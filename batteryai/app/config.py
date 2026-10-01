@@ -21,9 +21,18 @@ SENSOR_KEYS = (
     "tomorrow_forecast_sensor",
     "battery_soc_sensor",
     "outages_sensor",
-    "today_load_sensor",
+    "load_power_sensor",
     "today_consumption_sensor",
+    "weather_entity",
+    "heat_pump_power_sensor",
+    "boiler_power_sensor",
+    "ev_power_sensor",
+    "pv_energy_sensor",
+    "pv_power_sensor",
+    "grid_import_sensor",
 )
+# Settings saved by 0.1/0.2 used "today_load_sensor" for what is a load power sensor.
+LEGACY_KEYS = {"load_power_sensor": "today_load_sensor"}
 ENTITY_RE = re.compile(r"^[a-z_]+\.[a-z0-9_]+$")
 TIME_RE = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
 
@@ -33,6 +42,7 @@ class DeyeProgram:
     slot: int
     time_entity: str = ""
     soc_entity: str = ""
+    charge_entity: str = ""  # optional grid-charge switch of the program
 
 
 @dataclass
@@ -41,19 +51,40 @@ class Options:
     claude_model: str = "claude-opus-5-5"
     claude_effort: str = "high"
     response_language: str = "English"
-    analyses_per_day: int = 2
-    first_analysis_time: str = "06:00"
+    # Prediction runs (HH:MM, Home Assistant time zone); with auto-control on, each run
+    # pushes new SOC values to the inverter.
+    analysis_times_list: list[str] = field(default_factory=lambda: ["12:00", "23:00"])
     record_interval_minutes: int = 5
     history_days: int = 14
     today_forecast_sensor: str = ""
     tomorrow_forecast_sensor: str = ""
     battery_soc_sensor: str = ""
     outages_sensor: str = ""
-    today_load_sensor: str = ""
+    load_power_sensor: str = ""
     today_consumption_sensor: str = ""
+    weather_entity: str = ""
+    heat_pump_power_sensor: str = ""
+    boiler_power_sensor: str = ""
+    ev_power_sensor: str = ""
+    pv_energy_sensor: str = ""
+    pv_power_sensor: str = ""
+    grid_import_sensor: str = ""
+    tariff_currency: str = "UAH"
+    tariff_peak_price: float = 4.32
+    tariff_offpeak_price: float = 2.16
+    tariff_offpeak_windows: list[str] = field(default_factory=lambda: ["23:00-07:00"])
+    prediction_margin_percent: int = 10
+    min_soc_percent: int = 20
+    max_soc_percent: int = 100
+    apply_threshold_percent: int = 5
+    charge_all_soc_percent: int = 98
     weekend_days: list[str] = field(default_factory=lambda: ["saturday", "sunday"])
     deye_programs: list[DeyeProgram] = field(default_factory=list)
     extra_instructions: str = ""
+    notify_services: list[str] = field(default_factory=list)
+    notify_predictions: bool = True
+    notify_soc_changes: bool = True
+    notify_errors: bool = True
 
     def sensor_map(self) -> dict[str, str]:
         """Snapshot field name -> configured entity id."""
@@ -62,17 +93,18 @@ class Options:
             "tomorrow_forecast": self.tomorrow_forecast_sensor,
             "battery_soc": self.battery_soc_sensor,
             "outages": self.outages_sensor,
-            "today_load": self.today_load_sensor,
+            "load_power": self.load_power_sensor,
             "today_consumption": self.today_consumption_sensor,
+            "heat_pump_power": self.heat_pump_power_sensor,
+            "boiler_power": self.boiler_power_sensor,
+            "ev_power": self.ev_power_sensor,
+            "pv_today": self.pv_energy_sensor,
+            "pv_power": self.pv_power_sensor,
+            "grid_import_today": self.grid_import_sensor,
         }
 
     def analysis_times(self) -> list[tuple[int, int]]:
-        """Evenly spread analysis times over the day, starting at first_analysis_time."""
-        hour, minute = (int(part) for part in self.first_analysis_time.split(":"))
-        start = hour * 60 + minute
-        count = max(1, self.analyses_per_day)
-        step = 1440 / count
-        minutes = sorted({(start + round(i * step)) % 1440 for i in range(count)})
+        minutes = sorted({int(t[:2]) * 60 + int(t[3:5]) for t in self.analysis_times_list})
         return [(m // 60, m % 60) for m in minutes]
 
     def next_analysis(self, now: datetime, tz: tzinfo) -> datetime:
@@ -85,6 +117,31 @@ class Options:
                 if candidate > local:
                     candidates.append(candidate)
         return min(candidates)
+
+    def offpeak_ranges(self) -> list[tuple[int, int]]:
+        """Off-peak windows as (start, end) minutes; a window may wrap past midnight."""
+        ranges = []
+        for window in self.tariff_offpeak_windows:
+            start, end = window.split("-")
+            ranges.append((int(start[:2]) * 60 + int(start[3:5]), int(end[:2]) * 60 + int(end[3:5])))
+        return ranges
+
+    def tariff_at(self, minute_of_day: int) -> tuple[float, str]:
+        """(price per kWh, "offpeak" | "peak") at a minute of the day."""
+        for start, end in self.offpeak_ranges():
+            inside = start <= minute_of_day < end if start < end else minute_of_day >= start or minute_of_day < end
+            if inside:
+                return self.tariff_offpeak_price, "offpeak"
+        return self.tariff_peak_price, "peak"
+
+    def tariff_dict(self) -> dict[str, Any]:
+        return {
+            "currency": self.tariff_currency,
+            "peak_price_per_kwh": self.tariff_peak_price,
+            "offpeak_price_per_kwh": self.tariff_offpeak_price,
+            "offpeak_windows": self.tariff_offpeak_windows,
+            "peak": "all other times",
+        }
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -108,7 +165,11 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
     base = current or Options()
 
     def text(key: str) -> str:
-        value = raw.get(key, getattr(base, key))
+        legacy = LEGACY_KEYS.get(key)
+        if key not in raw and legacy in raw:
+            value = raw[legacy]
+        else:
+            value = raw.get(key, getattr(base, key))
         return "" if value is None else str(value).strip()
 
     def integer(key: str, low: int, high: int) -> int:
@@ -133,19 +194,75 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         claude_model=text("claude_model") or "claude-opus-5-5",
         claude_effort=text("claude_effort"),
         response_language=text("response_language") or "English",
-        analyses_per_day=integer("analyses_per_day", 1, 24),
-        first_analysis_time=text("first_analysis_time"),
         record_interval_minutes=integer("record_interval_minutes", 1, 60),
         history_days=integer("history_days", 1, 90),
         extra_instructions=text("extra_instructions"),
+        prediction_margin_percent=integer("prediction_margin_percent", 0, 100),
+        min_soc_percent=integer("min_soc_percent", 0, 100),
+        max_soc_percent=integer("max_soc_percent", 0, 100),
+        apply_threshold_percent=integer("apply_threshold_percent", 0, 50),
+        charge_all_soc_percent=integer("charge_all_soc_percent", 10, 100),
     )
+    if opts.min_soc_percent > opts.max_soc_percent:
+        errors["min_soc_percent"] = "must not be higher than the maximum SOC"
     for key in SENSOR_KEYS:
         setattr(opts, key, entity(key, text(key)))
 
     if opts.claude_effort not in EFFORTS:
         errors["claude_effort"] = "must be one of " + ", ".join(EFFORTS)
-    if not TIME_RE.match(opts.first_analysis_time):
-        errors["first_analysis_time"] = "must be HH:MM (24-hour)"
+    times = raw.get("analysis_times_list", base.analysis_times_list)
+    if isinstance(times, str):
+        times = times.replace(";", ",").split(",")
+    times = [str(t).strip()[:5] for t in times or [] if str(t).strip()]
+    times = [t if len(t) == 5 else t.zfill(5) for t in times]
+    bad = [t for t in times if not TIME_RE.match(t)]
+    if bad:
+        errors["analysis_times_list"] = "times must be HH:MM (24-hour): " + ", ".join(bad)
+    elif not 1 <= len(set(times)) <= 24:
+        errors["analysis_times_list"] = "enter between 1 and 24 times"
+    opts.analysis_times_list = sorted(set(times))
+
+    def price(key: str) -> float:
+        value = raw.get(key, getattr(base, key))
+        try:
+            number = float(str(value).replace(",", "."))
+        except (TypeError, ValueError):
+            errors[key] = "must be a number"
+            return getattr(base, key)
+        if number < 0:
+            errors[key] = "must not be negative"
+        return number
+
+    opts.tariff_currency = text("tariff_currency")[:8]
+    opts.tariff_peak_price = price("tariff_peak_price")
+    opts.tariff_offpeak_price = price("tariff_offpeak_price")
+    windows = raw.get("tariff_offpeak_windows", base.tariff_offpeak_windows)
+    if isinstance(windows, str):
+        windows = windows.replace(";", ",").split(",")
+    opts.tariff_offpeak_windows = []
+    for window in (str(w).replace(" ", "").replace("–", "-") for w in windows or []):
+        if not window:
+            continue
+        parts = window.split("-")
+        if len(parts) != 2 or not all(TIME_RE.match(p.zfill(5)) for p in parts):
+            errors["tariff_offpeak_windows"] = f"'{window}' must look like 23:00-07:00"
+            continue
+        opts.tariff_offpeak_windows.append("-".join(p.zfill(5) for p in parts))
+
+    services = raw.get("notify_services", base.notify_services) or []
+    if isinstance(services, str):
+        services = services.split(",")
+    opts.notify_services = []
+    for service in (str(x).strip() for x in services):
+        if not service:
+            continue
+        service = service.removeprefix("notify.")
+        if not re.match(r"^[a-z0-9_]+$", service):
+            errors["notify_services"] = f"'{service}' is not a notify service name"
+        opts.notify_services.append(service)
+    for key in ("notify_predictions", "notify_soc_changes", "notify_errors"):
+        value = raw.get(key, getattr(base, key))
+        setattr(opts, key, value if isinstance(value, bool) else str(value).lower() in ("1", "true", "on", "yes"))
 
     weekend = raw.get("weekend_days", base.weekend_days) or []
     opts.weekend_days = [str(day).lower() for day in weekend if str(day).lower() in WEEKDAYS]
@@ -159,7 +276,12 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         slot = index + 1
         time_entity = entity(f"deye_programs.{slot}.time_entity", str(item.get("time_entity") or "").strip())
         soc_entity = entity(f"deye_programs.{slot}.soc_entity", str(item.get("soc_entity") or "").strip())
-        opts.deye_programs.append(DeyeProgram(slot=slot, time_entity=time_entity, soc_entity=soc_entity))
+        charge_entity = entity(
+            f"deye_programs.{slot}.charge_entity", str(item.get("charge_entity") or "").strip()
+        )
+        opts.deye_programs.append(
+            DeyeProgram(slot=slot, time_entity=time_entity, soc_entity=soc_entity, charge_entity=charge_entity)
+        )
 
     if errors:
         raise SettingsError(errors)
@@ -176,6 +298,9 @@ def load_settings() -> Options:
             continue
         if not raw:
             continue
+        for key, legacy in LEGACY_KEYS.items():
+            if key not in raw and legacy in raw:
+                raw[key] = raw[legacy]
         try:
             return parse_settings(raw)
         except SettingsError:

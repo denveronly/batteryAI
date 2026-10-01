@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.0
+
+- Charts fixed: history is imported from the Home Assistant recorder on first start (and
+  on demand in Settings → History); Chart.js is bundled instead of downloaded at build
+  time; empty charts explain why.
+- Fixed prediction times (default 12:00 and 23:00) instead of "N per day".
+- AI auto-control: predictions write SOC and force-charge settings to the Deye programs.
+  "Charge all to 98%" button, "Apply to inverter" for a single prediction, "Predict now".
+- Outage changes trigger an extra prediction; Claude decides force charge per program
+  depending on usage, time of day and PV.
+- Weather entity with tomorrow's forecast; heat pump, boiler and EV power sensors;
+  hourly power forecast for tomorrow and appliance usage windows.
+- Load is now a power sensor (W); PV power, PV production and grid import sensors.
+- Prediction tuning: safety margin, SOC range, apply threshold, charge-all SOC.
+- Prediction accuracy section (predicted vs. actual, solar forecast vs. PV).
+- Tariff settings (peak/off-peak windows and prices, currency) and an Economy tab with
+  savings by day from PV and from the battery / AI plan.
+- Phone notifications through Home Assistant notify services.
+
 ## 0.2.0
 
 - Settings moved from the add-on Configuration tab to a Settings tab in the panel; they

@@ -27,7 +27,10 @@ batteryai/
     analyzer.py           Claude request and response schema
     ha.py                 Home Assistant REST client
     config.py             settings validation and storage (/data/settings.json)
-    static/               panel UI: dashboard + settings (Chart.js)
+    control.py            writes SOC / force charge to the Deye programs
+    history.py            imports past values from the HA recorder
+    notify.py             phone notifications
+    static/               panel UI: dashboard, economy, settings (bundled Chart.js)
 ```
 
 ## Local development
@@ -39,6 +42,3 @@ mkdir -p dev-data && export BATTERYAI_DATA=$PWD/dev-data
 export HA_URL=http://homeassistant.local:8123 HA_TOKEN=<long-lived token>
 python main.py   # UI on http://localhost:8099
 ```
-
-The UI expects Chart.js at `app/static/vendor/chart.umd.min.js`; the Docker build
-downloads it.

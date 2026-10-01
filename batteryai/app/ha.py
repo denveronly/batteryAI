@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, urlencode
 
 import aiohttp
 
@@ -63,14 +65,25 @@ class HomeAssistant:
                 "and restart it."
             )
 
-    async def request(self, path: str) -> Any:
-        """GET an API path; raises HAError with a readable reason on failure."""
+    async def request(
+        self,
+        path: str,
+        *,
+        method: str = "GET",
+        json_body: Any = None,
+        timeout: aiohttp.ClientTimeout | None = None,
+    ) -> Any:
+        """Calls an API path; raises HAError with a readable reason on failure."""
         if not self.token:
             self.last_error = "No Home Assistant access token (SUPERVISOR_TOKEN missing). Restart the add-on."
             raise HAError("auth", self.last_error)
         try:
-            async with self._session.get(
-                f"{self._api}{path}", headers=self._headers, timeout=self._timeout
+            async with self._session.request(
+                method,
+                f"{self._api}{path}",
+                headers=self._headers,
+                json=json_body,
+                timeout=timeout or self._timeout,
             ) as resp:
                 if resp.status == 404:
                     raise HAError("not_found", "Not found in Home Assistant")
@@ -118,6 +131,34 @@ class HomeAssistant:
         self._logged_error = None
         self._missing_logged.discard(entity_id)
         return result
+
+    async def weather_forecast(self, entity_id: str, kind: str) -> list[dict[str, Any]]:
+        """Daily or hourly forecast of a weather entity (weather.get_forecasts, HA 2024.3+)."""
+        response = await self.request(
+            "/services/weather/get_forecasts?return_response",
+            method="POST",
+            json_body={"entity_id": entity_id, "type": kind},
+        )
+        service_response = response.get("service_response", {}) if isinstance(response, dict) else {}
+        return (service_response.get(entity_id) or {}).get("forecast") or []
+
+    async def history(
+        self, entity_id: str, start: datetime, end: datetime, with_attributes: bool = False
+    ) -> list[dict[str, Any]]:
+        """State changes of one entity between start and end (from the HA recorder)."""
+        query = {
+            "filter_entity_id": entity_id,
+            "end_time": end.astimezone(timezone.utc).isoformat(),
+            "significant_changes_only": "0",
+        }
+        path = f"/history/period/{quote(start.astimezone(timezone.utc).isoformat())}?{urlencode(query)}"
+        if not with_attributes:
+            path += "&minimal_response&no_attributes"
+        result = await self.request(path, timeout=aiohttp.ClientTimeout(total=180))
+        return result[0] if result else []
+
+    async def call_service(self, domain: str, service: str, data: dict[str, Any]) -> Any:
+        return await self.request(f"/services/{domain}/{service}", method="POST", json_body=data)
 
     async def states(self) -> list[dict[str, Any]]:
         return await self.request("/states")

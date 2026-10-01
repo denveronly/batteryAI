@@ -2,5 +2,4 @@ __pycache__/
 *.pyc
 .venv/
 *.db
-batteryai/app/static/vendor/
 batteryai/app/dev-data/

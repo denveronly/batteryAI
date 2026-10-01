@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import signal
@@ -17,14 +18,19 @@ import anthropic
 from aiohttp import web
 
 from analyzer import AnalysisError, analyze, build_input
-from collector import UNAVAILABLE, collect, has_data, parse_hhmm, to_float
+import control
+import notify
+from collector import UNAVAILABLE, collect, has_data, parse_hhmm, to_float, weather_details
 from config import DATA_DIR, Options, SettingsError, load_settings, parse_settings, save_settings
-from db import Database
+from db import READING_FIELDS, Database, accuracy_report, economy_report
 from ha import HAError, HomeAssistant
+from history import import_history
 
 PORT = int(os.environ.get("BATTERYAI_PORT", "8099"))
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_CHART_POINTS = 2500
+OUTAGE_RERUN_SECONDS = 30 * 60  # at most one extra prediction per 30 min when outages change
+REQUIRED_SENSORS = ("today_forecast", "tomorrow_forecast", "battery_soc", "load_power", "today_consumption")
 
 _LOGGER = logging.getLogger("batteryai")
 
@@ -40,6 +46,76 @@ class BatteryAI:
         self._analysis_lock = asyncio.Lock()
         self._loops: list[asyncio.Task] = []
         self._client = self._make_client(opts.claude_api_key)
+        self.control = control.load_state()
+        self.history_import: dict[str, Any] = {"running": False, "result": None, "error": None}
+        self._background: set[asyncio.Task] = set()
+        self._last_outage_key: str | None = None
+        self._last_outage_run = 0.0
+
+    def spawn(self, coro: Any) -> asyncio.Task:
+        task = asyncio.create_task(coro)
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
+        return task
+
+    # History import -------------------------------------------------------
+
+    def start_history_import(self, days: int) -> bool:
+        if self.history_import["running"]:
+            return False
+        self.history_import = {"running": True, "days": days, "result": None, "error": None}
+        self.spawn(self._run_history_import(days))
+        return True
+
+    async def _run_history_import(self, days: int) -> None:
+        try:
+            result = await import_history(self.ha, self.opts, self.db, self.tz, days, self.history_import)
+            self.history_import["result"] = result
+        except Exception as err:
+            _LOGGER.exception("History import failed")
+            self.history_import["error"] = str(err)
+        finally:
+            self.history_import["running"] = False
+            self.history_import["finished"] = time.time()
+
+    def import_history_if_empty(self) -> None:
+        """On a fresh install there is no history yet: take it from the Home Assistant recorder."""
+        earliest = self.db.earliest_ts()
+        if earliest is None or earliest > time.time() - 86400:
+            _LOGGER.info("Less than a day of readings; importing history from Home Assistant")
+            self.start_history_import(self.opts.history_days)
+
+    # Inverter control -------------------------------------------------------
+
+    async def set_mode(self, mode: str) -> list[dict[str, Any]]:
+        actions: list[dict[str, Any]] = []
+        previous = self.control["mode"]
+        if previous == "charge_all" and mode != "charge_all":
+            actions += await control.restore_switches(self.ha, self.control)
+        self.control.update(mode=mode, since=time.time())
+        control.save_state(self.control)
+        _LOGGER.info("Control mode %s -> %s", previous, mode)
+        if mode == "auto":
+            latest = next((a for a in self.db.analyses(20) if a["status"] == "ok" and a["result"]), None)
+            if latest:
+                applied = await control.apply_prediction(self.ha, self.opts, latest["result"])
+                self.db.add_actions(latest["id"], applied)
+                actions += applied
+        await self.notify(
+            "BatteryAI",
+            {"auto": "AI auto-control turned on.", "off": "AI auto-control turned off."}.get(mode),
+            self.opts.notify_soc_changes,
+        )
+        await self.notify_actions(actions, "SOC updated")
+        return actions
+
+    async def charge_all(self) -> list[dict[str, Any]]:
+        actions = await control.charge_all(self.ha, self.opts, self.control)
+        self.control.update(mode="charge_all", since=time.time(), last_actions=actions)
+        control.save_state(self.control)
+        _LOGGER.info("Charge all to %d%%: %s", self.opts.charge_all_soc_percent, actions)
+        await self.notify_actions(actions, f"charging all to {self.opts.charge_all_soc_percent}%")
+        return actions
 
     @staticmethod
     def _make_client(api_key: str) -> anthropic.AsyncAnthropic | None:
@@ -70,8 +146,31 @@ class BatteryAI:
         if not has_data(snapshot):
             _LOGGER.warning("No sensor values available; reading not stored")
             return None
+        snapshot["control_mode"] = self.control["mode"]
         self.db.add_reading(snapshot, self.tz)
+        self._check_outage_change(snapshot)
         return snapshot
+
+    def _check_outage_change(self, snapshot: dict[str, Any]) -> None:
+        """A new or changed outage announcement gets its own prediction (rate limited)."""
+        if not self.opts.outages_sensor or snapshot["outages_state"] is None:
+            return
+        key = json.dumps([snapshot["outages_state"], snapshot["outages_attrs"]], sort_keys=True, default=str)
+        previous, self._last_outage_key = self._last_outage_key, key
+        if previous is None or previous == key or self._client is None or self.analysis_running:
+            return
+        if time.time() - self._last_outage_run < OUTAGE_RERUN_SECONDS:
+            return
+        self._last_outage_run = time.time()
+        _LOGGER.info("Outage information changed; running an extra prediction")
+        self.spawn(self.run_analysis("outage"))
+
+    async def notify(self, title: str, message: str | None, enabled: bool = True) -> None:
+        if enabled and message and self.opts.notify_services:
+            await notify.send(self.ha, self.opts, title, message)
+
+    async def notify_actions(self, actions: list[dict[str, Any]], reason: str) -> None:
+        await self.notify(f"BatteryAI: {reason}", notify.actions_message(actions), self.opts.notify_soc_changes)
 
     async def recorder_loop(self) -> None:
         interval = self.opts.record_interval_minutes * 60
@@ -107,17 +206,20 @@ class BatteryAI:
             try:
                 if self._client is None:
                     raise AnalysisError("Set the Claude API key in the Settings tab.")
+                # record() may itself trigger an outage run; that waits for this lock.
                 snapshot = await self.record() or self.last_snapshot
                 if snapshot is None or not has_data(snapshot):
                     raise AnalysisError("No sensor data available from Home Assistant.")
-                data = build_input(self.db, self.opts, snapshot, self.tz)
+                data = build_input(self.db, self.opts, snapshot, self.tz, trigger)
                 outcome = await analyze(self._client, self.opts, data)
             except AnalysisError as err:
                 _LOGGER.error("Analysis #%d failed: %s", analysis_id, err)
                 self.db.finish_analysis(analysis_id, status="error", error=str(err), input_data=data)
+                await self.notify("BatteryAI: prediction failed", str(err), self.opts.notify_errors)
             except Exception as err:
                 _LOGGER.exception("Analysis #%d crashed", analysis_id)
                 self.db.finish_analysis(analysis_id, status="error", error=f"Unexpected error: {err}", input_data=data)
+                await self.notify("BatteryAI: prediction failed", f"Unexpected error: {err}", self.opts.notify_errors)
             else:
                 result = outcome["result"]
                 self.db.finish_analysis(
@@ -131,6 +233,15 @@ class BatteryAI:
                     output_tokens=outcome["output_tokens"],
                 )
                 _LOGGER.info("Analysis #%d done: %s", analysis_id, result.get("summary"))
+                title = "BatteryAI: outage plan" if trigger == "outage" else "BatteryAI prediction"
+                await self.notify(title, notify.prediction_message(result), self.opts.notify_predictions)
+                if self.control["mode"] == "auto":
+                    try:
+                        actions = await control.apply_prediction(self.ha, self.opts, result)
+                        self.db.add_actions(analysis_id, actions)
+                        await self.notify_actions(actions, "SOC updated")
+                    except Exception:
+                        _LOGGER.exception("Applying analysis #%d failed", analysis_id)
             return analysis_id
 
 
@@ -170,7 +281,7 @@ async def status(request: web.Request) -> web.Response:
             "Unavailable entities: " + ", ".join(app.last_snapshot["missing_entities"])
             + ". Use the Test buttons in Settings to see why."
         )
-    unset = [key for key, entity in opts.sensor_map().items() if not entity and key != "outages"]
+    unset = [key for key, entity in opts.sensor_map().items() if not entity and key in REQUIRED_SENSORS]
     unset += [f"Deye program {p.slot}" for p in opts.deye_programs if not (p.time_entity and p.soc_entity)]
     if unset:
         warnings.append("Not configured yet: " + ", ".join(k.replace("_", " ") for k in unset) + ".")
@@ -187,6 +298,20 @@ async def status(request: web.Request) -> web.Response:
             "units": app.last_snapshot["units"] if app.last_snapshot else {},
             "active_program_slot": app.last_snapshot["active_program_slot"] if app.last_snapshot else None,
             "sensors": opts.sensor_map(),
+            "tariff": {**opts.tariff_dict(), "now": opts.tariff_at(datetime.now(app.tz).hour * 60 + datetime.now(app.tz).minute)[1]},
+            "appliances": {
+                "heat_pump_power": bool(opts.heat_pump_power_sensor),
+                "boiler_power": bool(opts.boiler_power_sensor),
+                "ev_power": bool(opts.ev_power_sensor),
+            },
+            "weather": app.last_snapshot.get("weather") if app.last_snapshot else None,
+            "control": {
+                "mode": app.control["mode"],
+                "since": app.control["since"],
+                "charge_all_soc": opts.charge_all_soc_percent,
+                "can_write": any(p.soc_entity for p in opts.deye_programs),
+            },
+            "history_import": app.history_import,
             "warnings": warnings,
         }
     )
@@ -197,7 +322,7 @@ async def readings(request: web.Request) -> web.Response:
     hours = _int_param(request, "hours", 48, 1, 24 * 90)
     rows = _app(request).db.readings_since(int(time.time()) - hours * 3600)
     step = max(1, len(rows) // MAX_CHART_POINTS)
-    keys = ("ts", "battery_soc", "target_soc", "today_load", "today_consumption", "today_forecast")
+    keys = ("ts", "target_soc", *READING_FIELDS)
     return web.json_response([{k: row[k] for k in keys} for row in rows[::step]])
 
 
@@ -220,6 +345,68 @@ async def analysis_input(request: web.Request) -> web.Response:
     if data is None:
         raise web.HTTPNotFound()
     return web.json_response(data)
+
+
+@routes.get("/api/accuracy")
+async def accuracy(request: web.Request) -> web.Response:
+    app = _app(request)
+    days = _int_param(request, "days", 14, 1, 90)
+    return web.json_response(accuracy_report(app.db, days, datetime.now(app.tz).date(), app.tz))
+
+
+@routes.get("/api/economy")
+async def economy(request: web.Request) -> web.Response:
+    app = _app(request)
+    days = _int_param(request, "days", 30, 1, 365)
+    report = economy_report(app.db, days, datetime.now(app.tz).date(), app.opts.tariff_at)
+    report["currency"] = app.opts.tariff_currency
+    report["has_grid_sensor"] = bool(app.opts.grid_import_sensor)
+    report["has_pv_power_sensor"] = bool(app.opts.pv_power_sensor)
+    return web.json_response(report)
+
+
+@routes.post("/api/control")
+async def set_control(request: web.Request) -> web.Response:
+    """Body {"mode": "off" | "auto"}; Charge all has its own endpoint."""
+    mode = (await request.json()).get("mode")
+    if mode not in ("off", "auto"):
+        return web.json_response({"error": "mode must be off or auto"}, status=400)
+    actions = await _app(request).set_mode(mode)
+    return web.json_response({"mode": mode, "actions": actions})
+
+
+@routes.post("/api/control/charge_all")
+async def charge_all(request: web.Request) -> web.Response:
+    app = _app(request)
+    if not any(p.soc_entity for p in app.opts.deye_programs):
+        return web.json_response({"error": "No Deye program SOC entities configured."}, status=400)
+    actions = await app.charge_all()
+    return web.json_response({"mode": "charge_all", "actions": actions})
+
+
+@routes.post(r"/api/analyses/{analysis_id:\d+}/apply")
+async def apply_analysis(request: web.Request) -> web.Response:
+    app = _app(request)
+    analysis = app.db.analysis(int(request.match_info["analysis_id"]))
+    if not analysis or analysis["status"] != "ok":
+        return web.json_response({"error": "No successful prediction with this id."}, status=404)
+    actions = await control.apply_prediction(app.ha, app.opts, analysis["result"])
+    app.db.add_actions(analysis["id"], [{**a, "manual": True} for a in actions])
+    await app.notify_actions(actions, "SOC updated (manual)")
+    return web.json_response({"actions": actions})
+
+
+@routes.post("/api/history/import")
+async def history_import(request: web.Request) -> web.Response:
+    app = _app(request)
+    body = await request.json() if request.can_read_body else {}
+    try:
+        days = max(1, min(90, int(body.get("days") or app.opts.history_days)))
+    except (TypeError, ValueError):
+        return web.json_response({"error": "days must be a number"}, status=400)
+    if not app.start_history_import(days):
+        return web.json_response({"error": "An import is already running."}, status=409)
+    return web.json_response({"started": True, "days": days}, status=202)
 
 
 @routes.post("/api/analyze")
@@ -297,9 +484,27 @@ async def test_entity(request: web.Request) -> web.Response:
         warning = "Expected a number, but the state is not numeric."
     elif kind == "time" and parse_hhmm(value) is None:
         warning = "Expected a time such as 01:00, 01:00:00 or 100."
+    elif kind == "switch" and str(value) not in ("on", "off"):
+        warning = "Expected a switch (on/off) that turns grid charging of this program on or off."
+    detail = None
+    if entity_id.startswith("weather."):
+        weather = await weather_details(_app(request).ha, entity_id, _app(request).tz)
+        unit = weather.get("unit") or ""
+        tomorrow = weather.get("tomorrow")
+        detail = f"now {weather.get('outdoor_temp')} {unit}".strip()
+        if tomorrow:
+            detail += (
+                f" · tomorrow {tomorrow.get('templow', '?')}…{tomorrow.get('temperature', '?')} {unit}, "
+                f"{tomorrow.get('condition', '')}"
+            )
+        elif weather.get("forecast_error"):
+            warning = f"No forecast: {weather['forecast_error']}"
+        else:
+            warning = "This weather entity has no forecast for tomorrow."
     return web.json_response(
         {
             "ok": warning is None,
+            "detail": detail,
             "entity_id": state.get("entity_id", entity_id),
             "state": value,
             "unit": attributes.get("unit_of_measurement"),
@@ -331,6 +536,39 @@ async def entities(request: web.Request) -> web.Response:
             key=lambda e: e["entity_id"],
         )
     )
+
+
+@routes.get("/api/notify_services")
+async def notify_services(request: web.Request) -> web.Response:
+    """Notify services in Home Assistant; phones appear as mobile_app_<device>."""
+    try:
+        domains = await _app(request).ha.request("/services")
+    except HAError as err:
+        return web.json_response({"error": str(err)}, status=502)
+    services = next((d.get("services") or {} for d in domains if d.get("domain") == "notify"), {})
+    return web.json_response(
+        sorted(
+            ({"service": name, "phone": name.startswith("mobile_app_"), "name": (info or {}).get("name") or ""}
+             for name, info in services.items()),
+            key=lambda s: (not s["phone"], s["service"]),
+        )
+    )
+
+
+@routes.post("/api/test/notify")
+async def test_notify(request: web.Request) -> web.Response:
+    app = _app(request)
+    body = await request.json() if request.can_read_body else {}
+    service = str(body.get("service") or "").strip().removeprefix("notify.")
+    if not service:
+        return web.json_response({"ok": False, "error": "Enter a notify service first."})
+    try:
+        await app.ha.call_service(
+            "notify", service, {"title": "BatteryAI", "message": "Test notification from BatteryAI ✓", "data": {"tag": "batteryai-test"}}
+        )
+    except HAError as err:
+        return web.json_response({"ok": False, "error": str(err)})
+    return web.json_response({"ok": True})
 
 
 @routes.post("/api/test/claude")
@@ -402,6 +640,7 @@ async def main() -> None:
             loop.add_signal_handler(sig, stop.set)
 
         batteryai.start_loops()
+        batteryai.import_history_if_empty()
         await stop.wait()
         _LOGGER.info("Shutting down")
         batteryai.stop_loops()

@@ -2,15 +2,17 @@
 
 // Relative URLs keep working behind the Home Assistant ingress path prefix.
 const api = (path, options) =>
-  fetch(path, options).then((r) => {
-    if (!r.ok && r.status !== 409) throw new Error(`${path}: HTTP ${r.status}`);
-    return r.json();
+  fetch(path, options).then(async (r) => {
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok && !body.error) throw new Error(`${path}: HTTP ${r.status}`);
+    return body;
   });
 
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const $ = (id) => document.getElementById(id);
 const charts = {};
 let status = null;
+let latestPrediction = null;
 let refreshTimer = null;
 
 function el(tag, attrs = {}, ...children) {
@@ -32,13 +34,33 @@ const fmtTime = (ts) =>
   new Date(ts * 1000).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
 const fmtDateTime = (ts) =>
   new Date(ts * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
-const unit = (field, fallback) => (status?.units?.[field] || fallback);
+const pct = (v) => (v === null || v === undefined ? "—" : `${fmt(v, 0)} %`);
+const unit = (field, fallback) => status?.units?.[field] || fallback;
+const shortDate = (iso) => new Date(iso + "T12:00:00").toLocaleDateString([], { weekday: "short", day: "numeric" });
 
 // Charts ----------------------------------------------------------------------
 
-function baseOptions(yTitle, extra = {}) {
+function timeOptions(yTitle, y = {}, y2 = null) {
   const grid = css("--grid");
   const text = css("--muted");
+  const scales = {
+    x: {
+      type: "linear",
+      grid: { color: grid },
+      ticks: {
+        color: text,
+        maxTicksLimit: 8,
+        callback: (v) => {
+          const d = new Date(v);
+          return d.getHours() === 0 && d.getMinutes() === 0
+            ? d.toLocaleDateString([], { weekday: "short", day: "numeric" })
+            : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        },
+      },
+    },
+    y: { grid: { color: grid }, ticks: { color: text }, title: { display: true, text: yTitle, color: text }, ...y },
+  };
+  if (y2) scales.y2 = { position: "right", grid: { display: false }, ticks: { color: text }, title: { display: true, text: y2, color: text } };
   return {
     responsive: true,
     maintainAspectRatio: false,
@@ -46,44 +68,31 @@ function baseOptions(yTitle, extra = {}) {
     interaction: { mode: "index", intersect: false },
     plugins: {
       legend: { labels: { color: text, boxWidth: 12 } },
-      tooltip: {
-        callbacks: { title: (items) => (items.length ? fmtTime(items[0].parsed.x / 1000) : "") },
-      },
+      tooltip: { callbacks: { title: (items) => (items.length ? fmtTime(items[0].parsed.x / 1000) : "") } },
     },
-    scales: {
-      x: {
-        type: "linear",
-        grid: { color: grid },
-        ticks: {
-          color: text,
-          maxTicksLimit: 8,
-          callback: (v) => {
-            const d = new Date(v);
-            return d.getHours() === 0 && d.getMinutes() === 0
-              ? d.toLocaleDateString([], { weekday: "short", day: "numeric" })
-              : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-          },
-        },
-      },
-      y: { grid: { color: grid }, ticks: { color: text }, title: { display: true, text: yTitle, color: text }, ...extra },
-    },
+    scales,
   };
 }
 
 function line(label, color, points, extra = {}) {
-  return {
-    label,
-    data: points,
-    borderColor: color,
-    backgroundColor: color + "33",
-    borderWidth: 2,
-    pointRadius: 0,
-    spanGaps: true,
-    ...extra,
-  };
+  return { label, data: points, borderColor: color, backgroundColor: color + "33", borderWidth: 2, pointRadius: 0, spanGaps: true, ...extra };
 }
 
-function upsertChart(id, config) {
+function hasPoints(datasets) {
+  return datasets.some((d) => d.data.some((p) => (typeof p === "object" && p !== null ? p.y : p) !== null && (typeof p === "object" && p !== null ? p.y : p) !== undefined));
+}
+
+function upsertChart(id, config, emptyText) {
+  const empty = $(id).parentElement.querySelector(".chart-empty");
+  const show = hasPoints(config.data.datasets);
+  if (empty) {
+    empty.hidden = show;
+    empty.textContent = emptyText || "No data yet.";
+  }
+  if (typeof Chart === "undefined") {
+    if (empty) { empty.hidden = false; empty.textContent = "Chart library failed to load."; }
+    return;
+  }
   if (charts[id]) {
     charts[id].data = config.data;
     charts[id].options = config.options;
@@ -93,6 +102,9 @@ function upsertChart(id, config) {
   }
 }
 
+const NO_READINGS =
+  "No readings yet. History is imported from Home Assistant on first start (Settings → History), and new values are recorded every few minutes.";
+
 function renderBattery(rows) {
   const pts = (key) => rows.map((r) => ({ x: r.ts * 1000, y: r[key] }));
   upsertChart("batteryChart", {
@@ -100,29 +112,26 @@ function renderBattery(rows) {
     data: {
       datasets: [
         line("Battery SOC", css("--series-soc"), pts("battery_soc"), { fill: "origin" }),
-        line("Deye program SOC", css("--series-target"), pts("target_soc"), {
-          stepped: true,
-          borderDash: [6, 4],
-          backgroundColor: "transparent",
-        }),
+        line("Deye program SOC", css("--series-target"), pts("target_soc"), { stepped: true, borderDash: [6, 4], backgroundColor: "transparent" }),
       ],
     },
-    options: baseOptions("%", { min: 0, max: 100 }),
-  });
+    options: timeOptions("%", { min: 0, max: 100 }),
+  }, NO_READINGS);
 }
 
-function renderLoad(rows) {
+function renderPower(rows) {
   const pts = (key) => rows.map((r) => ({ x: r.ts * 1000, y: r[key] }));
-  upsertChart("loadChart", {
-    type: "line",
-    data: {
-      datasets: [
-        line("Today load", css("--series-load"), pts("today_load")),
-        line("Today consumption", css("--series-consumption"), pts("today_consumption")),
-      ],
-    },
-    options: baseOptions(unit("today_load", "kWh"), { beginAtZero: true }),
-  });
+  const datasets = [line("Load", css("--series-load"), pts("load_power"), { fill: "origin", backgroundColor: css("--series-load") + "22" })];
+  const pv = pts("pv_power");
+  if (pv.some((p) => p.y !== null)) datasets.push(line("PV", css("--series-pv"), pv, { fill: "origin", backgroundColor: css("--series-pv") + "22" }));
+  const appliances = status?.appliances || {};
+  if (appliances.heat_pump_power) datasets.push(line("Heat pump", css("--series-heatpump"), pts("heat_pump_power")));
+  if (appliances.boiler_power) datasets.push(line("Boiler", css("--series-boiler"), pts("boiler_power")));
+  if (appliances.ev_power) datasets.push(line("EV", css("--series-ev"), pts("ev_power")));
+  const temps = pts("outdoor_temp");
+  const hasTemp = temps.some((p) => p.y !== null);
+  if (hasTemp) datasets.push(line("Outdoor temp", css("--series-temp"), temps, { yAxisID: "y2", borderDash: [4, 4], borderWidth: 1.5, backgroundColor: "transparent" }));
+  upsertChart("loadChart", { type: "line", data: { datasets }, options: timeOptions("W", { beginAtZero: true }, hasTemp ? "°" : null) }, NO_READINGS);
 }
 
 const weekendShading = {
@@ -130,7 +139,7 @@ const weekendShading = {
   beforeDatasetsDraw(chart, _args, opts) {
     const { ctx, chartArea, scales } = chart;
     const days = opts.days || [];
-    const width = (scales.x.getPixelForValue(1) - scales.x.getPixelForValue(0)) || 0;
+    const width = scales.x.getPixelForValue(1) - scales.x.getPixelForValue(0) || 0;
     ctx.save();
     ctx.fillStyle = css("--weekend");
     days.forEach((day, i) => {
@@ -142,73 +151,163 @@ const weekendShading = {
   },
 };
 
-function renderDaily(days) {
+function categoryOptions(days, yTitle, y2Title) {
   const text = css("--muted");
   const grid = css("--grid");
-  const bar = (label, color, key) => ({
-    label,
-    data: days.map((d) => d[key]),
-    backgroundColor: color,
-    borderRadius: 4,
-    maxBarThickness: 18,
-  });
-  upsertChart("dailyChart", {
-    type: "bar",
-    data: {
-      labels: days.map((d) => {
-        const date = new Date(d.date + "T12:00:00");
-        return date.toLocaleDateString([], { weekday: "short", day: "numeric" });
-      }),
-      datasets: [
-        bar("Load", css("--series-load"), "load_kwh"),
-        bar("Consumption", css("--series-consumption"), "consumption_kwh"),
-        bar("Solar forecast", css("--series-forecast"), "solar_forecast_kwh"),
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      plugins: { legend: { labels: { color: text, boxWidth: 12 } }, weekendShading: { days } },
-      scales: {
-        x: { grid: { display: false }, ticks: { color: text } },
-        y: { beginAtZero: true, grid: { color: grid }, ticks: { color: text }, title: { display: true, text: "kWh", color: text } },
-      },
-    },
-    plugins: [weekendShading],
-  });
+  const scales = {
+    x: { grid: { display: false }, ticks: { color: text } },
+    y: { beginAtZero: true, grid: { color: grid }, ticks: { color: text }, title: { display: true, text: yTitle, color: text } },
+  };
+  if (y2Title) scales.y2 = { position: "right", grid: { display: false }, ticks: { color: text }, title: { display: true, text: y2Title, color: text } };
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    interaction: { mode: "index", intersect: false },
+    plugins: { legend: { labels: { color: text, boxWidth: 12 } }, weekendShading: { days } },
+    scales,
+  };
 }
 
-// Status, tiles, programs -----------------------------------------------------
+function bar(label, color, data, extra = {}) {
+  return { type: "bar", label, data, backgroundColor: color, borderRadius: 4, maxBarThickness: 16, ...extra };
+}
+
+function renderDaily(days) {
+  const col = (key) => days.map((d) => d[key]);
+  const appliances = status?.appliances || {};
+  const datasets = [bar("Consumption", css("--series-consumption"), col("consumption_kwh"))];
+  if (appliances.heat_pump_power) datasets.push(bar("Heat pump", css("--series-heatpump"), col("heat_pump_kwh")));
+  if (appliances.boiler_power) datasets.push(bar("Boiler", css("--series-boiler"), col("boiler_kwh")));
+  if (appliances.ev_power) datasets.push(bar("EV", css("--series-ev"), col("ev_kwh")));
+  if (col("pv_kwh").some((v) => v !== null)) datasets.push(bar("PV", css("--series-pv"), col("pv_kwh")));
+  datasets.push({ type: "line", label: "Solar forecast", data: col("solar_forecast_kwh"), borderColor: css("--series-forecast"), backgroundColor: css("--series-forecast"), borderDash: [5, 4], pointRadius: 3, borderWidth: 1.5 });
+  const hasTemp = col("temp_avg").some((v) => v !== null);
+  if (hasTemp) datasets.push({ type: "line", label: "Avg temp", data: col("temp_avg"), yAxisID: "y2", borderColor: css("--series-temp"), backgroundColor: css("--series-temp"), pointRadius: 2, borderWidth: 1.5 });
+  upsertChart("dailyChart", {
+    data: { labels: days.map((d) => shortDate(d.date)), datasets },
+    options: categoryOptions(days, "kWh", hasTemp ? "°" : null),
+    plugins: [weekendShading],
+  }, NO_READINGS);
+}
+
+function renderAccuracy(report) {
+  const days = report.days;
+  const col = (key) => days.map((d) => d[key]);
+  const avg = report.average;
+  $("accuracySummary").replaceChildren(
+    el("span", { class: "chip" }, "Prediction accuracy ", el("b", {}, pct(avg.prediction_accuracy))),
+    el("span", { class: "chip" }, "Solar forecast accuracy ", el("b", {}, pct(avg.solar_accuracy))),
+    el("span", { class: "chip" }, "PV covered ", el("b", {}, pct(avg.pv_coverage)), " of consumption"),
+    el("span", { class: "chip" }, "Grid share ", el("b", {}, pct(avg.grid_share))),
+  );
+  upsertChart("accuracyChart", {
+    data: {
+      labels: days.map((d) => shortDate(d.date)),
+      datasets: [
+        bar("Predicted", css("--series-target"), col("predicted_kwh")),
+        bar("Actual", css("--series-consumption"), col("actual_kwh")),
+        bar("PV", css("--series-pv"), col("pv_kwh")),
+        { type: "line", label: "Prediction accuracy %", data: col("prediction_accuracy"), yAxisID: "y2", borderColor: css("--series-soc"), backgroundColor: css("--series-soc"), pointRadius: 3, borderWidth: 2 },
+      ],
+    },
+    options: (() => {
+      const o = categoryOptions(days, "kWh", "%");
+      o.scales.y2.min = 0;
+      o.scales.y2.max = 100;
+      return o;
+    })(),
+    plugins: [weekendShading],
+  }, "No completed days with a prediction yet. Accuracy appears the day after the first prediction.");
+
+  const header = ["Day", "Predicted", "Actual", "Accuracy", "Solar fcst", "PV", "Solar acc.", "PV covered", "Grid", "Temp"];
+  $("accuracyTable").replaceChildren(
+    el("tr", {}, ...header.map((h) => el("th", {}, h))),
+    ...days.slice().reverse().map((d) =>
+      el("tr", {},
+        el("td", {}, shortDate(d.date)),
+        el("td", {}, d.predicted_kwh === null ? "—" : `${fmt(d.predicted_kwh)} kWh`),
+        el("td", {}, d.actual_kwh === null ? "—" : `${fmt(d.actual_kwh)} kWh`),
+        el("td", {}, pct(d.prediction_accuracy)),
+        el("td", {}, d.solar_forecast_kwh === null ? "—" : `${fmt(d.solar_forecast_kwh)} kWh`),
+        el("td", {}, d.pv_kwh === null ? "—" : `${fmt(d.pv_kwh)} kWh`),
+        el("td", {}, pct(d.solar_accuracy)),
+        el("td", {}, pct(d.pv_coverage)),
+        el("td", {}, pct(d.grid_share)),
+        el("td", {}, d.temp_avg === null ? "—" : `${fmt(d.temp_avg)}°`),
+      )),
+  );
+}
+
+// Status, tiles, programs, control ---------------------------------------------
 
 function tile(label, value, suffix) {
   return el("div", { class: "tile" }, el("div", { class: "label" }, label), el("div", { class: "value" }, value, suffix ? el("small", {}, " ", suffix) : null));
+}
+
+function pvTiles(latest) {
+  if (latest.pv_power === null || latest.pv_power === undefined) return [];
+  const tiles = [tile("PV now", fmt(latest.pv_power, 0), "W")];
+  if (latest.load_power !== null && latest.load_power !== undefined) {
+    const surplus = latest.pv_power - latest.load_power;
+    tiles.push(
+      surplus > 50
+        ? tile("PV surplus", `+${fmt(surplus, 0)}`, "W · battery charging")
+        : tile("PV surplus", fmt(surplus, 0), "W · not charging"),
+    );
+  }
+  return tiles;
+}
+
+function weatherText(w) {
+  if (!w || !w.tomorrow) return null;
+  const t = w.tomorrow;
+  return `${fmt(t.templow)}…${fmt(t.temperature)}${w.unit || "°"}`;
 }
 
 function renderStatus() {
   const latest = status.latest || {};
   const next = status.next_analysis ? new Date(status.next_analysis) : null;
   $("schedule").textContent =
-    `Analyses daily at ${status.analysis_times.join(", ")} · model ${status.model}` +
+    `Predictions daily at ${status.analysis_times.join(", ")} · model ${status.model}` +
     (next ? ` · next ${next.toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })}` : "");
 
-  $("warnings").replaceChildren(...status.warnings.map((w) => el("div", { class: "banner" }, w)));
+  const warnings = [...status.warnings];
+  const imp = status.history_import;
+  if (imp?.running) warnings.unshift(`Importing history from Home Assistant… (${imp.done ?? 0}/${imp.total ?? "?"} entities)`);
+  $("warnings").replaceChildren(...warnings.map((w) => el("div", { class: "banner" }, w)));
 
   const weekday = latest.weekday ? latest.weekday[0].toUpperCase() + latest.weekday.slice(1) : "—";
-  $("tiles").replaceChildren(
+  const appliances = status.appliances || {};
+  const tiles = [
     tile("Battery SOC", fmt(latest.battery_soc, 0), "%"),
+    tile("Load", fmt(latest.load_power, 0), "W"),
+    ...pvTiles(latest),
+    tile("Consumption today", fmt(latest.today_consumption), unit("today_consumption", "kWh")),
     tile("Solar today", fmt(latest.today_forecast), unit("today_forecast", "kWh")),
     tile("Solar tomorrow", fmt(latest.tomorrow_forecast), unit("tomorrow_forecast", "kWh")),
-    tile("Today load", fmt(latest.today_load), unit("today_load", "kWh")),
-    tile("Today consumption", fmt(latest.today_consumption), unit("today_consumption", "kWh")),
+  ];
+  if (latest.pv_today !== null && latest.pv_today !== undefined) tiles.push(tile("PV today", fmt(latest.pv_today), "kWh"));
+  if (appliances.heat_pump_power) tiles.push(tile("Heat pump", fmt(latest.heat_pump_power, 0), "W"));
+  if (appliances.boiler_power) tiles.push(tile("Boiler", fmt(latest.boiler_power, 0), "W"));
+  if (appliances.ev_power) tiles.push(tile("EV", fmt(latest.ev_power, 0), "W"));
+  if (latest.outdoor_temp !== null && latest.outdoor_temp !== undefined) tiles.push(tile("Outside", fmt(latest.outdoor_temp), status.weather?.unit || "°"));
+  const tomorrowWeather = weatherText(status.weather);
+  if (tomorrowWeather) tiles.push(tile("Tomorrow", tomorrowWeather, status.weather.tomorrow.condition || ""));
+  if (status.tariff) {
+    const t = status.tariff;
+    const price = t.now === "offpeak" ? t.offpeak_price_per_kwh : t.peak_price_per_kwh;
+    tiles.push(tile("Tariff now", t.now === "offpeak" ? "Off-peak" : "Peak", `${price} ${t.currency}/kWh`));
+  }
+  tiles.push(
     tile("Probable outages", latest.outages_state ?? "—"),
     tile("Day", weekday, latest.is_weekend ? "weekend" : latest.weekday ? "weekday" : ""),
     tile("Last reading", latest.ts ? fmtTime(latest.ts) : "—"),
   );
+  $("tiles").replaceChildren(...tiles);
 
   const programs = latest.deye_programs || [];
-  const table = $("programs");
-  table.replaceChildren(
+  $("programs").replaceChildren(
     el("tr", {}, el("th", {}, "Program"), el("th", {}, "Start time"), el("th", {}, "SOC capacity")),
     ...(programs.length
       ? programs.map((p) => el("tr", { class: p.slot === status.active_program_slot ? "active" : "" }, el("td", {}, `#${p.slot}`), el("td", {}, p.time ?? "—"), el("td", {}, p.soc === null ? "—" : `${fmt(p.soc, 0)} %`)))
@@ -216,15 +315,232 @@ function renderStatus() {
   );
 
   $("analyze").disabled = status.analysis_running;
-  $("analyze").textContent = status.analysis_running ? "Analysing…" : "Run analysis now";
+  $("analyze").textContent = status.analysis_running ? "Predicting…" : "Predict now";
+  renderControl();
 }
+
+const MODE_TEXT = {
+  off: "Advice only",
+  auto: "AI auto-control",
+  charge_all: "Charging all",
+};
+
+function renderControl() {
+  const c = status.control;
+  $("modeBadge").textContent = MODE_TEXT[c.mode];
+  $("modeBadge").className = `badge ${c.mode}`;
+  $("autoToggle").checked = c.mode === "auto";
+  $("autoToggle").disabled = !c.can_write;
+  $("chargeAll").textContent = c.mode === "charge_all" ? `Charging all to ${c.charge_all_soc}% — set again` : `Charge all to ${c.charge_all_soc}%`;
+  $("chargeAll").disabled = !c.can_write;
+  const since = c.since ? ` since ${fmtTime(c.since)}` : "";
+  $("controlInfo").textContent = !c.can_write
+    ? "Configure the Deye program SOC entities in Settings to control the inverter."
+    : c.mode === "auto"
+      ? `Claude's SOC suggestions are written to the inverter after every prediction${since}.`
+      : c.mode === "charge_all"
+        ? `All programs are held at ${c.charge_all_soc}%${since}. Turn on AI auto-control to hand control back to Claude.`
+        : "Claude only advises; nothing is written to the inverter. Use Apply on a prediction to write it once.";
+}
+
+function actionsList(actions) {
+  if (!actions?.length) return null;
+  return el("ul", { class: "actions-list" }, ...actions.map((a) =>
+    el("li", { class: a.status === "error" ? "error" : "" },
+      a.slot ? `Program ${a.slot}: ` : "",
+      a.kind === "grid_charge" ? "force charge " : "",
+      a.status === "set" ? `${a.entity_id} ${a.from ?? ""} → ${a.to}` :
+        a.status === "unchanged" ? (a.kind === "grid_charge" ? `${a.entity_id} already ${a.value}` : `${a.entity_id} kept at ${fmt(a.value, 0)} (suggested ${fmt(a.suggested, 0)}, below threshold)`) :
+          `${a.entity_id}: ${a.error}`)));
+}
+
+async function controlAction(path, body) {
+  const result = $("controlResult");
+  result.className = "result";
+  result.textContent = "Working…";
+  const res = await api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) })
+    .catch((err) => ({ error: err.message }));
+  if (res.error) {
+    result.className = "result error";
+    result.textContent = `✕ ${res.error}`;
+  } else {
+    const failed = (res.actions || []).filter((a) => a.status === "error").length;
+    result.className = `result ${failed ? "warn" : "ok"}`;
+    result.replaceChildren(failed ? `⚠ ${failed} change(s) failed` : "✓ Done", actionsList(res.actions) || "");
+  }
+  refresh();
+}
+
+$("autoToggle").addEventListener("change", (e) => controlAction("api/control", { mode: e.target.checked ? "auto" : "off" }));
+$("chargeAll").addEventListener("click", () => {
+  const soc = status?.control?.charge_all_soc ?? 98;
+  if (confirm(`Set all Deye programs to ${soc}% and turn off AI auto-control?`)) controlAction("api/control/charge_all");
+});
+
+// Latest prediction -------------------------------------------------------------
+
+const APPLIANCE_LABEL = { heat_pump: "Heat pump", boiler: "Boiler", ev: "EV" };
+
+function predictionChips(r) {
+  return el(
+    "div",
+    { class: "chips" },
+    el("span", { class: "chip" }, "Rest of today ", el("b", {}, `${fmt(r.predicted_consumption_rest_of_today_kwh)} kWh`)),
+    el("span", { class: "chip" }, "Tomorrow ", el("b", {}, `${fmt(r.predicted_consumption_tomorrow_kwh)} kWh`)),
+    r.predicted_pv_tomorrow_kwh !== undefined ? el("span", { class: "chip" }, "PV tomorrow ", el("b", {}, `${fmt(r.predicted_pv_tomorrow_kwh)} kWh`)) : null,
+    el("span", { class: "chip" }, "Min SOC ", el("b", {}, `${fmt(r.predicted_min_soc_percent, 0)} %`)),
+    r.estimated_grid_cost_tomorrow !== undefined
+      ? el("span", { class: "chip" }, "Grid cost tomorrow ", el("b", {}, `${fmt(r.estimated_grid_cost_tomorrow, 2)} ${status?.tariff?.currency || ""}`))
+      : null,
+    el("span", { class: "chip" }, "Outage risk ", el("b", {}, r.outage_risk)),
+    el("span", { class: "chip" }, "Confidence ", el("b", {}, r.confidence)),
+  );
+}
+
+function renderPrediction(analysis) {
+  latestPrediction = analysis;
+  const box = $("prediction");
+  if (!analysis) {
+    $("predictionTime").textContent = "";
+    box.replaceChildren(el("div", { class: "empty" }, "No prediction yet. Press “Predict now”."));
+    return;
+  }
+  const r = analysis.result;
+  $("predictionTime").textContent = fmtDateTime(analysis.ts);
+  const applyButton = el("button", { type: "button", class: "secondary" }, "Apply to inverter");
+  applyButton.disabled = !status?.control?.can_write;
+  applyButton.addEventListener("click", () => {
+    if (confirm("Write this prediction's SOC values to the Deye programs now?")) controlAction(`api/analyses/${analysis.id}/apply`);
+  });
+  box.replaceChildren(
+    el("div", {}, r.summary),
+    predictionChips(r),
+    r.weather_impact ? el("p", { class: "muted prediction-meta" }, "Weather: ", r.weather_impact) : null,
+    r.appliance_forecast?.length
+      ? el("ul", { class: "appliances" }, ...r.appliance_forecast.map((a) =>
+        el("li", {}, el("b", {}, APPLIANCE_LABEL[a.appliance] || a.appliance), ` ${fmt(a.expected_kwh_tomorrow)} kWh tomorrow · ${a.expected_usage_windows}`)))
+      : null,
+    r.hourly_forecast_tomorrow?.length ? el("div", { class: "chart small" }, el("canvas", { id: "forecastChart" })) : null,
+    programTable(r) ? el("details", {}, el("summary", {}, "Suggested Deye programs"), programTable(r)) : null,
+    el("div", { class: "control-buttons" }, applyButton),
+  );
+  if (r.hourly_forecast_tomorrow?.length) {
+    delete charts.forecastChart;
+    const hours = r.hourly_forecast_tomorrow.slice().sort((a, b) => a.hour - b.hour);
+    const appliances = status?.appliances || {};
+    const series = [["Load", "load_w", "--series-load"]];
+    if (appliances.heat_pump_power) series.push(["Heat pump", "heat_pump_w", "--series-heatpump"]);
+    if (appliances.boiler_power) series.push(["Boiler", "boiler_w", "--series-boiler"]);
+    if (appliances.ev_power) series.push(["EV", "ev_w", "--series-ev"]);
+    const text = css("--muted");
+    charts.forecastChart = typeof Chart === "undefined" ? undefined : new Chart($("forecastChart"), {
+      type: "line",
+      data: {
+        labels: hours.map((h) => `${String(h.hour).padStart(2, "0")}:00`),
+        datasets: series.map(([label, key, color], i) => ({
+          label, data: hours.map((h) => h[key]), borderColor: css(color), backgroundColor: css(color) + "22",
+          borderWidth: 2, pointRadius: 0, fill: i === 0 ? "origin" : false,
+        })),
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
+        plugins: { legend: { labels: { color: text, boxWidth: 10 } }, title: { display: true, text: "Predicted power tomorrow (W)", color: text } },
+        scales: { x: { ticks: { color: text, maxTicksLimit: 8 }, grid: { display: false } }, y: { beginAtZero: true, ticks: { color: text }, grid: { color: css("--grid") } } },
+      },
+    });
+  }
+}
+
+function programTable(r) {
+  if (!(r.deye_programs || []).length) return null;
+  const charge = (v) => (v === true ? "⚡ on" : v === false ? "off" : "—");
+  return el(
+    "div",
+    { class: "table-scroll" },
+    el(
+      "table",
+      { class: "programs" },
+      el("tr", {}, el("th", {}, "Program"), el("th", {}, "Time"), el("th", {}, "SOC"), el("th", {}, "Force charge"), el("th", {}, "Why")),
+      ...r.deye_programs.map((p) => el("tr", {}, el("td", {}, `#${p.slot}`), el("td", {}, p.time), el("td", {}, `${fmt(p.soc_percent, 0)} %`), el("td", {}, charge(p.grid_charge)), el("td", {}, p.reason))),
+    ),
+  );
+}
+
+// Economy tab -------------------------------------------------------------------
+
+async function refreshEconomy() {
+  const days = $("economyRange").value;
+  let report;
+  try {
+    [report, status] = await Promise.all([api(`api/economy?days=${days}`), status ? Promise.resolve(status) : api("api/status")]);
+  } catch (err) {
+    $("economyNotes").replaceChildren(el("div", { class: "banner" }, `Could not load data: ${err.message}`));
+    return;
+  }
+  const cur = report.currency;
+  const money = (v) => (v === null || v === undefined ? "—" : `${fmt(v, 2)} ${cur}`);
+  const t = report.totals;
+  const notes = [];
+  if (!report.has_grid_sensor) notes.push("Set a “Grid import today” sensor in Settings to calculate what was paid and the savings.");
+  if (!report.has_pv_power_sensor) notes.push("Set a “PV power” sensor in Settings to split savings into PV and battery.");
+  $("economyNotes").replaceChildren(...notes.map((n) => el("div", { class: "banner" }, n)));
+  $("economyInfo").textContent = status?.tariff
+    ? `Peak ${status.tariff.peak_price_per_kwh} ${cur}/kWh · off-peak ${status.tariff.offpeak_price_per_kwh} ${cur}/kWh (${status.tariff.offpeak_windows.join(", ")})`
+    : "";
+  $("economyTiles").replaceChildren(
+    tile("Saved", money(t.total_saved), t.saved_percent !== null ? `${fmt(t.saved_percent, 0)} %` : ""),
+    tile("Saved by PV", money(t.pv_saved)),
+    tile("Saved by battery & AI plan", money(t.battery_saved)),
+    tile("Paid for grid", money(t.paid)),
+    tile("Without PV & battery", money(t.without_system)),
+    tile("Grid energy", t.grid_kwh === null ? "—" : fmt(t.grid_kwh), t.grid_kwh === null ? "" : `kWh (${fmt(t.grid_offpeak_kwh)} off-peak)`),
+    tile("Consumption", fmt(t.load_kwh), "kWh"),
+  );
+
+  const rows = report.days;
+  const col = (key) => rows.map((d) => d[key]);
+  const options = categoryOptions(rows, cur, null);
+  options.scales.x.stacked = true;
+  options.scales.y.stacked = true;
+  upsertChart("economyChart", {
+    data: {
+      labels: rows.map((d) => shortDate(d.date)),
+      datasets: [
+        bar("Paid", css("--series-load"), col("paid"), { stack: "cost" }),
+        bar("Saved by PV", css("--series-pv"), col("pv_saved"), { stack: "cost" }),
+        bar("Saved by battery & AI", css("--series-soc"), rows.map((d) => (d.battery_saved === null ? null : Math.max(0, d.battery_saved))), { stack: "cost" }),
+      ],
+    },
+    options,
+    plugins: [weekendShading],
+  }, NO_READINGS);
+
+  const header = ["Day", "Consumption", "Grid peak", "Grid off-peak", "Paid", "Without system", "PV saved", "Battery/AI saved", "Saved", "AI control"];
+  $("economyTable").replaceChildren(
+    el("tr", {}, ...header.map((h, i) => el("th", { class: i ? "num" : "" }, h))),
+    ...rows.slice().reverse().map((d) =>
+      el("tr", {},
+        el("td", {}, shortDate(d.date)),
+        el("td", { class: "num" }, `${fmt(d.load_kwh)} kWh`),
+        el("td", { class: "num" }, d.grid_peak_kwh === null ? "—" : `${fmt(d.grid_peak_kwh)} kWh`),
+        el("td", { class: "num" }, d.grid_offpeak_kwh === null ? "—" : `${fmt(d.grid_offpeak_kwh)} kWh`),
+        el("td", { class: "num" }, money(d.paid)),
+        el("td", { class: "num" }, money(d.without_system)),
+        el("td", { class: "num" }, money(d.pv_saved)),
+        el("td", { class: "num" }, money(d.battery_saved)),
+        el("td", { class: "num saved" }, d.total_saved === null ? "—" : `${money(d.total_saved)} (${fmt(d.saved_percent, 0)} %)`),
+        el("td", { class: "num" }, `${d.ai_control_share} %`),
+      )),
+  );
+}
+$("economyRange").addEventListener("change", refreshEconomy);
 
 // Analysis log ----------------------------------------------------------------
 
 function renderLog(analyses) {
   $("logInfo").textContent = analyses.length ? `${analyses.length} most recent runs` : "";
   if (!analyses.length) {
-    $("log").replaceChildren(el("div", { class: "empty" }, "No analyses yet. They run on the schedule above, or press “Run analysis now”."));
+    $("log").replaceChildren(el("div", { class: "empty" }, "No predictions yet. They run on the schedule above, or press “Predict now”."));
     return;
   }
   $("log").replaceChildren(...analyses.map(renderEntry));
@@ -240,39 +556,24 @@ function renderEntry(a) {
     el("span", { class: "entry-time" }, fmtDateTime(a.ts)),
     el("span", { class: `badge ${a.status}` }, a.status),
     el("span", { class: "badge" }, a.trigger),
+    a.actions?.some((x) => x.status === "set") ? el("span", { class: "badge auto" }, "applied") : null,
     el("span", { class: "muted" }, [a.model, duration, tokens].filter(Boolean).join(" · ")),
   );
 
   if (a.status === "running") return el("div", { class: "entry" }, head, el("div", { class: "muted" }, "Claude is analysing the data…"));
   if (a.status === "error") return el("div", { class: "entry error" }, head, el("div", { class: "error-text" }, a.error));
 
-  const chips = el(
-    "div",
-    { class: "chips" },
-    el("span", { class: "chip" }, "Rest of today ", el("b", {}, `${fmt(r.predicted_consumption_rest_of_today_kwh)} kWh`)),
-    el("span", { class: "chip" }, "Tomorrow ", el("b", {}, `${fmt(r.predicted_consumption_tomorrow_kwh)} kWh`)),
-    el("span", { class: "chip" }, "Min SOC ", el("b", {}, `${fmt(r.predicted_min_soc_percent, 0)} %`)),
-    el("span", { class: "chip" }, "Outage risk ", el("b", {}, r.outage_risk)),
-    el("span", { class: "chip" }, "Confidence ", el("b", {}, r.confidence)),
-  );
-
-  const programs = (r.deye_programs || []).length
-    ? el(
-        "table",
-        { class: "programs" },
-        el("tr", {}, el("th", {}, "Program"), el("th", {}, "Time"), el("th", {}, "SOC"), el("th", {}, "Why")),
-        ...r.deye_programs.map((p) => el("tr", {}, el("td", {}, `#${p.slot}`), el("td", {}, p.time), el("td", {}, `${fmt(p.soc_percent, 0)} %`), el("td", {}, p.reason))),
-      )
-    : null;
+  const programs = programTable(r);
 
   return el(
     "div",
     { class: "entry" },
     head,
     el("div", {}, r.summary),
-    chips,
+    predictionChips(r),
     r.recommendations?.length ? el("ul", {}, ...r.recommendations.map((t) => el("li", {}, t))) : null,
     programs ? el("details", {}, el("summary", {}, "Suggested Deye programs"), programs) : null,
+    a.actions?.length ? el("details", {}, el("summary", {}, "Changes written to the inverter"), actionsList(a.actions)) : null,
     el("details", {}, el("summary", {}, "Reasoning"), el("pre", {}, r.reasoning)),
     inputDetails(a.id),
   );
@@ -296,37 +597,46 @@ async function refresh() {
   clearTimeout(refreshTimer);
   const hours = $("range").value;
   try {
-    const [s, rows, days, analyses] = await Promise.all([
+    const [s, rows, days, analyses, accuracy] = await Promise.all([
       api("api/status"),
       api(`api/readings?hours=${hours}`),
       api("api/daily?days=14"),
       api("api/analyses?limit=30"),
+      api("api/accuracy?days=14"),
     ]);
     status = s;
     renderStatus();
     renderBattery(rows);
-    renderLoad(rows);
+    renderPower(rows);
     renderDaily(days);
+    renderAccuracy(accuracy);
+    const latestOk = analyses.find((a) => a.status === "ok" && a.result);
+    if (latestOk?.id !== latestPrediction?.id || latestOk?.actions?.length !== latestPrediction?.actions?.length) renderPrediction(latestOk);
     renderLog(analyses);
   } catch (err) {
     $("warnings").replaceChildren(el("div", { class: "banner" }, `Could not load data: ${err.message}`));
   }
-  // Poll quickly while an analysis is running so the log updates when it finishes.
-  refreshTimer = setTimeout(refresh, status?.analysis_running ? 5000 : 60000);
+  // Poll quickly while a prediction or history import is running.
+  const busy = status?.analysis_running || status?.history_import?.running;
+  refreshTimer = setTimeout(refresh, busy ? 5000 : 60000);
 }
 
 $("range").addEventListener("change", refresh);
 $("analyze").addEventListener("click", async () => {
   $("analyze").disabled = true;
+  $("analyze").textContent = "Predicting…";
   const res = await api("api/analyze", { method: "POST" }).catch((err) => ({ error: err.message }));
   if (res.error) alert(res.error);
   setTimeout(refresh, 500);
 });
+
 // Charts read their colours from CSS variables, so rebuild them when the theme changes.
 function rebuildCharts() {
-  Object.values(charts).forEach((c) => c.destroy());
+  Object.values(charts).forEach((c) => c?.destroy());
   for (const key of Object.keys(charts)) delete charts[key];
+  latestPrediction = null;
   refresh();
+  if (location.hash === "#economy") refreshEconomy();
 }
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", rebuildCharts);
 
@@ -362,19 +672,23 @@ applyTheme(currentTheme());
 // Tabs ---------------------------------------------------------------------------
 
 function showTab() {
-  const tab = location.hash === "#settings" ? "settings" : "dashboard";
+  const tab = ["#settings", "#economy"].includes(location.hash) ? location.hash.slice(1) : "dashboard";
   $("view-dashboard").hidden = tab !== "dashboard";
+  $("view-economy").hidden = tab !== "economy";
   $("view-settings").hidden = tab !== "settings";
   $("dashActions").hidden = tab !== "dashboard";
   document.querySelectorAll(".tabs a").forEach((a) => {
     a.classList.toggle("active", a.dataset.tab === tab);
     a.setAttribute("aria-selected", a.dataset.tab === tab);
   });
+  // Charts created while the dashboard was hidden have no size yet.
+  if (tab !== "settings") requestAnimationFrame(() => Object.values(charts).forEach((c) => c?.resize()));
+  if (tab === "economy") refreshEconomy();
   window.dispatchEvent(new CustomEvent("batteryai:tab", { detail: tab }));
 }
 window.addEventListener("hashchange", () => {
   showTab();
-  if (location.hash !== "#settings") refresh();
+  if (location.hash !== "#settings" && location.hash !== "#economy") refresh();
 });
 
 showTab();

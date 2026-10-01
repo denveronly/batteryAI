@@ -1,73 +1,105 @@
 # BatteryAI
 
-BatteryAI records your battery, solar forecast, load and outage data into a local
-database and asks Claude, a few times a day, to predict consumption and suggest SOC
-capacities for the six Deye time-of-use programs.
+BatteryAI records your battery, solar, load, appliance, weather and outage data, and
+asks Claude at fixed times each day (12:00 and 23:00 by default) to predict consumption
+and plan the SOC and force charge of the six Deye time-of-use programs. With AI
+auto-control on, the plan is written to the inverter.
 
-## What it does
+## Tabs
 
-- **Records** the configured sensors at a set interval into SQLite
-  (`/data/batteryai.db`, included in add-on backups): battery SOC, today/tomorrow solar
-  forecast, today load, today consumption, probable outages (state and attributes), all
-  six Deye program times and SOC capacities, plus the day of the week and whether it is a
-  weekend.
-- **Analyses** the data with Claude a configurable number of times a day, starting at
-  the first analysis time and spread evenly over 24 hours (2 per day at 06:00 gives 06:00 and
-  18:00). Each analysis gets the current values, per-day totals for the last
-  history days, hourly samples for the last 48 hours and its own previous predictions.
-- **Shows** a panel in the Home Assistant sidebar with:
-  - a battery chart (SOC vs. the SOC of the Deye program active at that moment),
-  - a load chart (today load and today consumption counters),
-  - a daily energy chart (load, consumption, solar forecast; weekends shaded),
-  - the current Deye program table,
-  - the AI analysis log: every run with its predictions, outage risk, suggested Deye
-    programs, recommendations, reasoning and the exact data sent to Claude.
+### Dashboard
 
-BatteryAI only reads Home Assistant entities. It does **not** change inverter settings;
-the Deye program suggestions are advice you apply yourself.
+- **Tiles** – battery SOC, load, PV power and PV surplus (positive = the battery is
+  charging from the sun), consumption, solar forecasts, heat pump / boiler / EV power,
+  outdoor temperature, tomorrow's weather, current tariff, outages.
+- **Battery control**
+  - *AI auto-control* – when on, every prediction writes Claude's SOC values and force
+    charge settings to the Deye programs. When off, Claude only advises.
+  - *Charge all to 98%* – sets every program to the “Charge all” SOC, turns on each
+    program's force-charge switch and turns AI auto-control off. Turning auto-control
+    back on restores the force-charge switches and applies the latest prediction.
+- **Latest prediction** – consumption today/tomorrow, PV tomorrow, lowest SOC, outage
+  risk, estimated grid cost, the effect of the weather, when the heat pump, boiler and
+  EV will run, an hourly power forecast for tomorrow, the suggested programs, and
+  *Apply to inverter* to write it once.
+- **Predict now** – runs a prediction immediately.
+- Charts: battery SOC vs. program SOC; power (load, PV, appliances, outdoor
+  temperature); daily energy.
+- **Prediction accuracy** – per day, predicted vs. actual consumption (accuracy %),
+  solar forecast vs. actual PV, how much of the consumption PV covered and the grid
+  share.
+- **AI analysis log** – every run with its reasoning, the exact data sent to Claude and
+  the changes written to the inverter.
 
-## Settings
+### Economy
 
-All settings are in the **Settings** tab of the BatteryAI panel (the add-on's
-Configuration tab is empty). Changes apply immediately when you press **Save settings**;
-no restart is needed. Settings are stored in `/data/settings.json`. If you used version
-0.1.0, BatteryAI imports the old add-on options on first start if the Supervisor still
-provides them; otherwise enter them again in the Settings tab.
+Per day and in total: what was paid for grid energy (peak / off-peak), what the same
+consumption would have cost without PV and battery, and what was saved — split into
+**saved by PV** (load covered directly by PV power) and **saved by battery & AI plan**
+(battery energy and cheap off-peak charging replacing peak-time grid energy). The
+*AI control* column shows how much of the day auto-control was on.
+Requires the *Grid import today* and *PV power* sensors and the tariff settings.
 
-- **Home Assistant connection** – *Test connection* shows the Home Assistant version and
-  time zone, or the exact reason the add-on cannot read data (no token, token refused,
-  Home Assistant unreachable).
-- **Claude** – API key, model, analysis effort, response language. *Test Claude* checks
-  the key and the model without spending tokens. The saved key is never sent back to the
-  browser; leave the field empty to keep it.
-- **Schedule** – analyses per day (1–24), first analysis time, recording interval, days of
-  history sent to Claude, and which days count as weekend.
-- **Sensors** – today/tomorrow solar forecast, battery SOC, probable outages (optional),
-  today load and today consumption.
-- **Deye programs** – for each of the 6 programs, the start-time entity and the SOC
-  capacity entity.
-- **Extra instructions** – free-text notes for Claude (tariffs, backup preferences…).
+### Settings
 
-Every entity field has a **Test** button (and is tested automatically when the tab opens
-or the field changes). It shows the current value and unit, or why it fails:
+All settings are stored in `/data/settings.json` and apply immediately when saved.
 
-| Result | Meaning |
-| --- | --- |
-| ✓ value | The entity is read correctly. |
-| ⚠ unavailable / unknown | The entity exists, but its integration is not delivering data. |
-| ⚠ not numeric / not a time | The entity works but holds the wrong kind of value. |
-| ✕ does not exist | No entity with that ID; check for typos (the field suggests IDs as you type). |
-| ✕ token / connection error | The add-on cannot talk to Home Assistant at all; see the connection test. |
+- **Home Assistant connection** – test shows the version and time zone, or why the
+  add-on cannot read data.
+- **Claude** – API key (never sent back to the browser), model, effort, language.
+- **Prediction schedule** – the times of the daily runs (default 12:00 and 23:00), or
+  fill them evenly with *N per day from HH:MM*. Recording interval, history days,
+  weekend days.
+- **Prediction tuning**
+  - *Safety margin* – Claude plans for the predicted consumption plus this %.
+  - *Lowest / highest SOC* – Claude's SOC values are kept within this range.
+  - *Apply threshold* – a program's SOC is only rewritten when the new value differs by
+    at least this many %.
+  - *Charge all SOC* – the value used by *Charge all* (98% by default).
+- **Sensors** – battery SOC, solar forecast today/tomorrow, PV power (W), PV production
+  today (kWh), load power (W, kW is converted), consumption today (kWh), grid import
+  today (kWh), weather, probable outages, heat pump / boiler / EV power (W).
+- **Deye programs** – for each of the 6 programs: start-time entity, SOC entity
+  (number, input_number or select) and an optional force (grid) charge switch.
+- **Tariff** – currency, peak and off-peak price per kWh, off-peak windows such as
+  `23:00-07:00` (every other time is peak).
+- **Phone notifications** – one or more notify services (phones from the Home Assistant
+  Companion app appear as `mobile_app_…`), with a test button. Notifications are normal
+  priority, not critical alerts: every prediction, every SOC / force-charge change, and
+  failed predictions can each be switched on or off.
+- **History** – rebuild the data from the Home Assistant recorder (10 days by default).
+- **Extra instructions** for Claude.
 
-Deye time entities may report `01:00`, `01:00:00` or `100`; all three are understood.
+Every entity has a **Test** button showing its current value or why it fails.
 
-## Theme
+## Weather
 
-The ◐/☀/☾ button in the header switches between automatic (follows your system), light
-and dark. The choice is remembered in your browser.
+Use a `weather.*` entity: BatteryAI reads the current temperature and asks Home Assistant
+for the daily and hourly forecast (`weather.get_forecasts`). Claude relates heat pump
+energy to the outdoor temperature in the history and uses tomorrow's temperatures to
+predict it. A plain temperature sensor also works, without a forecast.
+
+## Outages
+
+When the outage sensor's state or attributes change, BatteryAI runs an extra
+prediction (at most once every 30 minutes). Claude raises the SOC and turns on force
+charge before an outage when the battery would not otherwise cover the load — unless
+the outage falls in daylight and PV is expected to cover it.
+
+## History
+
+On first start (less than a day of data) BatteryAI imports the configured entities from
+the Home Assistant recorder, so the charts and Claude have data right away. New values
+are then recorded at the recording interval. *Settings → History* re-imports on demand.
+
+## Safety
+
+Nothing is written to the inverter unless AI auto-control is on, *Apply to inverter* is
+pressed, or *Charge all* is pressed. Every write respects the entity's own min/max/step
+and the SOC range in *Prediction tuning*, and is listed in the analysis log and sent as a
+notification.
 
 ## Costs
 
-Each analysis is a single Claude API request containing a few thousand tokens of data.
-With 2 analyses a day the cost is small, but it scales with analyses per day, history
-days and effort. Token usage for every run is shown in the log.
+Each prediction is one Claude API request; token usage is shown in the log. Outage
+changes can add extra runs (at most one per 30 minutes).
