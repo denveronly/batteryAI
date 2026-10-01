@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BatteryAI</title>
+  <link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>BatteryAI</h1>
+      <p class="muted" id="schedule">Loading…</p>
+    </div>
+    <div class="actions">
+      <select id="range" aria-label="Chart range">
+        <option value="24">24 hours</option>
+        <option value="48" selected>48 hours</option>
+        <option value="168">7 days</option>
+        <option value="720">30 days</option>
+      </select>
+      <button id="analyze" type="button">Run analysis now</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="warnings"></div>
+
+    <section class="tiles" id="tiles"></section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Battery</h2>
+        <span class="muted">State of charge vs. active Deye program SOC</span>
+      </div>
+      <div class="chart"><canvas id="batteryChart"></canvas></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Load</h2>
+        <span class="muted">Today's load and consumption counters</span>
+      </div>
+      <div class="chart"><canvas id="loadChart"></canvas></div>
+    </section>
+
+    <section class="grid-2">
+      <section class="card">
+        <div class="card-head">
+          <h2>Daily energy</h2>
+          <span class="muted">Weekends are shaded</span>
+        </div>
+        <div class="chart"><canvas id="dailyChart"></canvas></div>
+      </section>
+      <section class="card">
+        <div class="card-head">
+          <h2>Deye programs</h2>
+          <span class="muted">Current inverter settings</span>
+        </div>
+        <table class="programs" id="programs"></table>
+      </section>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>AI analysis log</h2>
+        <span class="muted" id="logInfo"></span>
+      </div>
+      <div class="log" id="log"></div>
+    </section>
+  </main>
+
+  <script src="static/vendor/chart.umd.min.js"></script>
+  <script src="static/app.js"></script>
+</body>
+</html>

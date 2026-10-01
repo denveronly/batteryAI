@@ -1,0 +1,52 @@
+configuration:
+  claude_api_key:
+    name: Claude API key
+    description: Anthropic API key used for the analyses (console.anthropic.com).
+  claude_model:
+    name: Claude model
+    description: Model used for the analysis, for example claude-opus-5-5 or claude-sonnet-5-5.
+  claude_effort:
+    name: Analysis effort
+    description: How hard Claude thinks. Higher effort costs more tokens.
+  response_language:
+    name: Response language
+    description: Language for the summary, recommendations and reasoning.
+  analyses_per_day:
+    name: Analyses per day
+    description: How many times a day Claude analyses the data. Runs are spread evenly over 24 hours.
+  first_analysis_time:
+    name: First analysis time
+    description: Time of the first daily analysis (HH:MM, Home Assistant time zone). With 2 per day and 06:00 the runs are at 06:00 and 18:00.
+  record_interval_minutes:
+    name: Recording interval (minutes)
+    description: How often the sensor values are written to the database.
+  history_days:
+    name: History sent to Claude (days)
+    description: Number of recorded days included in each analysis.
+  today_forecast_sensor:
+    name: Today solar forecast
+    description: Sensor with today's PV forecast in kWh (for example Solcast forecast_today).
+  tomorrow_forecast_sensor:
+    name: Tomorrow solar forecast
+    description: Sensor with tomorrow's PV forecast in kWh.
+  battery_soc_sensor:
+    name: Battery SOC
+    description: Battery state of charge sensor (%).
+  outages_sensor:
+    name: Probable outages
+    description: Sensor describing planned or probable power outages. Its attributes are sent to Claude as well.
+  today_load_sensor:
+    name: Today load
+    description: Daily load energy counter (kWh) that resets at midnight.
+  today_consumption_sensor:
+    name: Today consumption
+    description: Daily consumption energy counter (kWh) that resets at midnight.
+  weekend_days:
+    name: Weekend days
+    description: Days counted as weekend (usually lower consumption). The day of the week is detected automatically.
+  deye_programs:
+    name: Deye programs
+    description: The 6 Deye time-of-use programs. For each, the entity holding the start time and the entity holding the SOC capacity.
+  extra_instructions:
+    name: Extra instructions for Claude
+    description: Optional notes, for example tariff times or how much backup you want during outages.
