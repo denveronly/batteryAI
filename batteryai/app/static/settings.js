@@ -40,7 +40,7 @@ const SENSOR_GROUPS = [
 const SENSORS = SENSOR_GROUPS.flatMap((g) => g.rows);
 const NUMBER_FIELDS = ["record_interval_minutes", "history_days", "prediction_margin_percent", "min_soc_percent",
   "max_soc_percent", "apply_threshold_percent", "charge_all_soc_percent"];
-const TEXT_FIELDS = ["claude_model", "claude_effort", "response_language", "extra_instructions", "tariff_currency"];
+const TEXT_FIELDS = ["claude_effort", "response_language", "extra_instructions", "tariff_currency", "program_time_marks"];
 const PRICE_FIELDS = ["tariff_peak_price", "tariff_offpeak_price"];
 const CHECKBOXES = ["notify_predictions", "notify_soc_changes", "notify_errors"];
 const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
@@ -113,6 +113,10 @@ function fillForm(s) {
   field("notify_services").value = (s.notify_services || []).join(", ");
   for (const key of CHECKBOXES) field(key).checked = !!s[key];
   field("claude_api_key").value = "";
+  loadModels().then((data) => {
+    fillModelSelect(field("claude_model"), data.models, s.claude_model);
+    $("modelHint").textContent = data.live ? "Models available to your API key." : data.error ? `Could not list models: ${data.error}` : "Save an API key to list the models it can use.";
+  });
   $("apiKeyHint").textContent = s.claude_api_key_set ? "A key is saved. Leave empty to keep it." : "No key saved yet.";
   form.querySelectorAll('input[name="weekend_days"]').forEach((box) => {
     box.checked = s.weekend_days.includes(box.value);
@@ -135,6 +139,7 @@ function readForm() {
     deye_programs: [],
   };
   for (const key of TEXT_FIELDS) data[key] = value(key);
+  if (field("claude_model").value) data.claude_model = field("claude_model").value;
   for (const key of NUMBER_FIELDS) data[key] = Number(value(key));
   for (const key of PRICE_FIELDS) data[key] = value(key);
   for (const key of CHECKBOXES) data[key] = field(key).checked;
@@ -330,7 +335,9 @@ form.addEventListener("submit", async (event) => {
     } else if (!resp.ok) {
       showResult(result, "error", `✕ HTTP ${resp.status}`);
     } else {
+      await loadModels(true);
       fillForm(body);
+      fillModelSelect($("modelSelect"), (await loadModels()).models, body.claude_model, true);
       showResult(result, "ok", "✓ Saved and applied");
     }
   } catch (err) {

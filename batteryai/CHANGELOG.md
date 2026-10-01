@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.1
+
+- Deye program ranges: a program's time is the END of its range, which starts at the
+  previous program's time (P1 05:00 after P6 23:15 = 23:15 – 05:00). Configurable in
+  Settings → Deye programs. Tables show the time range ("23:15 – 05:00", no seconds);
+  Claude gets the computed ranges and no longer suggests moving program times.
+- Battery chart shows each program's range as a labelled band; stored program SOC is
+  recalculated for all readings.
+- Power chart shows Claude's predicted hourly load (past days and tomorrow); time axis
+  ticks on round hours.
+- Claude requests are streamed with a 64k output limit, so long answers with thinking
+  are no longer cut off; clearer API error messages.
+- Model selection dropdown in the header and in Settings, listing the models available
+  to your API key.
+
 ## 0.3.0
 
 - Charts fixed: history is imported from the Home Assistant recorder on first start (and

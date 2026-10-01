@@ -8,7 +8,7 @@ import logging
 import os
 import signal
 import time
-from datetime import datetime, timezone, tzinfo
+from datetime import datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -20,7 +20,7 @@ from aiohttp import web
 from analyzer import AnalysisError, analyze, build_input
 import control
 import notify
-from collector import UNAVAILABLE, collect, has_data, parse_hhmm, to_float, weather_details
+from collector import UNAVAILABLE, active_program, collect, has_data, parse_hhmm, to_float, weather_details
 from config import DATA_DIR, Options, SettingsError, load_settings, parse_settings, save_settings
 from db import READING_FIELDS, Database, accuracy_report, economy_report
 from ha import HAError, HomeAssistant
@@ -132,9 +132,22 @@ class BatteryAI:
             task.cancel()
         self._loops = []
 
+    def recompute_targets(self) -> None:
+        time_is_end = self.opts.program_time_marks == "end"
+
+        def target(programs: list[dict[str, Any]], minute: int) -> float | None:
+            program = active_program(programs, minute, time_is_end)
+            return program.get("soc") if program else None
+
+        count = self.db.recompute_targets(target)
+        _LOGGER.info("Recomputed program SOC for %d readings (program time = %s)", count, self.opts.program_time_marks)
+
     def apply_settings(self, opts: Options) -> None:
         """Use new settings right away: new Claude client, new schedule and recording interval."""
+        marks_changed = opts.program_time_marks != self.opts.program_time_marks
         self.opts = opts
+        if marks_changed:
+            self.recompute_targets()
         self._client = self._make_client(opts.claude_api_key)
         self.stop_loops()
         self.start_loops()
@@ -297,6 +310,7 @@ async def status(request: web.Request) -> web.Response:
             "latest": latest,
             "units": app.last_snapshot["units"] if app.last_snapshot else {},
             "active_program_slot": app.last_snapshot["active_program_slot"] if app.last_snapshot else None,
+            "program_time_marks": opts.program_time_marks,
             "sensors": opts.sensor_map(),
             "tariff": {**opts.tariff_dict(), "now": opts.tariff_at(datetime.now(app.tz).hour * 60 + datetime.now(app.tz).minute)[1]},
             "appliances": {
@@ -571,6 +585,56 @@ async def test_notify(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
+FALLBACK_MODEL_LIST = [
+    {"id": "claude-opus-5-5", "display_name": "Claude Opus 5.5"},
+    {"id": "claude-sonnet-5-5", "display_name": "Claude Sonnet 5.5"},
+    {"id": "claude-fable-5-1", "display_name": "Claude Fable 5.1"},
+    {"id": "claude-haiku-4-5", "display_name": "Claude Haiku 4.5"},
+]
+
+
+@routes.get("/api/models")
+async def models(request: web.Request) -> web.Response:
+    """Models the saved API key can use (Models API), newest first; a built-in list without a key."""
+    app = _app(request)
+    current = app.opts.claude_model
+    found: list[dict[str, str]] = []
+    error = None
+    if app.opts.claude_api_key:
+        client = anthropic.AsyncAnthropic(api_key=app.opts.claude_api_key, max_retries=1, timeout=20.0)
+        try:
+            async for model in client.models.list(limit=100):
+                found.append({"id": model.id, "display_name": model.display_name})
+        except anthropic.APIError as err:
+            error = str(err)
+        finally:
+            await client.close()
+    models_list = found or FALLBACK_MODEL_LIST
+    if current and current not in {m["id"] for m in models_list}:
+        models_list = [{"id": current, "display_name": current}, *models_list]
+    return web.json_response({"models": models_list, "current": current, "live": bool(found), "error": error})
+
+
+@routes.get("/api/predicted_load")
+async def predicted_load(request: web.Request) -> web.Response:
+    """Hourly load forecasts as points: each run predicts the day after it ran (later runs win)."""
+    app = _app(request)
+    hours = _int_param(request, "hours", 48, 1, 24 * 90)
+    since = int(time.time()) - hours * 3600
+    points: dict[int, dict[str, Any]] = {}
+    for analysis in app.db.ok_analyses_since(since - 2 * 86400):
+        day = datetime.fromtimestamp(analysis["ts"], app.tz).date() + timedelta(days=1)
+        for item in analysis["result"].get("hourly_forecast_tomorrow") or []:
+            try:
+                hour = int(item["hour"])
+                ts = int(datetime(day.year, day.month, day.day, hour, tzinfo=app.tz).timestamp())
+            except (KeyError, TypeError, ValueError):
+                continue
+            if ts >= since:
+                points[ts] = {"ts": ts, "load_w": item.get("load_w"), "heat_pump_w": item.get("heat_pump_w")}
+    return web.json_response([points[ts] for ts in sorted(points)])
+
+
 @routes.post("/api/test/claude")
 async def test_claude(request: web.Request) -> web.Response:
     """Checks the API key and model with the Models API (no tokens are used)."""
@@ -639,6 +703,7 @@ async def main() -> None:
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, stop.set)
 
+        batteryai.recompute_targets()
         batteryai.start_loops()
         batteryai.import_history_if_empty()
         await stop.wait()

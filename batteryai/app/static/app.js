@@ -38,7 +38,108 @@ const pct = (v) => (v === null || v === undefined ? "—" : `${fmt(v, 0)} %`);
 const unit = (field, fallback) => status?.units?.[field] || fallback;
 const shortDate = (iso) => new Date(iso + "T12:00:00").toLocaleDateString([], { weekday: "short", day: "numeric" });
 
+// Deye program time ranges ----------------------------------------------------
+
+const pad2 = (n) => String(n).padStart(2, "0");
+const fmtMin = (m) => `${pad2(Math.floor(m / 60))}:${pad2(m % 60)}`;
+
+function toMinutes(value) {
+  const text = String(value ?? "").trim();
+  if (!text || ["unknown", "unavailable", "none"].includes(text.toLowerCase())) return null;
+  let h, m;
+  if (text.includes(":")) [h, m] = text.split(":").map((x) => parseInt(x, 10));
+  else {
+    const n = parseInt(text, 10);
+    if (Number.isNaN(n)) return null;
+    [h, m] = [Math.floor(n / 100), n % 100];
+  }
+  return h >= 0 && h < 24 && m >= 0 && m < 60 ? h * 60 + m : null;
+}
+
+// slot -> [start, end] minutes. With "end" (default) a program's time is the END of its
+// range, which starts at the previous program's time: P1 05:00 after P6 23:15 = 23:15–05:00.
+function programSpans(programs) {
+  const timeIsEnd = (status?.program_time_marks || "end") === "end";
+  const timed = programs
+    .map((p) => [toMinutes(p.time), p.slot])
+    .filter(([m]) => m !== null)
+    .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const spans = {};
+  timed.forEach(([minute, slot], i) => {
+    spans[slot] = timeIsEnd
+      ? [timed[(i - 1 + timed.length) % timed.length][0], minute]
+      : [minute, timed[(i + 1) % timed.length][0]];
+  });
+  return spans;
+}
+
+function rangeText(span) {
+  if (!span) return "—";
+  return span[0] === span[1] ? `${fmtMin(span[0])} (unused)` : `${fmtMin(span[0])} – ${fmtMin(span[1])}`;
+}
+
 // Charts ----------------------------------------------------------------------
+
+// Ticks on round local hours (3 h, 6 h, a day…) instead of wherever the data starts.
+function alignedTicks(scale) {
+  const span = (scale.max - scale.min) / 3_600_000;
+  const step = [1, 2, 3, 6, 12, 24, 48, 72, 168].find((h) => span / h <= 9) || 336;
+  const start = new Date(scale.min);
+  start.setHours(0, 0, 0, 0);
+  const ticks = [];
+  for (let t = start.getTime(); t <= scale.max; ) {
+    if (t >= scale.min) ticks.push({ value: t });
+    const d = new Date(t);
+    d.setHours(d.getHours() + step);
+    t = d.getTime();
+  }
+  scale.ticks = ticks;
+}
+
+// Shaded band per Deye program range, labelled with its SOC, repeated for every day shown.
+const programBands = {
+  id: "programBands",
+  beforeDatasetsDraw(chart, _args, opts) {
+    const programs = opts.programs || [];
+    if (!programs.length) return;
+    const spans = programSpans(programs);
+    const { ctx, chartArea, scales } = chart;
+    const x = scales.x;
+    const color = css("--series-target");
+    const first = new Date(x.min);
+    first.setHours(0, 0, 0, 0);
+    first.setDate(first.getDate() - 1);
+    ctx.save();
+    ctx.font = "11px system-ui, sans-serif";
+    ctx.textBaseline = "top";
+    for (const day = new Date(first); day.getTime() <= x.max; day.setDate(day.getDate() + 1)) {
+      for (const p of programs) {
+        const span = spans[p.slot];
+        if (!span || span[0] === span[1]) continue;
+        const startDate = new Date(day);
+        startDate.setMinutes(span[0]);
+        const endDate = new Date(day);
+        endDate.setMinutes(span[1] + (span[1] <= span[0] ? 1440 : 0));
+        const left = Math.max(chartArea.left, x.getPixelForValue(startDate.getTime()));
+        const right = Math.min(chartArea.right, x.getPixelForValue(endDate.getTime()));
+        if (right <= left) continue;
+        ctx.fillStyle = color + (p.slot % 2 ? "1f" : "0d");
+        ctx.fillRect(left, chartArea.top, right - left, chartArea.bottom - chartArea.top);
+        ctx.strokeStyle = color + "40";
+        ctx.beginPath();
+        ctx.moveTo(left, chartArea.top);
+        ctx.lineTo(left, chartArea.bottom);
+        ctx.stroke();
+        const label = `P${p.slot}${p.soc !== null && p.soc !== undefined ? ` ${fmt(p.soc, 0)}%` : ""}`;
+        if (right - left > ctx.measureText(label).width + 6) {
+          ctx.fillStyle = css("--muted");
+          ctx.fillText(label, left + 3, chartArea.top + 3);
+        }
+      }
+    }
+    ctx.restore();
+  },
+};
 
 function timeOptions(yTitle, y = {}, y2 = null) {
   const grid = css("--grid");
@@ -47,9 +148,10 @@ function timeOptions(yTitle, y = {}, y2 = null) {
     x: {
       type: "linear",
       grid: { color: grid },
+      afterBuildTicks: alignedTicks,
       ticks: {
         color: text,
-        maxTicksLimit: 8,
+        autoSkip: false,
         callback: (v) => {
           const d = new Date(v);
           return d.getHours() === 0 && d.getMinutes() === 0
@@ -112,16 +214,26 @@ function renderBattery(rows) {
     data: {
       datasets: [
         line("Battery SOC", css("--series-soc"), pts("battery_soc"), { fill: "origin" }),
-        line("Deye program SOC", css("--series-target"), pts("target_soc"), { stepped: true, borderDash: [6, 4], backgroundColor: "transparent" }),
+        line("Program SOC (recorded)", css("--series-target"), pts("target_soc"), { stepped: true, borderDash: [6, 4], backgroundColor: "transparent" }),
       ],
     },
-    options: timeOptions("%", { min: 0, max: 100 }),
+    options: (() => {
+      const o = timeOptions("%", { min: 0, max: 100 });
+      o.plugins.programBands = { programs: status?.latest?.deye_programs || [] };
+      return o;
+    })(),
+    plugins: [programBands],
   }, NO_READINGS);
 }
 
-function renderPower(rows) {
+function renderPower(rows, predicted = []) {
   const pts = (key) => rows.map((r) => ({ x: r.ts * 1000, y: r[key] }));
   const datasets = [line("Load", css("--series-load"), pts("load_power"), { fill: "origin", backgroundColor: css("--series-load") + "22" })];
+  if (predicted.length) {
+    datasets.push(line("Predicted load", css("--series-target"), predicted.map((p) => ({ x: p.ts * 1000, y: p.load_w })), {
+      stepped: "before", borderDash: [6, 4], borderWidth: 2, backgroundColor: "transparent",
+    }));
+  }
   const pv = pts("pv_power");
   if (pv.some((p) => p.y !== null)) datasets.push(line("PV", css("--series-pv"), pv, { fill: "origin", backgroundColor: css("--series-pv") + "22" }));
   const appliances = status?.appliances || {};
@@ -307,10 +419,16 @@ function renderStatus() {
   $("tiles").replaceChildren(...tiles);
 
   const programs = latest.deye_programs || [];
+  const spans = programSpans(programs);
+  const hasCharge = programs.some((p) => p.grid_charge !== undefined);
   $("programs").replaceChildren(
-    el("tr", {}, el("th", {}, "Program"), el("th", {}, "Start time"), el("th", {}, "SOC capacity")),
+    el("tr", {}, el("th", {}, "Program"), el("th", {}, "Time range"), el("th", {}, "SOC capacity"), hasCharge ? el("th", {}, "Force charge") : null),
     ...(programs.length
-      ? programs.map((p) => el("tr", { class: p.slot === status.active_program_slot ? "active" : "" }, el("td", {}, `#${p.slot}`), el("td", {}, p.time ?? "—"), el("td", {}, p.soc === null ? "—" : `${fmt(p.soc, 0)} %`)))
+      ? programs.map((p) => el("tr", { class: p.slot === status.active_program_slot ? "active" : "" },
+        el("td", {}, `#${p.slot}`),
+        el("td", {}, rangeText(spans[p.slot])),
+        el("td", {}, p.soc === null ? "—" : `${fmt(p.soc, 0)} %`),
+        hasCharge ? el("td", {}, p.grid_charge === "on" ? "⚡ on" : p.grid_charge ?? "—") : null))
       : [el("tr", {}, el("td", { colspan: "3", class: "empty" }, "No Deye program data yet."))]),
   );
 
@@ -454,14 +572,15 @@ function renderPrediction(analysis) {
 function programTable(r) {
   if (!(r.deye_programs || []).length) return null;
   const charge = (v) => (v === true ? "⚡ on" : v === false ? "off" : "—");
+  const spans = programSpans(r.deye_programs);
   return el(
     "div",
     { class: "table-scroll" },
     el(
       "table",
       { class: "programs" },
-      el("tr", {}, el("th", {}, "Program"), el("th", {}, "Time"), el("th", {}, "SOC"), el("th", {}, "Force charge"), el("th", {}, "Why")),
-      ...r.deye_programs.map((p) => el("tr", {}, el("td", {}, `#${p.slot}`), el("td", {}, p.time), el("td", {}, `${fmt(p.soc_percent, 0)} %`), el("td", {}, charge(p.grid_charge)), el("td", {}, p.reason))),
+      el("tr", {}, el("th", {}, "Program"), el("th", {}, "Time range"), el("th", {}, "SOC"), el("th", {}, "Force charge"), el("th", {}, "Why")),
+      ...r.deye_programs.map((p) => el("tr", {}, el("td", { class: "nowrap" }, `#${p.slot}`), el("td", { class: "nowrap" }, rangeText(spans[p.slot])), el("td", { class: "nowrap" }, `${fmt(p.soc_percent, 0)} %`), el("td", { class: "nowrap" }, charge(p.grid_charge)), el("td", {}, p.reason))),
     ),
   );
 }
@@ -597,17 +716,18 @@ async function refresh() {
   clearTimeout(refreshTimer);
   const hours = $("range").value;
   try {
-    const [s, rows, days, analyses, accuracy] = await Promise.all([
+    const [s, rows, days, analyses, accuracy, predicted] = await Promise.all([
       api("api/status"),
       api(`api/readings?hours=${hours}`),
       api("api/daily?days=14"),
       api("api/analyses?limit=30"),
       api("api/accuracy?days=14"),
+      api(`api/predicted_load?hours=${hours}`),
     ]);
     status = s;
     renderStatus();
     renderBattery(rows);
-    renderPower(rows);
+    renderPower(rows, predicted);
     renderDaily(days);
     renderAccuracy(accuracy);
     const latestOk = analyses.find((a) => a.status === "ok" && a.result);
@@ -639,6 +759,41 @@ function rebuildCharts() {
   if (location.hash === "#economy") refreshEconomy();
 }
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", rebuildCharts);
+
+// Model selection (header and Settings) ------------------------------------------
+
+let modelsPromise = null;
+function loadModels(force = false) {
+  if (!modelsPromise || force) modelsPromise = api("api/models").catch(() => ({ models: [], current: null }));
+  return modelsPromise;
+}
+
+function fillModelSelect(select, models, current, short = false) {
+  const label = (m) => (!m.display_name || m.display_name === m.id ? m.id : short ? m.display_name : `${m.display_name} (${m.id})`);
+  select.replaceChildren(...models.map((m) => el("option", { value: m.id, title: m.id }, label(m))));
+  if (current) select.value = current;
+}
+
+async function initModelSelect() {
+  const data = await loadModels();
+  fillModelSelect($("modelSelect"), data.models, data.current, true);
+}
+
+$("modelSelect").addEventListener("change", async (e) => {
+  const select = e.target;
+  select.disabled = true;
+  const resp = await fetch("api/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ claude_model: select.value }),
+  }).catch(() => null);
+  select.disabled = false;
+  if (!resp?.ok) alert("Could not change the model.");
+  const settingsModel = document.querySelector('#settingsForm select[name="claude_model"]');
+  if (settingsModel) settingsModel.value = select.value;
+  refresh();
+});
+initModelSelect();
 
 // Theme switch: auto (follow the system) -> light -> dark ------------------------
 

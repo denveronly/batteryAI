@@ -163,6 +163,19 @@ class Database:
             self._conn.executemany(self._INSERT, [self._reading_values(s, tz, "history") for s in snaps])
             self._conn.commit()
 
+    def recompute_targets(self, target_for: Callable[[list[dict[str, Any]], int], float | None]) -> int:
+        """Re-derives target_soc of every reading from its stored programs (after the
+        program-time meaning changes, or for rows recorded before programs were configured)."""
+        with self._lock:
+            rows = self._conn.execute("SELECT id, minute_of_day, deye_programs FROM readings").fetchall()
+            updates = []
+            for row in rows:
+                programs = json.loads(row["deye_programs"] or "[]")
+                updates.append((target_for(programs, row["minute_of_day"]) if programs else None, row["id"]))
+            self._conn.executemany("UPDATE readings SET target_soc = ? WHERE id = ?", updates)
+            self._conn.commit()
+        return len(updates)
+
     def readings_since(self, since_ts: int) -> list[dict[str, Any]]:
         return self._query(
             "SELECT ts, local_date, minute_of_day, weekday, is_weekend, "

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from datetime import datetime, tzinfo
 from typing import Any
@@ -19,13 +20,15 @@ _LOGGER = logging.getLogger(__name__)
 FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5"}
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 RECENT_HOURS = 48
+# Adaptive thinking counts toward max_tokens; stream so a long answer can't hit the HTTP timeout.
+MAX_TOKENS = 64000
 
 SYSTEM_PROMPT = """You are BatteryAI, an energy analyst for a home in Home Assistant with solar panels, a battery and a Deye hybrid inverter. The house is heated by a heat pump when it gets cold, and may also have an electric boiler (water heater) and an EV charger.
 
 Each request gives you one JSON document with:
 - current: the latest values: battery SOC, PV power and load power right now (pv_surplus_w > 0 means the battery is being charged by the sun), solar forecast for today and tomorrow, total load power (W), today's consumption counter (kWh), heat pump / boiler / EV power (W), outdoor temperature, the probable-outages sensor with its attributes, local time and weekday.
 - weather: the current condition and the forecast for today and tomorrow (daily and, when available, hourly temperatures).
-- deye_programs: the inverter's six time-of-use programs. Each program starts at its time and keeps the battery at or above its SOC capacity until the next program starts; the last program runs until the first one of the next day. When a program has grid_charge ("on"/"off"), that is its force-charge switch: when on, the inverter charges the battery from the grid up to the program's SOC.
+- deye_programs: the inverter's six time-of-use programs. Each has a range (already worked out for you, e.g. "23:15-05:00", which crosses midnight) during which the inverter keeps the battery at or above the program's SOC capacity. "time" is only the value of the program's time setting; always reason with "range". When a program has grid_charge ("on"/"off"), that is its force-charge switch: when on, the inverter charges the battery from the grid up to the program's SOC.
 - schedule: when this plan is applied and when the next run will replace it. Plan for the whole period until the next run.
 - daily_history: one row per day with consumption, PV production, grid import, the solar forecast, energy used by each appliance and the hours it was running, outdoor temperatures, min/max SOC, weekday and weekend flag.
 - hourly_profile: average power per hour of day for the load and each appliance, split into weekdays and weekends, with the average outdoor temperature for that hour.
@@ -41,7 +44,7 @@ Your tasks:
 1. Predict consumption for the rest of today and for tomorrow, and when each appliance (heat pump, boiler, EV) will run and how much energy it will use. Use weekday/weekend patterns, temperature, the solar forecast and your past accuracy (correct systematic over- or under-prediction).
 2. Give an hourly forecast for tomorrow (average W per hour for total load and each appliance).
 3. Judge the outage risk from the outages sensor and make sure the battery will hold enough charge to cover the expected outage windows.
-4. Propose an SOC capacity for each Deye program. Plan for the predicted consumption increased by tuning.prediction_margin_percent, keep every SOC between tuning.min_soc_percent and tuning.max_soc_percent, balance outage backup, solar self-consumption and grid charging, keep the owner's program times unless a different time clearly helps, and explain every change.
+4. Propose an SOC capacity for each Deye program. Plan for the predicted consumption increased by tuning.prediction_margin_percent, keep every SOC between tuning.min_soc_percent and tuning.max_soc_percent, balance outage backup, solar self-consumption and grid charging, and explain every change. Program times are fixed by the owner and are never changed by BatteryAI: return each program's current time unchanged and do not suggest moving times.
 5. Decide force charge (grid_charge) for each program that has a switch. Turn it on and raise the SOC before an expected outage when the battery would otherwise not cover the load until power returns, taking into account the time of day: if the outage falls in daylight hours and the PV forecast covers the load and recharges the battery, grid charging is not needed. Turn it off when PV is expected to be enough, so the battery is charged by the sun. For programs without a switch return null.
 6. Minimise what is paid for grid energy: charge from the grid in off-peak windows rather than peak, use PV first, and cover peak-time load from the battery. Estimate tomorrow's grid cost in the tariff currency.
 7. Give short, practical recommendations.
@@ -127,6 +130,14 @@ RESULT_SCHEMA: dict[str, Any] = {
     ],
     "additionalProperties": False,
 }
+
+
+# Models without the effort parameter (it returns an error there).
+NO_EFFORT_MODELS = re.compile(r"claude-(haiku|sonnet-4-5|sonnet-4-0|opus-4-1|opus-4-0|3)")
+
+
+def supports_effort(model: str) -> bool:
+    return not NO_EFFORT_MODELS.search(model)
 
 
 class AnalysisError(Exception):
@@ -233,11 +244,11 @@ async def analyze(client: anthropic.AsyncAnthropic, opts: Options, data: dict[st
         + json.dumps(data, ensure_ascii=False, default=str)
     )
     output_config: dict[str, Any] = {"format": {"type": "json_schema", "schema": RESULT_SCHEMA}}
-    if "haiku" not in opts.claude_model:
+    if supports_effort(opts.claude_model):
         output_config["effort"] = opts.claude_effort
     request: dict[str, Any] = {
         "model": opts.claude_model,
-        "max_tokens": 16000,
+        "max_tokens": MAX_TOKENS,
         "system": SYSTEM_PROMPT,
         "messages": [{"role": "user", "content": user_text}],
         "output_config": output_config,
@@ -246,9 +257,11 @@ async def analyze(client: anthropic.AsyncAnthropic, opts: Options, data: dict[st
     started = time.monotonic()
     try:
         if opts.claude_model in FALLBACK_MODELS:
-            response = await client.beta.messages.create(**request, betas=[FALLBACK_BETA], fallbacks="default")
+            stream_manager = client.beta.messages.stream(**request, betas=[FALLBACK_BETA], fallbacks="default")
         else:
-            response = await client.messages.create(**request)
+            stream_manager = client.messages.stream(**request)
+        async with stream_manager as stream:
+            response = await stream.get_final_message()
     except anthropic.AuthenticationError as err:
         raise AnalysisError("Claude rejected the API key. Check it in the Settings tab.") from err
     except anthropic.PermissionDeniedError as err:
@@ -263,11 +276,13 @@ async def analyze(client: anthropic.AsyncAnthropic, opts: Options, data: dict[st
         raise AnalysisError(f"Claude API error {err.status_code}: {err.message}") from err
     except anthropic.APIConnectionError as err:
         raise AnalysisError(f"Could not reach the Claude API: {err}") from err
+    except anthropic.APIError as err:  # e.g. an error event in the middle of the stream
+        raise AnalysisError(f"Claude API error: {err}") from err
 
     _LOGGER.info(
-        "Claude analysis finished in %.1fs (request %s, stop_reason %s)",
+        "Claude analysis finished in %.1fs (message %s, stop_reason %s)",
         time.monotonic() - started,
-        response._request_id,
+        getattr(response, "_request_id", None) or response.id,
         response.stop_reason,
     )
     if response.stop_reason == "refusal":

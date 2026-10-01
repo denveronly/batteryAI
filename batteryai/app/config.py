@@ -80,6 +80,9 @@ class Options:
     charge_all_soc_percent: int = 98
     weekend_days: list[str] = field(default_factory=lambda: ["saturday", "sunday"])
     deye_programs: list[DeyeProgram] = field(default_factory=list)
+    # "end": a program's time is the END of its period, which starts at the previous
+    # program's time. "start": the time starts the period, which lasts until the next one.
+    program_time_marks: str = "end"
     extra_instructions: str = ""
     notify_services: list[str] = field(default_factory=list)
     notify_predictions: bool = True
@@ -208,6 +211,9 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
     for key in SENSOR_KEYS:
         setattr(opts, key, entity(key, text(key)))
 
+    opts.program_time_marks = text("program_time_marks") or "end"
+    if opts.program_time_marks not in ("end", "start"):
+        errors["program_time_marks"] = "must be end or start"
     if opts.claude_effort not in EFFORTS:
         errors["claude_effort"] = "must be one of " + ", ".join(EFFORTS)
     times = raw.get("analysis_times_list", base.analysis_times_list)

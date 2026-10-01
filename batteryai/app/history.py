@@ -117,7 +117,7 @@ async def import_history(
             for p in opts.deye_programs
         ]
         snap["deye_programs"] = programs
-        current = active_program(programs, local.hour * 60 + local.minute)
+        current = active_program(programs, local.hour * 60 + local.minute, opts.program_time_marks == "end")
         snap["active_program_slot"] = current["slot"] if current else None
         if any(snap.get(name) is not None for name in sensors) or snap["outdoor_temp"] is not None:
             snapshots.append(snap)

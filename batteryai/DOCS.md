@@ -23,8 +23,9 @@ auto-control on, the plan is written to the inverter.
   EV will run, an hourly power forecast for tomorrow, the suggested programs, and
   *Apply to inverter* to write it once.
 - **Predict now** – runs a prediction immediately.
-- Charts: battery SOC vs. program SOC; power (load, PV, appliances, outdoor
-  temperature); daily energy.
+- Charts: battery SOC with each Deye program's time range as a labelled band; power
+  (load, PV, appliances, outdoor temperature and Claude's predicted hourly load); daily
+  energy.
 - **Prediction accuracy** – per day, predicted vs. actual consumption (accuracy %),
   solar forecast vs. actual PV, how much of the consumption PV covered and the grid
   share.
@@ -46,7 +47,8 @@ All settings are stored in `/data/settings.json` and apply immediately when save
 
 - **Home Assistant connection** – test shows the version and time zone, or why the
   add-on cannot read data.
-- **Claude** – API key (never sent back to the browser), model, effort, language.
+- **Claude** – API key (never sent back to the browser), model (dropdown with the models
+  your key can use; also in the header), effort, language.
 - **Prediction schedule** – the times of the daily runs (default 12:00 and 23:00), or
   fill them evenly with *N per day from HH:MM*. Recording interval, history days,
   weekend days.
@@ -59,8 +61,13 @@ All settings are stored in `/data/settings.json` and apply immediately when save
 - **Sensors** – battery SOC, solar forecast today/tomorrow, PV power (W), PV production
   today (kWh), load power (W, kW is converted), consumption today (kWh), grid import
   today (kWh), weather, probable outages, heat pump / boiler / EV power (W).
-- **Deye programs** – for each of the 6 programs: start-time entity, SOC entity
-  (number, input_number or select) and an optional force (grid) charge switch.
+- **Deye programs** – for each of the 6 programs: time entity, SOC entity (number,
+  input_number or select) and an optional force (grid) charge switch. *Program time
+  marks* says how the inverter reads the times: **end** (default) – a program's time is
+  the end of its range, which starts at the previous program's time (P1 05:00 after
+  P6 23:15 covers 23:15 – 05:00); **start** – the range lasts until the next program's
+  time. Two programs with the same time leave one of them unused. BatteryAI never
+  changes program times, only SOC and force charge.
 - **Tariff** – currency, peak and off-peak price per kWh, off-peak windows such as
   `23:00-07:00` (every other time is peak).
 - **Phone notifications** – one or more notify services (phones from the Home Assistant

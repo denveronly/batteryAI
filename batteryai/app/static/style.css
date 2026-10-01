@@ -277,3 +277,5 @@ button.warn-button { background: var(--warn); border-color: var(--warn); color: 
 .notes { margin-bottom: 12px; }
 td.num, th.num { text-align: right; white-space: nowrap; }
 .saved { color: var(--ok); font-weight: 600; }
+td.nowrap { white-space: nowrap; }
+#modelSelect { max-width: 190px; }

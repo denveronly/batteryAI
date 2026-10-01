@@ -69,17 +69,53 @@ def parse_hhmm(value: Any) -> int | None:
     return None
 
 
-def active_program(programs: list[dict[str, Any]], minute_of_day: int) -> dict[str, Any] | None:
-    """The Deye program in effect: the latest start time at or before now, wrapping past midnight."""
-    timed = [(parse_hhmm(p.get("time")), p) for p in programs]
-    timed = sorted(((start, p) for start, p in timed if start is not None), key=lambda item: item[0])
-    if not timed:
-        return None
-    current = timed[-1][1]
-    for start, program in timed:
-        if start <= minute_of_day:
-            current = program
-    return current
+def _fmt_minutes(minutes: int) -> str:
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def program_ranges(programs: list[dict[str, Any]], time_is_end: bool) -> dict[int, tuple[int, int]]:
+    """slot -> (start, end) minutes of the period each program covers, wrapping past midnight.
+
+    time_is_end: the program's time marks the END of its period, which starts at the previous
+    program's time (P1 05:00 covers 23:15-05:00 when the last program is at 23:15).
+    Otherwise the time marks the START and the period runs until the next program's time.
+    """
+    timed = sorted(
+        ((parse_hhmm(p.get("time")), p["slot"]) for p in programs if parse_hhmm(p.get("time")) is not None),
+    )
+    ranges = {}
+    for index, (minute, slot) in enumerate(timed):
+        if time_is_end:
+            ranges[slot] = (timed[index - 1][0], minute)
+        else:
+            ranges[slot] = (minute, timed[(index + 1) % len(timed)][0])
+    return ranges
+
+
+def _in_range(minute: int, start: int, end: int) -> bool:
+    if start == end:
+        return False
+    return start <= minute < end if start < end else minute >= start or minute < end
+
+
+def active_program(
+    programs: list[dict[str, Any]], minute_of_day: int, time_is_end: bool = True
+) -> dict[str, Any] | None:
+    """The Deye program in effect at a minute of the day."""
+    ranges = program_ranges(programs, time_is_end)
+    for program in programs:
+        span = ranges.get(program["slot"])
+        if span and _in_range(minute_of_day, *span):
+            return program
+    return None
+
+
+def annotate_ranges(programs: list[dict[str, Any]], time_is_end: bool) -> None:
+    """Adds a readable "range" (e.g. "23:15-05:00") to every program."""
+    ranges = program_ranges(programs, time_is_end)
+    for program in programs:
+        span = ranges.get(program["slot"])
+        program["range"] = f"{_fmt_minutes(span[0])}-{_fmt_minutes(span[1])}" if span else None
 
 
 def _trim_attributes(attributes: dict[str, Any] | None) -> dict[str, Any]:
@@ -216,7 +252,9 @@ async def collect(ha: HomeAssistant, opts: Options, tz: tzinfo) -> dict[str, Any
         programs.append(entry)
     snapshot["deye_programs"] = programs
 
-    current = active_program(programs, now.hour * 60 + now.minute)
+    time_is_end = opts.program_time_marks == "end"
+    annotate_ranges(programs, time_is_end)
+    current = active_program(programs, now.hour * 60 + now.minute, time_is_end)
     snapshot["active_program_slot"] = current["slot"] if current else None
     snapshot["missing_entities"] = missing
     return snapshot
