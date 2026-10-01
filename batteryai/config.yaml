@@ -1,5 +1,5 @@
 name: BatteryAI
-version: "0.1.0"
+version: "0.2.0"
 slug: batteryai
 description: Records battery, solar and load data and uses Claude to plan Deye battery SOC
 url: https://github.com/denveronly/batteryai
@@ -14,56 +14,7 @@ ingress: true
 ingress_port: 8099
 panel_icon: mdi:battery-charging-high
 panel_title: BatteryAI
-options:
-  claude_api_key: ""
-  claude_model: claude-opus-5-5
-  claude_effort: high
-  response_language: English
-  analyses_per_day: 2
-  first_analysis_time: "06:00"
-  record_interval_minutes: 5
-  history_days: 14
-  today_forecast_sensor: sensor.solcast_pv_forecast_forecast_today
-  tomorrow_forecast_sensor: sensor.solcast_pv_forecast_forecast_tomorrow
-  battery_soc_sensor: sensor.deye_battery_soc
-  outages_sensor: sensor.probable_outages
-  today_load_sensor: sensor.deye_today_load
-  today_consumption_sensor: sensor.deye_today_consumption
-  weekend_days:
-    - saturday
-    - sunday
-  deye_programs:
-    - time_entity: time.deye_program_1_time
-      soc_entity: number.deye_program_1_soc
-    - time_entity: time.deye_program_2_time
-      soc_entity: number.deye_program_2_soc
-    - time_entity: time.deye_program_3_time
-      soc_entity: number.deye_program_3_soc
-    - time_entity: time.deye_program_4_time
-      soc_entity: number.deye_program_4_soc
-    - time_entity: time.deye_program_5_time
-      soc_entity: number.deye_program_5_soc
-    - time_entity: time.deye_program_6_time
-      soc_entity: number.deye_program_6_soc
-  extra_instructions: ""
-schema:
-  claude_api_key: password
-  claude_model: str
-  claude_effort: list(low|medium|high|xhigh|max)
-  response_language: str
-  analyses_per_day: int(1,24)
-  first_analysis_time: match(^([01][0-9]|2[0-3]):[0-5][0-9]$)
-  record_interval_minutes: int(1,60)
-  history_days: int(1,90)
-  today_forecast_sensor: str
-  tomorrow_forecast_sensor: str
-  battery_soc_sensor: str
-  outages_sensor: str?
-  today_load_sensor: str
-  today_consumption_sensor: str
-  weekend_days:
-    - list(monday|tuesday|wednesday|thursday|friday|saturday|sunday)
-  deye_programs:
-    - time_entity: str
-      soc_entity: str
-  extra_instructions: str?
+# All settings are edited in the BatteryAI panel (Settings tab) and stored in
+# /data/settings.json. Options from version 0.1.0 are imported on first start.
+options: {}
+schema: {}

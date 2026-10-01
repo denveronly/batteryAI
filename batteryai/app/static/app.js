@@ -322,10 +322,60 @@ $("analyze").addEventListener("click", async () => {
   if (res.error) alert(res.error);
   setTimeout(refresh, 500);
 });
-window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+// Charts read their colours from CSS variables, so rebuild them when the theme changes.
+function rebuildCharts() {
   Object.values(charts).forEach((c) => c.destroy());
   for (const key of Object.keys(charts)) delete charts[key];
   refresh();
+}
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", rebuildCharts);
+
+// Theme switch: auto (follow the system) -> light -> dark ------------------------
+
+const THEMES = ["auto", "light", "dark"];
+const THEME_LABELS = { auto: "◐ Auto", light: "☀ Light", dark: "☾ Dark" };
+
+function currentTheme() {
+  try {
+    const saved = localStorage.getItem("batteryai-theme");
+    return THEMES.includes(saved) ? saved : "auto";
+  } catch (e) {
+    return "auto";
+  }
+}
+
+function applyTheme(theme) {
+  if (theme === "auto") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
+  $("themeToggle").textContent = THEME_LABELS[theme];
+  $("themeToggle").title = `Theme: ${theme}. Click to switch.`;
+}
+
+$("themeToggle").addEventListener("click", () => {
+  const next = THEMES[(THEMES.indexOf(currentTheme()) + 1) % THEMES.length];
+  try { localStorage.setItem("batteryai-theme", next); } catch (e) {}
+  applyTheme(next);
+  rebuildCharts();
+});
+applyTheme(currentTheme());
+
+// Tabs ---------------------------------------------------------------------------
+
+function showTab() {
+  const tab = location.hash === "#settings" ? "settings" : "dashboard";
+  $("view-dashboard").hidden = tab !== "dashboard";
+  $("view-settings").hidden = tab !== "settings";
+  $("dashActions").hidden = tab !== "dashboard";
+  document.querySelectorAll(".tabs a").forEach((a) => {
+    a.classList.toggle("active", a.dataset.tab === tab);
+    a.setAttribute("aria-selected", a.dataset.tab === tab);
+  });
+  window.dispatchEvent(new CustomEvent("batteryai:tab", { detail: tab }));
+}
+window.addEventListener("hashchange", () => {
+  showTab();
+  if (location.hash !== "#settings") refresh();
 });
 
+showTab();
 refresh();

@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BatteryAI</title>
   <link rel="stylesheet" href="static/style.css">
+  <script>
+    // Apply the saved theme before first paint to avoid a flash.
+    try {
+      const theme = localStorage.getItem("batteryai-theme");
+      if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+    } catch (e) {}
+  </script>
 </head>
 <body>
   <header class="topbar">
@@ -12,7 +19,13 @@
       <h1>BatteryAI</h1>
       <p class="muted" id="schedule">Loading…</p>
     </div>
-    <div class="actions">
+    <div class="header-right">
+    <nav class="tabs" role="tablist">
+      <a href="#dashboard" role="tab" data-tab="dashboard">Dashboard</a>
+      <a href="#settings" role="tab" data-tab="settings">Settings</a>
+    </nav>
+    <button type="button" class="secondary" id="themeToggle" title="Switch theme">Auto</button>
+    <div class="actions" id="dashActions">
       <select id="range" aria-label="Chart range">
         <option value="24">24 hours</option>
         <option value="48" selected>48 hours</option>
@@ -21,9 +34,10 @@
       </select>
       <button id="analyze" type="button">Run analysis now</button>
     </div>
+    </div>
   </header>
 
-  <main>
+  <main id="view-dashboard">
     <div id="warnings"></div>
 
     <section class="tiles" id="tiles"></section>
@@ -70,7 +84,100 @@
     </section>
   </main>
 
+  <main id="view-settings" hidden>
+    <section class="card">
+      <div class="card-head"><h2>Home Assistant connection</h2></div>
+      <div class="test-row">
+        <button type="button" class="secondary" id="testHa">Test connection</button>
+        <div class="result" id="haResult"></div>
+      </div>
+    </section>
+
+    <form id="settingsForm" novalidate>
+      <section class="card">
+        <div class="card-head"><h2>Claude</h2></div>
+        <div class="form-grid">
+          <label>API key
+            <input type="password" name="claude_api_key" autocomplete="off" placeholder="sk-ant-…">
+            <span class="hint" id="apiKeyHint"></span>
+          </label>
+          <label>Model
+            <input type="text" name="claude_model" list="modelList" required>
+            <datalist id="modelList">
+              <option value="claude-opus-5-5"></option>
+              <option value="claude-sonnet-5-5"></option>
+              <option value="claude-haiku-4-5"></option>
+            </datalist>
+          </label>
+          <label>Analysis effort
+            <select name="claude_effort">
+              <option value="low">low</option>
+              <option value="medium">medium</option>
+              <option value="high">high</option>
+              <option value="xhigh">xhigh</option>
+              <option value="max">max</option>
+            </select>
+          </label>
+          <label>Response language
+            <input type="text" name="response_language">
+          </label>
+        </div>
+        <div class="test-row">
+          <button type="button" class="secondary" id="testClaude">Test Claude</button>
+          <div class="result" id="claudeResult"></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>Schedule</h2><span class="muted" id="schedulePreview"></span></div>
+        <div class="form-grid">
+          <label>Analyses per day
+            <input type="number" name="analyses_per_day" min="1" max="24" step="1">
+          </label>
+          <label>First analysis time
+            <input type="time" name="first_analysis_time">
+          </label>
+          <label>Recording interval (minutes)
+            <input type="number" name="record_interval_minutes" min="1" max="60" step="1">
+          </label>
+          <label>History sent to Claude (days)
+            <input type="number" name="history_days" min="1" max="90" step="1">
+          </label>
+        </div>
+        <fieldset class="weekend">
+          <legend>Weekend days <span class="hint">(lower consumption; the day of week is detected automatically)</span></legend>
+          <div id="weekendDays"></div>
+        </fieldset>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Sensors</h2>
+          <button type="button" class="secondary small" id="testAll">Test all</button>
+        </div>
+        <div id="sensorRows"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>Deye programs</h2><span class="muted">Start time and SOC capacity entity for each of the 6 programs</span></div>
+        <div id="programRows"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>Extra instructions for Claude</h2></div>
+        <textarea name="extra_instructions" rows="4" placeholder="For example: night tariff 23:00–07:00; keep at least 40% for outages."></textarea>
+      </section>
+
+      <div class="save-bar">
+        <span class="result" id="saveResult"></span>
+        <button type="submit" id="saveSettings">Save settings</button>
+      </div>
+    </form>
+    <datalist id="entityList"></datalist>
+  </main>
+
   <script src="static/vendor/chart.umd.min.js"></script>
   <script src="static/app.js"></script>
+  <script src="static/settings.js"></script>
 </body>
 </html>

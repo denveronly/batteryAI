@@ -170,7 +170,7 @@ async def analyze(client: anthropic.AsyncAnthropic, opts: Options, data: dict[st
         else:
             response = await client.messages.create(**request)
     except anthropic.AuthenticationError as err:
-        raise AnalysisError("Claude rejected the API key. Check claude_api_key in the add-on settings.") from err
+        raise AnalysisError("Claude rejected the API key. Check it in the Settings tab.") from err
     except anthropic.PermissionDeniedError as err:
         raise AnalysisError(f"The API key has no access to this model or feature: {err.message}") from err
     except anthropic.NotFoundError as err:

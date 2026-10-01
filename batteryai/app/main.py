@@ -17,10 +17,10 @@ import anthropic
 from aiohttp import web
 
 from analyzer import AnalysisError, analyze, build_input
-from collector import collect, has_data
-from config import DATA_DIR, Options, load_options
+from collector import UNAVAILABLE, collect, has_data, parse_hhmm, to_float
+from config import DATA_DIR, Options, SettingsError, load_settings, parse_settings, save_settings
 from db import Database
-from ha import HomeAssistant
+from ha import HAError, HomeAssistant
 
 PORT = int(os.environ.get("BATTERYAI_PORT", "8099"))
 STATIC_DIR = Path(__file__).parent / "static"
@@ -38,11 +38,31 @@ class BatteryAI:
         self.next_analysis: datetime | None = None
         self.last_snapshot: dict[str, Any] | None = None
         self._analysis_lock = asyncio.Lock()
-        self._client = (
-            anthropic.AsyncAnthropic(api_key=opts.claude_api_key, max_retries=3, timeout=600.0)
-            if opts.claude_api_key
-            else None
-        )
+        self._loops: list[asyncio.Task] = []
+        self._client = self._make_client(opts.claude_api_key)
+
+    @staticmethod
+    def _make_client(api_key: str) -> anthropic.AsyncAnthropic | None:
+        return anthropic.AsyncAnthropic(api_key=api_key, max_retries=3, timeout=600.0) if api_key else None
+
+    def start_loops(self) -> None:
+        self._loops = [
+            asyncio.create_task(self.recorder_loop()),
+            asyncio.create_task(self.scheduler_loop()),
+        ]
+
+    def stop_loops(self) -> None:
+        for task in self._loops:
+            task.cancel()
+        self._loops = []
+
+    def apply_settings(self, opts: Options) -> None:
+        """Use new settings right away: new Claude client, new schedule and recording interval."""
+        self.opts = opts
+        self._client = self._make_client(opts.claude_api_key)
+        self.stop_loops()
+        self.start_loops()
+        _LOGGER.info("Settings updated")
 
     async def record(self) -> dict[str, Any] | None:
         snapshot = await collect(self.ha, self.opts, self.tz)
@@ -70,7 +90,8 @@ class BatteryAI:
             while (remaining := (self.next_analysis - datetime.now(self.tz)).total_seconds()) > 0:
                 await asyncio.sleep(min(remaining, 60))
             try:
-                await self.run_analysis("schedule")
+                # Shielded so that saving settings (which restarts this loop) can't cut a run short.
+                await asyncio.shield(self.run_analysis("schedule"))
             except Exception:
                 _LOGGER.exception("Scheduled analysis failed")
 
@@ -85,7 +106,7 @@ class BatteryAI:
             data: dict[str, Any] | None = None
             try:
                 if self._client is None:
-                    raise AnalysisError("Set claude_api_key in the add-on configuration.")
+                    raise AnalysisError("Set the Claude API key in the Settings tab.")
                 snapshot = await self.record() or self.last_snapshot
                 if snapshot is None or not has_data(snapshot):
                     raise AnalysisError("No sensor data available from Home Assistant.")
@@ -142,10 +163,17 @@ async def status(request: web.Request) -> web.Response:
     warnings = []
     if not opts.claude_api_key:
         warnings.append("Claude API key is not set.")
-    if len(opts.deye_programs) != 6:
-        warnings.append(f"{len(opts.deye_programs)} Deye programs configured; Deye inverters have 6.")
-    if app.last_snapshot and app.last_snapshot["missing_entities"]:
-        warnings.append("Unavailable entities: " + ", ".join(app.last_snapshot["missing_entities"]))
+    if app.ha.last_error:
+        warnings.append(app.ha.last_error)
+    elif app.last_snapshot and app.last_snapshot["missing_entities"]:
+        warnings.append(
+            "Unavailable entities: " + ", ".join(app.last_snapshot["missing_entities"])
+            + ". Use the Test buttons in Settings to see why."
+        )
+    unset = [key for key, entity in opts.sensor_map().items() if not entity and key != "outages"]
+    unset += [f"Deye program {p.slot}" for p in opts.deye_programs if not (p.time_entity and p.soc_entity)]
+    if unset:
+        warnings.append("Not configured yet: " + ", ".join(k.replace("_", " ") for k in unset) + ".")
     return web.json_response(
         {
             "time_zone": str(app.tz),
@@ -204,6 +232,134 @@ async def analyze_now(request: web.Request) -> web.Response:
     return web.json_response({"started": True}, status=202)
 
 
+# Settings and connection tests --------------------------------------------------
+
+
+@routes.get("/api/settings")
+async def get_settings(request: web.Request) -> web.Response:
+    return web.json_response(_app(request).opts.public_dict())
+
+
+@routes.put("/api/settings")
+async def put_settings(request: web.Request) -> web.Response:
+    app = _app(request)
+    try:
+        raw = await request.json()
+        opts = parse_settings(raw, app.opts)
+    except SettingsError as err:
+        return web.json_response({"errors": err.errors}, status=400)
+    except ValueError:
+        return web.json_response({"errors": {"_": "Invalid JSON"}}, status=400)
+    save_settings(opts)
+    app.apply_settings(opts)
+    return web.json_response(opts.public_dict())
+
+
+@routes.get("/api/test/ha")
+async def test_ha(request: web.Request) -> web.Response:
+    ha = _app(request).ha
+    info: dict[str, Any] = {"url": ha.base_url, "token_source": ha.token_source}
+    try:
+        await ha.request("/")
+        config = await ha.config()
+    except HAError as err:
+        return web.json_response({**info, "ok": False, "error": str(err), "kind": err.kind})
+    return web.json_response(
+        {
+            **info,
+            "ok": True,
+            "version": config.get("version"),
+            "location_name": config.get("location_name"),
+            "time_zone": config.get("time_zone"),
+        }
+    )
+
+
+@routes.get("/api/test/entity")
+async def test_entity(request: web.Request) -> web.Response:
+    """Reads one entity. kind=numeric|time|text says what value the setting expects."""
+    entity_id = request.query.get("entity_id", "").strip()
+    kind = request.query.get("kind", "text")
+    try:
+        state = await _app(request).ha.fetch_state(entity_id)
+    except HAError as err:
+        return web.json_response({"ok": False, "entity_id": entity_id, "error": str(err), "kind": err.kind})
+
+    value = state.get("state")
+    attributes = state.get("attributes") or {}
+    warning = None
+    if value is None or str(value).strip().lower() in UNAVAILABLE:
+        warning = (
+            f"The entity exists, but its state is '{value}'. The integration that provides it "
+            "is not delivering data right now."
+        )
+    elif kind == "numeric" and to_float(value) is None:
+        warning = "Expected a number, but the state is not numeric."
+    elif kind == "time" and parse_hhmm(value) is None:
+        warning = "Expected a time such as 01:00, 01:00:00 or 100."
+    return web.json_response(
+        {
+            "ok": warning is None,
+            "entity_id": state.get("entity_id", entity_id),
+            "state": value,
+            "unit": attributes.get("unit_of_measurement"),
+            "friendly_name": attributes.get("friendly_name"),
+            "last_updated": state.get("last_updated"),
+            "warning": warning,
+        }
+    )
+
+
+@routes.get("/api/entities")
+async def entities(request: web.Request) -> web.Response:
+    try:
+        states = await _app(request).ha.states()
+    except HAError as err:
+        return web.json_response({"error": str(err)}, status=502)
+    return web.json_response(
+        sorted(
+            (
+                {
+                    "entity_id": s["entity_id"],
+                    "name": (s.get("attributes") or {}).get("friendly_name") or "",
+                    "state": s.get("state"),
+                    "unit": (s.get("attributes") or {}).get("unit_of_measurement") or "",
+                }
+                for s in states
+                if s.get("entity_id")
+            ),
+            key=lambda e: e["entity_id"],
+        )
+    )
+
+
+@routes.post("/api/test/claude")
+async def test_claude(request: web.Request) -> web.Response:
+    """Checks the API key and model with the Models API (no tokens are used)."""
+    app = _app(request)
+    body = await request.json() if request.can_read_body else {}
+    api_key = (body.get("api_key") or "").strip() or app.opts.claude_api_key
+    model = (body.get("model") or "").strip() or app.opts.claude_model
+    if not api_key:
+        return web.json_response({"ok": False, "error": "No API key entered."})
+    client = anthropic.AsyncAnthropic(api_key=api_key, max_retries=1, timeout=20.0)
+    try:
+        info = await client.models.retrieve(model)
+    except anthropic.AuthenticationError:
+        return web.json_response({"ok": False, "error": "Claude rejected the API key."})
+    except anthropic.PermissionDeniedError as err:
+        return web.json_response({"ok": False, "error": f"The key has no access: {err.message}"})
+    except anthropic.NotFoundError:
+        return web.json_response({"ok": False, "error": f"The key works, but model '{model}' was not found."})
+    except anthropic.APIStatusError as err:
+        return web.json_response({"ok": False, "error": f"Claude API error {err.status_code}: {err.message}"})
+    except anthropic.APIConnectionError as err:
+        return web.json_response({"ok": False, "error": f"Could not reach the Claude API: {err}"})
+    finally:
+        await client.close()
+    return web.json_response({"ok": True, "model": info.id, "display_name": info.display_name})
+
+
 # Startup --------------------------------------------------------------------
 
 
@@ -220,7 +376,7 @@ async def resolve_time_zone(ha: HomeAssistant) -> tzinfo:
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    opts = load_options()
+    opts = load_settings()
     os.makedirs(DATA_DIR, exist_ok=True)
     db = Database(os.path.join(DATA_DIR, "batteryai.db"))
     db.mark_interrupted()
@@ -245,14 +401,10 @@ async def main() -> None:
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, stop.set)
 
-        tasks = [
-            asyncio.create_task(batteryai.recorder_loop()),
-            asyncio.create_task(batteryai.scheduler_loop()),
-        ]
+        batteryai.start_loops()
         await stop.wait()
         _LOGGER.info("Shutting down")
-        for task in tasks:
-            task.cancel()
+        batteryai.stop_loops()
         await runner.cleanup()
 
 

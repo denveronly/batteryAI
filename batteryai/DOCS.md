@@ -6,15 +6,15 @@ capacities for the six Deye time-of-use programs.
 
 ## What it does
 
-- **Records** every `record_interval_minutes` the configured sensors into SQLite
+- **Records** the configured sensors at a set interval into SQLite
   (`/data/batteryai.db`, included in add-on backups): battery SOC, today/tomorrow solar
   forecast, today load, today consumption, probable outages (state and attributes), all
   six Deye program times and SOC capacities, plus the day of the week and whether it is a
   weekend.
-- **Analyses** the data with Claude `analyses_per_day` times a day, starting at
-  `first_analysis_time` and spread evenly over 24 hours (2 per day at 06:00 gives 06:00 and
+- **Analyses** the data with Claude a configurable number of times a day, starting at
+  the first analysis time and spread evenly over 24 hours (2 per day at 06:00 gives 06:00 and
   18:00). Each analysis gets the current values, per-day totals for the last
-  `history_days`, hourly samples for the last 48 hours and its own previous predictions.
+  history days, hourly samples for the last 48 hours and its own previous predictions.
 - **Shows** a panel in the Home Assistant sidebar with:
   - a battery chart (SOC vs. the SOC of the Deye program active at that moment),
   - a load chart (today load and today consumption counters),
@@ -26,34 +26,48 @@ capacities for the six Deye time-of-use programs.
 BatteryAI only reads Home Assistant entities. It does **not** change inverter settings;
 the Deye program suggestions are advice you apply yourself.
 
-## Configuration
+## Settings
 
-| Option | Description |
+All settings are in the **Settings** tab of the BatteryAI panel (the add-on's
+Configuration tab is empty). Changes apply immediately when you press **Save settings**;
+no restart is needed. Settings are stored in `/data/settings.json`. If you used version
+0.1.0, BatteryAI imports the old add-on options on first start if the Supervisor still
+provides them; otherwise enter them again in the Settings tab.
+
+- **Home Assistant connection** – *Test connection* shows the Home Assistant version and
+  time zone, or the exact reason the add-on cannot read data (no token, token refused,
+  Home Assistant unreachable).
+- **Claude** – API key, model, analysis effort, response language. *Test Claude* checks
+  the key and the model without spending tokens. The saved key is never sent back to the
+  browser; leave the field empty to keep it.
+- **Schedule** – analyses per day (1–24), first analysis time, recording interval, days of
+  history sent to Claude, and which days count as weekend.
+- **Sensors** – today/tomorrow solar forecast, battery SOC, probable outages (optional),
+  today load and today consumption.
+- **Deye programs** – for each of the 6 programs, the start-time entity and the SOC
+  capacity entity.
+- **Extra instructions** – free-text notes for Claude (tariffs, backup preferences…).
+
+Every entity field has a **Test** button (and is tested automatically when the tab opens
+or the field changes). It shows the current value and unit, or why it fails:
+
+| Result | Meaning |
 | --- | --- |
-| `claude_api_key` | Your Anthropic API key from <https://console.anthropic.com>. |
-| `claude_model` | Default `claude-opus-5-5`. |
-| `claude_effort` | `low` … `max`. Default `high`. |
-| `response_language` | Language of the analysis text. |
-| `analyses_per_day` | 1–24 analyses per day. |
-| `first_analysis_time` | `HH:MM` of the first daily analysis, in the Home Assistant time zone. |
-| `record_interval_minutes` | How often readings are stored. |
-| `history_days` | Days of history included in each analysis. |
-| `today_forecast_sensor` / `tomorrow_forecast_sensor` | Solar forecast sensors (kWh). |
-| `battery_soc_sensor` | Battery SOC (%). |
-| `outages_sensor` | Probable outages sensor (optional). |
-| `today_load_sensor` / `today_consumption_sensor` | Daily energy counters (kWh) that reset at midnight. |
-| `weekend_days` | Which days count as weekend. The weekday itself is detected automatically. |
-| `deye_programs` | Six entries, each with the `time_entity` (program start time) and `soc_entity` (program SOC capacity). |
-| `extra_instructions` | Optional notes for Claude: tariffs, backup preferences, etc. |
-
-The defaults contain example entity IDs. Replace them with the IDs from your own
-installation (Settings → Devices & services → Entities). Entities that cannot be read are
-listed in a warning at the top of the panel.
+| ✓ value | The entity is read correctly. |
+| ⚠ unavailable / unknown | The entity exists, but its integration is not delivering data. |
+| ⚠ not numeric / not a time | The entity works but holds the wrong kind of value. |
+| ✕ does not exist | No entity with that ID; check for typos (the field suggests IDs as you type). |
+| ✕ token / connection error | The add-on cannot talk to Home Assistant at all; see the connection test. |
 
 Deye time entities may report `01:00`, `01:00:00` or `100`; all three are understood.
+
+## Theme
+
+The ◐/☀/☾ button in the header switches between automatic (follows your system), light
+and dark. The choice is remembered in your browser.
 
 ## Costs
 
 Each analysis is a single Claude API request containing a few thousand tokens of data.
-With 2 analyses a day the cost is small, but it scales with `analyses_per_day`,
-`history_days` and `claude_effort`. Token usage for every run is shown in the log.
+With 2 analyses a day the cost is small, but it scales with analyses per day, history
+days and effort. Token usage for every run is shown in the log.
