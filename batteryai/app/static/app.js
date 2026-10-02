@@ -699,6 +699,57 @@ async function refreshEconomy() {
 }
 $("economyRange").addEventListener("change", refreshEconomy);
 
+async function refreshMonths() {
+  let data;
+  try {
+    data = await api("api/monthly");
+  } catch (err) {
+    return;
+  }
+  const months = data.months;
+  const cur = data.currency;
+  const money = (v) => (v === null || v === undefined ? "—" : `${fmt(v, 0)} ${cur}`);
+  const label = (m) => new Date(`${m}-15T12:00:00`).toLocaleDateString([], { month: "short", year: "numeric" });
+  const text = css("--muted");
+  const grid = css("--grid");
+  upsertChart("monthChart", {
+    data: {
+      labels: months.map((m) => label(m.month)),
+      datasets: [
+        bar("Consumption / day", css("--series-consumption"), months.map((m) => m.avg_daily_kwh)),
+        bar("PV / day", css("--series-pv"), months.map((m) => m.avg_daily_pv_kwh)),
+        { type: "line", label: "Avg temp", data: months.map((m) => m.temp_avg), yAxisID: "y2", borderColor: css("--series-temp"), backgroundColor: css("--series-temp"), pointRadius: 3, borderWidth: 1.5 },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
+      plugins: { legend: { labels: { color: text, boxWidth: 12 } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: text } },
+        y: { beginAtZero: true, grid: { color: grid }, ticks: { color: text }, title: { display: true, text: "kWh per day", color: text } },
+        y2: { position: "right", grid: { display: false }, ticks: { color: text }, title: { display: true, text: "°", color: text } },
+      },
+    },
+  }, "No data yet.");
+  const header = ["Month", "Days", "Use / day", "Weekday", "Weekend", "PV / day", "Grid", "Temp", "Paid", "Saved"];
+  $("monthTable").replaceChildren(
+    el("tr", {}, ...header.map((h, i) => el("th", { class: i ? "num" : "" }, h))),
+    ...months.slice().reverse().map((m) =>
+      el("tr", {},
+        el("td", { class: "nowrap" }, label(m.month)),
+        el("td", { class: "num" }, m.days),
+        el("td", { class: "num" }, m.avg_daily_kwh === null ? "—" : `${fmt(m.avg_daily_kwh)} kWh`),
+        el("td", { class: "num" }, m.avg_weekday_kwh === null ? "—" : `${fmt(m.avg_weekday_kwh)} kWh`),
+        el("td", { class: "num" }, m.avg_weekend_kwh === null ? "—" : `${fmt(m.avg_weekend_kwh)} kWh`),
+        el("td", { class: "num" }, m.avg_daily_pv_kwh === null ? "—" : `${fmt(m.avg_daily_pv_kwh)} kWh`),
+        el("td", { class: "num" }, `${fmt(m.grid_import_kwh, 0)} kWh`),
+        el("td", { class: "num" }, m.temp_avg === null ? "—" : `${fmt(m.temp_avg)}°`),
+        el("td", { class: "num" }, money(m.paid)),
+        el("td", { class: "num saved" }, m.total_saved === null ? "—" : `${money(m.total_saved)} (${fmt(m.saved_percent, 0)} %)`),
+      )),
+  );
+}
+
 // Logs tab ----------------------------------------------------------------------
 
 let logTimer = null;
@@ -1009,7 +1060,10 @@ function showTab() {
   });
   // Charts created while the dashboard was hidden have no size yet.
   if (tab === "dashboard" || tab === "economy") requestAnimationFrame(() => Object.values(charts).forEach((c) => c?.resize()));
-  if (tab === "economy") refreshEconomy();
+  if (tab === "economy") {
+    refreshEconomy();
+    refreshMonths();
+  }
   if (tab === "logs") {
     refreshStorage();
     refreshLogs(true);

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.5
+
+- Seasons: a monthly summary over all stored history (consumption, PV, grid, appliances,
+  temperature, weekday/weekend averages, cost and savings).
+  - Economy tab → "By month" chart and table.
+  - Claude receives the monthly history and the same weeks of last year.
+  - Local fast searches all history for similar days and prefers the same time of year.
+
 ## 0.4.4
 
 - New BatteryAI logo (battery with a green brain and the sun) in the panel header, the

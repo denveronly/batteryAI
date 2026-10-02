@@ -27,7 +27,7 @@ import local_llm
 import notify
 from collector import UNAVAILABLE, active_program, collect, has_data, parse_hhmm, to_float, weather_details
 from config import DATA_DIR, Options, SettingsError, load_settings, parse_settings, save_settings
-from db import READING_FIELDS, Database, accuracy_report, economy_report
+from db import READING_FIELDS, Database, accuracy_report, economy_report, monthly_summary
 from ha import HAError, HomeAssistant, container_env
 from history import import_history
 
@@ -632,6 +632,13 @@ async def set_program(request: web.Request) -> web.Response:
     await asyncio.sleep(1)  # let the inverter integration report the new state
     await app.record()
     return web.json_response({"actions": actions})
+
+
+@routes.get("/api/monthly")
+async def monthly(request: web.Request) -> web.Response:
+    app = _app(request)
+    rows = await asyncio.to_thread(monthly_summary, app.db, datetime.now(app.tz).date(), app.opts.tariff_at)
+    return web.json_response({"months": rows, "currency": app.opts.tariff_currency})
 
 
 @routes.post("/api/control")

@@ -134,6 +134,11 @@ the outage falls in daylight and PV is expected to cover it.
 
 ## History and database size
 
+All history is kept – nothing is deleted. *History sent to Claude* only limits the daily
+detail in each prediction; every prediction also gets a summary of every recorded month,
+and (after a year) the same weeks of last year, because PV and usage change with the
+season. The Economy tab shows the same monthly summary under *By month*.
+
 Readings are kept in full detail (every few minutes) for *Keep full detail* days (30 by
 default, Settings → History). Older readings are compressed to one row per hour: power,
 SOC and temperature become hourly averages, energy counters keep their last value, so

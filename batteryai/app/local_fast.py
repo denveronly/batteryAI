@@ -64,13 +64,18 @@ def _kwh(profile_hours: dict[int, dict[str, Any]], field: str) -> float:
 
 
 def _similar(profiles: dict[str, dict[str, Any]], is_weekend: bool, temp: float | None, today: str) -> list[str]:
+    target = datetime.fromisoformat(today)
+
     def score(day: str) -> float:
         p = profiles[day]
-        age = (datetime.fromisoformat(today) - datetime.fromisoformat(day)).days
+        when = datetime.fromisoformat(day)
+        age = (target - when).days
+        # Days from the same time of year count as "seasonally close" even a year ago.
+        season_gap = min(abs(target.timetuple().tm_yday - when.timetuple().tm_yday), 366 - abs(target.timetuple().tm_yday - when.timetuple().tm_yday))
         s = 0.0 if p["is_weekend"] == is_weekend else 6.0
         if temp is not None and p["temp"] is not None:
             s += abs(p["temp"] - temp)
-        return s + 0.05 * age
+        return s + 0.03 * min(age, 60) + 0.08 * season_gap
 
     return sorted(profiles, key=score)[:SIMILAR_DAYS]
 
@@ -123,7 +128,8 @@ def _pv_shape(profiles: dict[str, dict[str, Any]]) -> list[float]:
 def forecast(db: Database, opts: Options, snapshot: dict[str, Any], tz: tzinfo) -> dict[str, Any]:
     now = datetime.fromtimestamp(snapshot["ts"], tz)
     tomorrow = (now + timedelta(days=1)).date()
-    profiles = _day_profiles(db, tz, snapshot["ts"] - max(opts.history_days, 14) * 86400)
+    # All stored history: last year's days from the same season are good matches too.
+    profiles = _day_profiles(db, tz, snapshot["ts"] - max(opts.history_days, 400) * 86400)
     weather = snapshot.get("weather") or {}
     tomorrow_weather = weather.get("tomorrow") or {}
     temps = [t for t in (tomorrow_weather.get("temperature"), tomorrow_weather.get("templow")) if t is not None]

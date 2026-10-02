@@ -7,13 +7,13 @@ import json
 import logging
 import re
 import time
-from datetime import datetime, tzinfo
+from datetime import date, datetime, timedelta, tzinfo
 from typing import Any
 
 import anthropic
 
 from config import Options
-from db import Database, accuracy_report
+from db import Database, accuracy_report, all_days, monthly_summary
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,6 +33,8 @@ Each request gives you one JSON document with:
 - schedule: when this plan is applied and when the next run will replace it. Plan for the whole period until the next run.
 - appliances: the listed appliances (id, name, temperature_dependent).
 - daily_history: one row per day with consumption, PV production, grid import, the solar forecast, energy used by each appliance (by id) and the hours it was running, outdoor temperatures, min/max SOC, weekday and weekend flag.
+- monthly_history: one row per calendar month over all recorded history (consumption, PV, grid import, appliances, average temperature, weekday/weekend averages). PV and usage change a lot with the season: use it to judge what is normal for this time of year.
+- same_period_last_year: daily rows from around this date last year, when recorded.
 - hourly_profile: average power per hour of day for the load, PV and each appliance, split into weekdays and weekends, with the average outdoor temperature for that hour.
 - recent_hourly: hourly samples from the last 48 hours.
 - accuracy: your earlier predictions compared with what actually happened, as percentages.
@@ -229,6 +231,8 @@ def build_input(
             "weekend_days": len(weekend_totals),
         },
         "daily_history": history,
+        "monthly_history": monthly_summary(db, now.date()),
+        "same_period_last_year": _same_period_last_year(db, now.date()),
         "hourly_profile": db.hourly_profile(since),
         "recent_hourly": list(hourly.values()),
         "accuracy": report,
@@ -310,6 +314,15 @@ async def analyze(client: anthropic.AsyncAnthropic, opts: Options, data: dict[st
         "input_tokens": response.usage.input_tokens,
         "output_tokens": response.usage.output_tokens,
     }
+
+
+def _same_period_last_year(db: Database, today: date) -> list[dict[str, Any]]:
+    """Daily rows from 10 days before to 10 days after this date one year ago."""
+    centre = today - timedelta(days=365)
+    if all_days(db, today) < 355:
+        return []
+    window = {(centre + timedelta(days=offset)).isoformat() for offset in range(-10, 11)}
+    return [d for d in db.daily_summary(all_days(db, today), today) if d["date"] in window]
 
 
 def _avg(values: list[float]) -> float | None:

@@ -733,3 +733,58 @@ def economy_report(
         else None
     )
     return {"days": result, "totals": totals}
+
+
+def all_days(db: Database, today: date) -> int:
+    """Number of days back to the first stored reading (at least 1)."""
+    first = db.earliest_ts()
+    if first is None:
+        return 1
+    return max(1, (today - datetime.fromtimestamp(first).date()).days + 2)
+
+
+def monthly_summary(db: Database, today: date, tariff_at: Callable[[int], tuple[float, str]] | None = None) -> list[dict[str, Any]]:
+    """One row per calendar month over all stored history: energy, PV, appliances,
+    temperature and (with tariff_at) what was paid and saved."""
+    days = all_days(db, today)
+    daily = db.daily_summary(days, today)
+    economy = {d["date"]: d for d in economy_report(db, days, today, tariff_at)["days"]} if tariff_at else {}
+    months: dict[str, dict[str, Any]] = {}
+    for day in daily:
+        month = months.setdefault(day["date"][:7], {
+            "month": day["date"][:7], "days": 0, "consumption_kwh": 0.0, "pv_kwh": 0.0, "grid_import_kwh": 0.0,
+            "_temps": [], "_weekday": [], "_weekend": [], "appliances_kwh": {},
+            "paid": None, "without_system": None, "total_saved": None, "pv_saved": None,
+        })
+        month["days"] += 1
+        for key in ("consumption_kwh", "pv_kwh", "grid_import_kwh"):
+            month[key] += day[key] or 0
+        if day["temp_avg"] is not None:
+            month["_temps"].append(day["temp_avg"])
+        if day["consumption_kwh"]:
+            month["_weekend" if day["is_weekend"] else "_weekday"].append(day["consumption_kwh"])
+        for app_id, entry in day["appliances"].items():
+            month["appliances_kwh"][app_id] = month["appliances_kwh"].get(app_id, 0.0) + entry["kwh"]
+        money = economy.get(day["date"])
+        if money and money["paid"] is not None:
+            for key in ("paid", "without_system", "total_saved", "pv_saved"):
+                month[key] = (month[key] or 0.0) + (money[key] or 0.0)
+
+    out = []
+    for month in months.values():
+        temps, weekday, weekend = month.pop("_temps"), month.pop("_weekday"), month.pop("_weekend")
+        month["temp_avg"] = round(sum(temps) / len(temps), 1) if temps else None
+        month["avg_weekday_kwh"] = round(sum(weekday) / len(weekday), 1) if weekday else None
+        month["avg_weekend_kwh"] = round(sum(weekend) / len(weekend), 1) if weekend else None
+        month["avg_daily_kwh"] = round(month["consumption_kwh"] / month["days"], 1) if month["days"] else None
+        month["avg_daily_pv_kwh"] = round(month["pv_kwh"] / month["days"], 1) if month["days"] else None
+        for key in ("consumption_kwh", "pv_kwh", "grid_import_kwh", "paid", "without_system", "total_saved", "pv_saved"):
+            if month[key] is not None:
+                month[key] = round(month[key], 2)
+        month["appliances_kwh"] = {k: round(v, 1) for k, v in month["appliances_kwh"].items()}
+        month["saved_percent"] = (
+            round(month["total_saved"] / month["without_system"] * 100, 1)
+            if month["total_saved"] is not None and month["without_system"] else None
+        )
+        out.append(month)
+    return out
