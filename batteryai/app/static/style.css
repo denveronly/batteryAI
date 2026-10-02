@@ -22,6 +22,9 @@
   --series-ev: #6f42c1;
   --series-temp: #7a8494;
   --series-pv: #e8a200;
+  --series-app4: #7c5c2e;
+  --series-app5: #2f6fb3;
+  --series-app6: #8a8f20;
   --weekend: rgba(99, 112, 131, 0.12);
   --grid: rgba(99, 112, 131, 0.18);
   color-scheme: light;
@@ -52,6 +55,9 @@
     --series-ev: #a37ef0;
     --series-temp: #a3adbb;
     --series-pv: #f5c542;
+    --series-app4: #c49a5c;
+    --series-app5: #6fa8e8;
+    --series-app6: #c8cd5a;
     --weekend: rgba(148, 160, 178, 0.12);
     --grid: rgba(148, 160, 178, 0.16);
     color-scheme: dark;
@@ -82,6 +88,9 @@
   --series-ev: #a37ef0;
   --series-temp: #a3adbb;
   --series-pv: #f5c542;
+  --series-app4: #c49a5c;
+  --series-app5: #6fa8e8;
+  --series-app6: #c8cd5a;
   --weekend: rgba(148, 160, 178, 0.12);
   --grid: rgba(148, 160, 178, 0.16);
   color-scheme: dark;
@@ -321,3 +330,13 @@ td.nowrap { white-space: nowrap; }
 .progress > div { height: 100%; background: var(--accent); }
 .form-grid > label, label { min-width: 0; }
 label select, label input:not([type="checkbox"]) { width: 100%; max-width: 100%; min-width: 0; }
+
+/* Appliance editor -------------------------------------------------------------- */
+.appliance-row { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.appliance-fields { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(200px, 2fr) auto auto; gap: 8px 12px; align-items: end; }
+.appliance-buttons { display: flex; gap: 6px; }
+.appliance-row .result { margin-top: 6px; }
+button.remove { font-size: 18px; line-height: 1; padding: 6px 12px; }
+.temp-toggle { padding-bottom: 8px; color: var(--muted); font-size: 13px; }
+.temp-toggle input { width: auto; }
+@media (max-width: 760px) { .appliance-fields { grid-template-columns: 1fr; } }

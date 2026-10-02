@@ -25,9 +25,6 @@ SENSOR_KEYS = (
     "load_power_sensor",
     "today_consumption_sensor",
     "weather_entity",
-    "heat_pump_power_sensor",
-    "boiler_power_sensor",
-    "ev_power_sensor",
     "pv_energy_sensor",
     "pv_power_sensor",
     "grid_import_sensor",
@@ -44,6 +41,35 @@ class DeyeProgram:
     time_entity: str = ""
     soc_entity: str = ""
     charge_entity: str = ""  # optional grid-charge switch of the program
+
+
+@dataclass
+class Appliance:
+    """A device with its own power sensor (W), e.g. a heat pump, boiler or EV charger."""
+
+    id: str  # stable key used in the database; kept when the appliance is renamed
+    name: str
+    entity: str = ""
+    temperature_dependent: bool = False  # heats or cools: energy follows outdoor temperature
+
+
+MAX_APPLIANCES = 12
+# Up to 0.4.0 there were three fixed appliance settings; they become the first entries.
+LEGACY_APPLIANCES = (
+    ("heat_pump", "Heat pump", "heat_pump_power_sensor", True),
+    ("boiler", "Boiler", "boiler_power_sensor", False),
+    ("ev", "EV charger", "ev_power_sensor", False),
+)
+
+
+def appliance_id(name: str, taken: set[str]) -> str:
+    base = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")[:24] or "appliance"
+    if base[0].isdigit():
+        base = "a_" + base
+    candidate, n = base, 2
+    while candidate in taken:
+        candidate, n = f"{base}_{n}", n + 1
+    return candidate
 
 
 @dataclass
@@ -66,9 +92,7 @@ class Options:
     load_power_sensor: str = ""
     today_consumption_sensor: str = ""
     weather_entity: str = ""
-    heat_pump_power_sensor: str = ""
-    boiler_power_sensor: str = ""
-    ev_power_sensor: str = ""
+    appliances: list[Appliance] = field(default_factory=list)
     pv_energy_sensor: str = ""
     pv_power_sensor: str = ""
     grid_import_sensor: str = ""
@@ -105,9 +129,6 @@ class Options:
             "outages": self.outages_sensor,
             "load_power": self.load_power_sensor,
             "today_consumption": self.today_consumption_sensor,
-            "heat_pump_power": self.heat_pump_power_sensor,
-            "boiler_power": self.boiler_power_sensor,
-            "ev_power": self.ev_power_sensor,
             "pv_today": self.pv_energy_sensor,
             "pv_power": self.pv_power_sensor,
             "grid_import_today": self.grid_import_sensor,
@@ -270,6 +291,34 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
             continue
         opts.tariff_offpeak_windows.append("-".join(p.zfill(5) for p in parts))
 
+    items = raw.get("appliances")
+    if items is None:
+        items = [asdict(a) for a in base.appliances]
+    if not items and any(raw.get(key) for _, _, key, _ in LEGACY_APPLIANCES):
+        items = [
+            {"id": app_id, "name": name, "entity": raw[key], "temperature_dependent": temp}
+            for app_id, name, key, temp in LEGACY_APPLIANCES
+            if raw.get(key)
+        ]
+    opts.appliances = []
+    taken: set[str] = set()
+    for index, item in enumerate(items[:MAX_APPLIANCES] if isinstance(items, list) else []):
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()[:40]
+        entity_id = entity(f"appliances.{index}.entity", str(item.get("entity") or "").strip())
+        if not name and not entity_id:
+            continue  # an empty row added with + and never filled in
+        if not name:
+            errors[f"appliances.{index}.name"] = "give the appliance a name"
+        app_id = str(item.get("id") or "").strip()
+        if not re.match(r"^[a-z][a-z0-9_]{0,40}$", app_id) or app_id in taken:
+            app_id = appliance_id(name, taken)
+        taken.add(app_id)
+        opts.appliances.append(Appliance(
+            id=app_id, name=name, entity=entity_id, temperature_dependent=bool(item.get("temperature_dependent")),
+        ))
+
     services = raw.get("notify_services", base.notify_services) or []
     if isinstance(services, str):
         services = services.split(",")
@@ -338,6 +387,12 @@ def _lenient(raw: dict[str, Any]) -> Options:
                 opts = parse_settings({item.name: raw[item.name]}, opts)
             except SettingsError:
                 pass
+    legacy = {key: raw[key] for _, _, key, _ in LEGACY_APPLIANCES if key in raw}
+    if legacy and "appliances" not in raw:
+        try:
+            opts = parse_settings(legacy, opts)
+        except SettingsError:
+            pass
     try:
         opts = parse_settings({"deye_programs": raw.get("deye_programs") or []}, opts)
     except SettingsError:

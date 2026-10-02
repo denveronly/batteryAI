@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import re
@@ -23,25 +24,26 @@ RECENT_HOURS = 48
 # Adaptive thinking counts toward max_tokens; stream so a long answer can't hit the HTTP timeout.
 MAX_TOKENS = 64000
 
-SYSTEM_PROMPT = """You are BatteryAI, an energy analyst for a home in Home Assistant with solar panels, a battery and a Deye hybrid inverter. The house is heated by a heat pump when it gets cold, and may also have an electric boiler (water heater) and an EV charger.
+SYSTEM_PROMPT = """You are BatteryAI, an energy analyst for a home in Home Assistant with solar panels, a battery and a Deye hybrid inverter. The owner lists the household's big appliances (for example a heat pump, an electric boiler or an EV charger), each with its own power sensor; appliances marked temperature_dependent heat or cool the house, so their use follows the outdoor temperature.
 
 Each request gives you one JSON document with:
-- current: the latest values: battery SOC, PV power and load power right now (pv_surplus_w > 0 means the battery is being charged by the sun), solar forecast for today and tomorrow, total load power (W), today's consumption counter (kWh), heat pump / boiler / EV power (W), outdoor temperature, the probable-outages sensor with its attributes, local time and weekday.
+- current: the latest values: battery SOC, PV power and load power right now (pv_surplus_w > 0 means the battery is being charged by the sun), solar forecast for today and tomorrow, total load power (W), today's consumption counter (kWh), the power of each listed appliance (W), outdoor temperature, the probable-outages sensor with its attributes, local time and weekday.
 - weather: the current condition and the forecast for today and tomorrow (daily and, when available, hourly temperatures).
 - deye_programs: the inverter's six time-of-use programs. Each has a range (already worked out for you, e.g. "23:15-05:00", which crosses midnight) during which the inverter keeps the battery at or above the program's SOC capacity. "time" is only the value of the program's time setting; always reason with "range". When a program has grid_charge ("on"/"off"), that is its grid-charge switch: when on, the inverter charges the battery from the grid up to the program's SOC.
 - schedule: when this plan is applied and when the next run will replace it. Plan for the whole period until the next run.
-- daily_history: one row per day with consumption, PV production, grid import, the solar forecast, energy used by each appliance and the hours it was running, outdoor temperatures, min/max SOC, weekday and weekend flag.
-- hourly_profile: average power per hour of day for the load and each appliance, split into weekdays and weekends, with the average outdoor temperature for that hour.
+- appliances: the listed appliances (id, name, temperature_dependent).
+- daily_history: one row per day with consumption, PV production, grid import, the solar forecast, energy used by each appliance (by id) and the hours it was running, outdoor temperatures, min/max SOC, weekday and weekend flag.
+- hourly_profile: average power per hour of day for the load, PV and each appliance, split into weekdays and weekends, with the average outdoor temperature for that hour.
 - recent_hourly: hourly samples from the last 48 hours.
 - accuracy: your earlier predictions compared with what actually happened, as percentages.
 - tuning: the owner's settings for planning (safety margin, allowed SOC range).
 - tariff: grid prices per kWh with currency; off-peak windows are cheap, every other time is peak.
 - user_notes: optional instructions from the owner.
 
-Weekends usually use less energy than weekdays in this home. The heat pump runs more when it is cold, so relate heat pump energy to outdoor temperature in the history and use tomorrow's forecast temperatures to predict it. Check every assumption against the data instead of assuming it.
+Weekends usually use less energy than weekdays in this home. For temperature-dependent appliances, relate their energy to the outdoor temperature in the history and use tomorrow's forecast temperatures to predict it. Check every assumption against the data instead of assuming it.
 
 Your tasks:
-1. Predict consumption for the rest of today and for tomorrow, and when each appliance (heat pump, boiler, EV) will run and how much energy it will use. Use weekday/weekend patterns, temperature, the solar forecast and your past accuracy (correct systematic over- or under-prediction).
+1. Predict consumption for the rest of today and for tomorrow, and when each listed appliance will run and how much energy it will use (refer to appliances by their id). Use weekday/weekend patterns, temperature, the solar forecast and your past accuracy (correct systematic over- or under-prediction).
 2. Give an hourly forecast for tomorrow (average W per hour for total load and each appliance).
 3. Judge the outage risk from the outages sensor and make sure the battery will hold enough charge to cover the expected outage windows.
 4. Propose an SOC capacity for each Deye program. Plan for the predicted consumption increased by tuning.prediction_margin_percent, keep every SOC between tuning.min_soc_percent and tuning.max_soc_percent, balance outage backup, solar self-consumption and grid charging, and explain every change. Program times are fixed by the owner and are never changed by BatteryAI: return each program's current time unchanged and do not suggest moving times.
@@ -49,9 +51,8 @@ Your tasks:
 6. Minimise what is paid for grid energy: charge from the grid in off-peak windows rather than peak, use PV first, and cover peak-time load from the battery. Estimate tomorrow's grid cost in the tariff currency.
 7. Give short, practical recommendations.
 
-Use the units the sensors report (W for power, kWh for energy, % for SOC). If data is missing, stale or implausible, say so in the summary and lower your confidence; never invent values. If an appliance sensor is not configured, return 0 for it."""
+Use the units the sensors report (W for power, kWh for energy, % for SOC). If data is missing, stale or implausible, say so in the summary and lower your confidence; never invent values. """
 
-APPLIANCE_NAMES = ["heat_pump", "boiler", "ev"]
 
 RESULT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -70,7 +71,7 @@ RESULT_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "appliance": {"type": "string", "enum": APPLIANCE_NAMES},
+                    "appliance": {"type": "string"},
                     "expected_kwh_tomorrow": {"type": "number"},
                     "expected_usage_windows": {"type": "string"},
                     "reason": {"type": "string"},
@@ -86,11 +87,8 @@ RESULT_SCHEMA: dict[str, Any] = {
                 "properties": {
                     "hour": {"type": "integer"},
                     "load_w": {"type": "number"},
-                    "heat_pump_w": {"type": "number"},
-                    "boiler_w": {"type": "number"},
-                    "ev_w": {"type": "number"},
                 },
-                "required": ["hour", "load_w", "heat_pump_w", "boiler_w", "ev_w"],
+                "required": ["hour", "load_w"],
                 "additionalProperties": False,
             },
         },
@@ -140,6 +138,19 @@ def supports_effort(model: str) -> bool:
     return not NO_EFFORT_MODELS.search(model)
 
 
+def result_schema(opts: Options) -> dict[str, Any]:
+    """RESULT_SCHEMA with one "<id>_w" column per configured appliance in the hourly forecast."""
+    schema = copy.deepcopy(RESULT_SCHEMA)
+    hourly = schema["properties"]["hourly_forecast_tomorrow"]["items"]
+    appliance_enum = [a.id for a in opts.appliances if a.entity]
+    for app_id in appliance_enum:
+        hourly["properties"][f"{app_id}_w"] = {"type": "number"}
+        hourly["required"].append(f"{app_id}_w")
+    if appliance_enum:
+        schema["properties"]["appliance_forecast"]["items"]["properties"]["appliance"] = {"type": "string", "enum": appliance_enum}
+    return schema
+
+
 class AnalysisError(Exception):
     pass
 
@@ -162,9 +173,7 @@ def build_input(
             "soc": row["battery_soc"],
             "load_w": row["load_power"],
             "pv_w": row["pv_power"],
-            "heat_pump_w": row["heat_pump_power"],
-            "boiler_w": row["boiler_power"],
-            "ev_w": row["ev_power"],
+            "appliances_w": row["appliances"],
             "consumption_today_kwh": row["today_consumption"],
             "outdoor_temp": row["outdoor_temp"],
             "target_soc": row["target_soc"],
@@ -191,9 +200,7 @@ def build_input(
             "consumption_today_kwh": snapshot["today_consumption"],
             "pv_today_kwh": snapshot.get("pv_today"),
             "grid_import_today_kwh": snapshot.get("grid_import_today"),
-            "heat_pump_power_w": snapshot.get("heat_pump_power"),
-            "boiler_power_w": snapshot.get("boiler_power"),
-            "ev_power_w": snapshot.get("ev_power"),
+            "appliances_w": snapshot.get("appliances") or {},
             "outdoor_temp": snapshot.get("outdoor_temp"),
             "units": snapshot["units"],
             "outages_state": snapshot["outages_state"],
@@ -201,12 +208,10 @@ def build_input(
             "active_deye_program": snapshot["active_program_slot"],
             "missing_entities": snapshot["missing_entities"],
         },
-        "configured_appliances": [
-            name for name, entity in (
-                ("heat_pump", opts.heat_pump_power_sensor),
-                ("boiler", opts.boiler_power_sensor),
-                ("ev", opts.ev_power_sensor),
-            ) if entity
+        "appliances": [
+            {"id": a.id, "name": a.name, "temperature_dependent": a.temperature_dependent}
+            for a in opts.appliances
+            if a.entity
         ],
         "weather": {key: value for key, value in weather.items() if key != "outdoor_temp"},
         "deye_programs": snapshot["deye_programs"],
@@ -244,7 +249,7 @@ async def analyze(client: anthropic.AsyncAnthropic, opts: Options, data: dict[st
         f"Analyse this data and produce the plan. Write all text fields in {opts.response_language}.\n\n"
         + json.dumps(data, ensure_ascii=False, default=str)
     )
-    output_config: dict[str, Any] = {"format": {"type": "json_schema", "schema": RESULT_SCHEMA}}
+    output_config: dict[str, Any] = {"format": {"type": "json_schema", "schema": result_schema(opts)}}
     if supports_effort(opts.claude_model):
         output_config["effort"] = opts.claude_effort
     request: dict[str, Any] = {

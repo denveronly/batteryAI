@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.1
+
+- Appliances are a list you manage in Settings → Appliances: custom name, power sensor
+  (W or kW), "depends on outdoor temperature", with + / − to add and remove. They appear
+  on the dashboard (tiles, power and daily charts, prediction card) and in every
+  prediction engine. The former heat pump / boiler / EV settings and their recorded
+  history are carried over; renaming an appliance keeps its history.
+
 ## 0.4.0
 
 - Prediction engine selection (Settings → Prediction engine, and the header dropdown):

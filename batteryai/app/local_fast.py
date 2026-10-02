@@ -1,8 +1,8 @@
 """Local fast engine: statistical forecast + rule-based SOC planner (no LLM, light on CPU).
 
 Forecast: tomorrow's hourly load is the average of the most similar recorded days (same
-weekday/weekend type, closest outdoor temperature, recent days preferred). Heat pump use
-is scaled with a temperature regression. PV is the recorded PV power shape scaled to the
+weekday/weekend type, closest outdoor temperature, recent days preferred). Appliances
+marked temperature-dependent (heat pump, AC) are scaled with a temperature regression. PV is the recorded PV power shape scaled to the
 solar forecast.
 
 Planner: for each Deye program range it estimates how much energy the battery must hold
@@ -21,7 +21,6 @@ from collector import program_ranges
 from config import WEEKDAYS, Options
 from db import Database
 
-APPLIANCES = {"heat_pump": "heat_pump_power", "boiler": "boiler_power", "ev": "ev_power"}
 SIMILAR_DAYS = 5
 ACTIVE_W = 200
 OUTAGE_OFF_STATES = {"off", "0", "false", "none", "no", "unknown", "unavailable", ""}
@@ -33,8 +32,8 @@ def _mean(values: list[float]) -> float | None:
 
 
 def _day_profiles(db: Database, tz: tzinfo, since_ts: int) -> dict[str, dict[str, Any]]:
-    """date -> {"weekday", "is_weekend", "hours": {h: {field: avg}}, "temp"}"""
-    fields = ["load_power", "pv_power", "outdoor_temp", *APPLIANCES.values()]
+    """date -> {"weekday", "is_weekend", "hours": {h: {field: avg}}, "temp"}; appliances as "app:<id>"."""
+    fields = ["load_power", "pv_power", "outdoor_temp"]
     buckets: dict[str, dict[int, dict[str, list[float]]]] = {}
     meta: dict[str, dict[str, Any]] = {}
     for row in db.readings_since(since_ts):
@@ -44,6 +43,9 @@ def _day_profiles(db: Database, tz: tzinfo, since_ts: int) -> dict[str, dict[str
         for f in fields:
             if row[f] is not None:
                 hour[f].append(row[f])
+        for app_id, watts in row["appliances"].items():
+            if watts is not None:
+                hour.setdefault(f"app:{app_id}", []).append(watts)
     profiles = {}
     for day, hours in buckets.items():
         averaged = {h: {f: _mean(v) for f, v in values.items()} for h, values in hours.items()}
@@ -73,12 +75,12 @@ def _similar(profiles: dict[str, dict[str, Any]], is_weekend: bool, temp: float 
     return sorted(profiles, key=score)[:SIMILAR_DAYS]
 
 
-def _heat_pump_regression(profiles: dict[str, dict[str, Any]]) -> tuple[float, float] | None:
-    """Daily heat pump kWh = a + b * average temperature (least squares)."""
+def _temperature_regression(profiles: dict[str, dict[str, Any]], field: str) -> tuple[float, float] | None:
+    """Daily appliance kWh = a + b * average temperature (least squares)."""
     points = [
-        (p["temp"], _kwh(p["hours"], "heat_pump_power"))
+        (p["temp"], _kwh(p["hours"], field))
         for p in profiles.values()
-        if p["temp"] is not None and any(h.get("heat_pump_power") is not None for h in p["hours"].values())
+        if p["temp"] is not None and any(h.get(field) is not None for h in p["hours"].values())
     ]
     if len(points) < 5:
         return None
@@ -129,30 +131,37 @@ def forecast(db: Database, opts: Options, snapshot: dict[str, Any], tz: tzinfo) 
     tomorrow_weekend = WEEKDAYS[tomorrow.weekday()] in opts.weekend_days
 
     similar = _similar(profiles, tomorrow_weekend, tomorrow_temp, now.date().isoformat())
+    appliances = [a for a in opts.appliances if a.entity]
     hourly = []
     for h in range(24):
         entry = {"hour": h}
-        for key, field in (("load_w", "load_power"), *((f"{k}_w", f) for k, f in APPLIANCES.items())):
+        for key, field in (("load_w", "load_power"), *((f"{a.id}_w", f"app:{a.id}") for a in appliances)):
             entry[key] = round(_mean([profiles[d]["hours"].get(h, {}).get(field) for d in similar]) or 0)
         hourly.append(entry)
 
-    weather_note = "No temperature data; heat pump use taken from similar days."
-    regression = _heat_pump_regression(profiles) if opts.heat_pump_power_sensor else None
-    if regression and tomorrow_temp is not None:
+    notes = []
+    for appliance in appliances:
+        if not appliance.temperature_dependent or tomorrow_temp is None:
+            continue
+        key = f"{appliance.id}_w"
+        regression = _temperature_regression(profiles, f"app:{appliance.id}")
+        if not regression:
+            continue
         a, b = regression
         expected = max(0.0, a + b * tomorrow_temp)
-        current = sum(e["heat_pump_w"] for e in hourly) / 1000
+        current = sum(e[key] for e in hourly) / 1000
         if current > 0.1:
             factor = expected / current
             for e in hourly:
-                new_hp = e["heat_pump_w"] * factor
-                e["load_w"] = round(max(0, e["load_w"] + new_hp - e["heat_pump_w"]))
-                e["heat_pump_w"] = round(new_hp)
-        weather_note = (
-            f"Tomorrow about {tomorrow_temp:.1f}°: the heat pump is expected to use {expected:.1f} kWh "
-            f"({b:+.2f} kWh per degree in your history)."
-        )
-    elif tomorrow_temp is not None:
+                new_w = e[key] * factor
+                e["load_w"] = round(max(0, e["load_w"] + new_w - e[key]))  # the appliance is part of the load
+                e[key] = round(new_w)
+        notes.append(f"{appliance.name} is expected to use {expected:.1f} kWh ({b:+.2f} kWh per degree in your history)")
+    if tomorrow_temp is None:
+        weather_note = "No temperature data; appliance use taken from similar days."
+    elif notes:
+        weather_note = f"Tomorrow about {tomorrow_temp:.1f}°: " + "; ".join(notes) + "."
+    else:
         weather_note = f"Tomorrow about {tomorrow_temp:.1f}°; days with similar temperature were used."
 
     pv_total = snapshot.get("tomorrow_forecast") or 0
@@ -276,23 +285,20 @@ def analyze(db: Database, opts: Options, snapshot: dict[str, Any], tz: tzinfo) -
     p = plan(opts, snapshot, fc)
     hourly = fc["hourly"]
     appliance_forecast = []
-    for name, sensor in (("heat_pump", opts.heat_pump_power_sensor), ("boiler", opts.boiler_power_sensor), ("ev", opts.ev_power_sensor)):
-        if not sensor:
-            continue
-        key = f"{name}_w"
+    recommendations = []
+    for appliance in (a for a in opts.appliances if a.entity):
+        key = f"{appliance.id}_w"
         active = [e["hour"] for e in hourly if e[key] >= ACTIVE_W]
         appliance_forecast.append({
-            "appliance": name,
+            "appliance": appliance.id,
             "expected_kwh_tomorrow": round(sum(e[key] for e in hourly) / 1000, 1),
             "expected_usage_windows": _windows(active),
-            "reason": "Average of the most similar recorded days" + (" adjusted for temperature." if name == "heat_pump" else "."),
+            "reason": "Average of the most similar recorded days"
+            + (", adjusted for temperature." if appliance.temperature_dependent else "."),
         })
-
-    recommendations = []
-    for a in appliance_forecast:
-        peak_hours = [e["hour"] for e in hourly if e[f"{a['appliance']}_w"] >= ACTIVE_W and opts.tariff_at(e["hour"] * 60 + 30)[1] == "peak"]
-        if a["appliance"] in ("ev", "boiler") and peak_hours:
-            recommendations.append(f"Move {a['appliance'].replace('_', ' ')} use from peak hours ({_windows(peak_hours)}) to off-peak.")
+        peak_hours = [h for h in active if opts.tariff_at(h * 60 + 30)[1] == "peak"]
+        if peak_hours and not appliance.temperature_dependent:
+            recommendations.append(f"If possible, move {appliance.name} from peak hours ({_windows(peak_hours)}) to off-peak.")
     if p["pv_short"]:
         recommendations.append("PV will not cover tomorrow's use: charge from the grid in off-peak hours.")
     else:

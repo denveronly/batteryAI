@@ -66,6 +66,10 @@ async def import_history(
     if opts.weather_entity:
         attribute = "temperature" if opts.weather_entity.startswith("weather.") else None
         entities["outdoor_temp"] = (opts.weather_entity, attribute)
+    appliance_keys = {f"appliance:{a.id}": a.id for a in opts.appliances if a.entity}
+    for appliance in opts.appliances:
+        if appliance.entity:
+            entities[f"appliance:{appliance.id}"] = (appliance.entity, None)
     for program in opts.deye_programs:
         if program.time_entity:
             entities[f"program_{program.slot}_time"] = (program.time_entity, None)
@@ -79,7 +83,7 @@ async def import_history(
     for name, (entity_id, attribute) in entities.items():
         progress["current"] = entity_id
         try:
-            if name in POWER_FIELDS:
+            if name in POWER_FIELDS or name in appliance_keys:
                 units[name] = ((await ha.fetch_state(entity_id)).get("attributes") or {}).get("unit_of_measurement")
             series[name] = Series(await _fetch(ha, entity_id, start, end, attribute))
         except HAError as err:
@@ -108,6 +112,9 @@ async def import_history(
                 continue
             number = to_float(value(name, ts))
             snap[name] = to_watts(number, units.get(name)) if name in POWER_FIELDS else number
+        snap["appliances"] = {
+            app_id: to_watts(to_float(value(key, ts)), units.get(key)) for key, app_id in appliance_keys.items()
+        }
         programs = [
             {
                 "slot": p.slot,

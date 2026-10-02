@@ -402,11 +402,11 @@ async def status(request: web.Request) -> web.Response:
             },
             "sensors": opts.sensor_map(),
             "tariff": {**opts.tariff_dict(), "now": opts.tariff_at(datetime.now(app.tz).hour * 60 + datetime.now(app.tz).minute)[1]},
-            "appliances": {
-                "heat_pump_power": bool(opts.heat_pump_power_sensor),
-                "boiler_power": bool(opts.boiler_power_sensor),
-                "ev_power": bool(opts.ev_power_sensor),
-            },
+            "appliances": [
+                {"id": a.id, "name": a.name, "temperature_dependent": a.temperature_dependent}
+                for a in opts.appliances
+                if a.entity
+            ],
             "weather": app.last_snapshot.get("weather") if app.last_snapshot else None,
             "control": {
                 "mode": app.control["mode"],
@@ -869,7 +869,7 @@ async def predicted_load(request: web.Request) -> web.Response:
             except (KeyError, TypeError, ValueError):
                 continue
             if ts >= since:
-                points[ts] = {"ts": ts, "load_w": item.get("load_w"), "heat_pump_w": item.get("heat_pump_w")}
+                points[ts] = {"ts": ts, "load_w": item.get("load_w")}
     return web.json_response([points[ts] for ts in sorted(points)])
 
 

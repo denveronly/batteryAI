@@ -61,6 +61,7 @@ NEW_READING_COLUMNS = {
     "control_mode": "TEXT",
     "source": "TEXT DEFAULT 'live'",
     "resolution_s": "INTEGER",
+    "appliances": "TEXT",  # JSON {appliance id: W}; replaces the three fixed columns above
 }
 NEW_ANALYSIS_COLUMNS = {"actions_json": "TEXT"}
 
@@ -70,9 +71,7 @@ READING_FIELDS = (
     "tomorrow_forecast",
     "today_consumption",
     "load_power",
-    "heat_pump_power",
-    "boiler_power",
-    "ev_power",
+    "appliances",
     "outdoor_temp",
     "pv_today",
     "grid_import_today",
@@ -82,8 +81,7 @@ READING_FIELDS = (
 )
 # Older readings are compressed to one row per hour (see compress_before).
 HOURLY = 3600
-AVERAGED = ("battery_soc", "load_power", "heat_pump_power", "boiler_power", "ev_power", "outdoor_temp", "pv_power")
-APPLIANCES = ("load_power", "heat_pump_power", "boiler_power", "ev_power")
+AVERAGED = ("battery_soc", "load_power", "outdoor_temp", "pv_power")
 
 # Daily energy counters may still show yesterday's total for a few minutes after midnight.
 DAILY_RESET_GRACE_MINUTES = 15
@@ -115,6 +113,19 @@ class Database:
                 if name == "load_power":
                     # Up to 0.2.0 the "today load" setting held a load power sensor (W).
                     self._conn.execute("UPDATE readings SET load_power = today_load")
+                if name == "appliances" and {"heat_pump_power", "boiler_power", "ev_power"} <= existing:
+                    # Up to 0.4.0 three fixed appliances had their own columns.
+                    rows = self._conn.execute(
+                        "SELECT id, heat_pump_power, boiler_power, ev_power FROM readings "
+                        "WHERE heat_pump_power IS NOT NULL OR boiler_power IS NOT NULL OR ev_power IS NOT NULL"
+                    ).fetchall()
+                    self._conn.executemany(
+                        "UPDATE readings SET appliances = ? WHERE id = ?",
+                        [
+                            (json.dumps({k: v for k, v in (("heat_pump", r[1]), ("boiler", r[2]), ("ev", r[3])) if v is not None}), r[0])
+                            for r in rows
+                        ],
+                    )
         existing = columns("analyses")
         for name, kind in NEW_ANALYSIS_COLUMNS.items():
             if name not in existing:
@@ -144,7 +155,7 @@ class Database:
             local.hour * 60 + local.minute,
             snap["weekday"],
             int(snap["is_weekend"]),
-            *(snap.get(field) for field in READING_FIELDS),
+            *(_encode(field, snap.get(field)) for field in READING_FIELDS),
             snap.get("outages_state"),
             json.dumps(snap.get("outages_attrs") or {}, default=str, ensure_ascii=False),
             json.dumps(snap.get("deye_programs") or []),
@@ -238,6 +249,14 @@ class Database:
                 for name in AVERAGED:
                     values = [r[name] for r in items if r[name] is not None]
                     merged[name] = sum(values) / len(values) if values else None
+                per_appliance: dict[str, list[float]] = {}
+                for r in items:
+                    for app_id, watts in (json.loads(r["appliances"]) if r.get("appliances") else {}).items():
+                        if watts is not None:
+                            per_appliance.setdefault(app_id, []).append(watts)
+                merged["appliances"] = (
+                    json.dumps({k: sum(v) / len(v) for k, v in per_appliance.items()}) if per_appliance else None
+                )
                 merged["outages_attrs"] = None
                 merged["resolution_s"] = HOURLY
                 merged["source"] = "hourly"
@@ -274,12 +293,13 @@ class Database:
         return len(updates)
 
     def readings_since(self, since_ts: int) -> list[dict[str, Any]]:
-        return self._query(
+        """Readings from since_ts on; "appliances" is a dict {appliance id: W}."""
+        return _decode_appliances(self._query(
             "SELECT ts, local_date, minute_of_day, weekday, is_weekend, "
             + ", ".join(READING_FIELDS)
             + ", outages_state, target_soc FROM readings WHERE ts >= ? ORDER BY ts",
             (since_ts,),
-        )
+        ))
 
     def latest_reading(self) -> dict[str, Any] | None:
         rows = self._query("SELECT * FROM readings ORDER BY ts DESC LIMIT 1")
@@ -287,6 +307,7 @@ class Database:
             return None
         row = rows[0]
         row["deye_programs"] = json.loads(row["deye_programs"] or "[]")
+        _decode_appliances([row])
         if row["outages_attrs"] is None:  # unchanged since an earlier reading
             earlier = self._query(
                 "SELECT outages_attrs FROM readings WHERE outages_attrs IS NOT NULL ORDER BY ts DESC LIMIT 1"
@@ -303,12 +324,12 @@ class Database:
 
     def daily_summary(self, days: int, today: date) -> list[dict[str, Any]]:
         first = (today - timedelta(days=days - 1)).isoformat()
-        rows = self._query(
+        rows = _decode_appliances(self._query(
             "SELECT ts, local_date, minute_of_day, weekday, is_weekend, "
             + ", ".join(READING_FIELDS)
             + ", outages_state FROM readings WHERE local_date >= ? ORDER BY ts",
             (first,),
-        )
+        ))
         days_out: dict[str, dict[str, Any]] = {}
         hourly_power: dict[tuple[str, str, int], list[float]] = {}
         for index, row in enumerate(rows):
@@ -328,7 +349,8 @@ class Database:
                     "temp_max": None,
                     "_temps": [],
                     "peak_load_w": None,
-                    **{f"{name.removesuffix('_power')}_kwh": 0.0 for name in APPLIANCES},
+                    "load_kwh": 0.0,
+                    "appliances": {},  # id -> {"kwh", "active_hours"}
                     "outage_states": [],
                     "samples": 0,
                 }
@@ -354,10 +376,14 @@ class Database:
             if index + 1 < len(rows):
                 gap = min(rows[index + 1]["ts"] - row["ts"], max(MAX_INTEGRATION_GAP, row["resolution_s"] or 0))
                 hour = row["minute_of_day"] // 60
-                for name in APPLIANCES:
-                    if row[name] is not None:
-                        day[f"{name.removesuffix('_power')}_kwh"] += row[name] * gap / 3_600_000
-                        hourly_power.setdefault((row["local_date"], name, hour), []).append(row[name])
+                if row["load_power"] is not None:
+                    day["load_kwh"] += row["load_power"] * gap / 3_600_000
+                for app_id, watts in row["appliances"].items():
+                    if watts is None:
+                        continue
+                    entry = day["appliances"].setdefault(app_id, {"kwh": 0.0, "active_hours": []})
+                    entry["kwh"] += watts * gap / 3_600_000
+                    hourly_power.setdefault((row["local_date"], app_id, hour), []).append(watts)
 
             state = row["outages_state"]
             if state and state not in day["outage_states"] and len(day["outage_states"]) < 10:
@@ -366,31 +392,43 @@ class Database:
         for day in days_out.values():
             temps = day.pop("_temps")
             day["temp_avg"] = round(sum(temps) / len(temps), 1) if temps else None
-            for name in APPLIANCES:
-                key = f"{name.removesuffix('_power')}_kwh"
-                day[key] = round(day[key], 2)
-                active = sorted(
+            day["load_kwh"] = round(day["load_kwh"], 2)
+            for app_id, entry in day["appliances"].items():
+                entry["kwh"] = round(entry["kwh"], 2)
+                entry["active_hours"] = sorted(
                     hour
                     for (date_key, appliance, hour), values in hourly_power.items()
-                    if date_key == day["date"] and appliance == name and sum(values) / len(values) >= ACTIVE_POWER_W
+                    if date_key == day["date"] and appliance == app_id and sum(values) / len(values) >= ACTIVE_POWER_W
                 )
-                if name != "load_power":
-                    day[f"{name.removesuffix('_power')}_active_hours"] = active
         return list(days_out.values())
 
     def hourly_profile(self, since_ts: int) -> list[dict[str, Any]]:
-        """Average power per hour of day, split into weekdays and weekends."""
-        rows = self._query(
-            "SELECT is_weekend, minute_of_day / 60 AS hour, "
-            + ", ".join(f"AVG({name}) AS {name}" for name in APPLIANCES)
-            + ", AVG(pv_power) AS pv_power, AVG(outdoor_temp) AS outdoor_temp FROM readings WHERE ts >= ? "
-            "GROUP BY is_weekend, hour ORDER BY is_weekend, hour",
+        """Average power per hour of day (load, PV, each appliance), split into weekdays and weekends."""
+        rows = _decode_appliances(self._query(
+            "SELECT is_weekend, minute_of_day, load_power, pv_power, outdoor_temp, appliances "
+            "FROM readings WHERE ts >= ?",
             (since_ts,),
-        )
-        return [
-            {key: (round(value, 1) if isinstance(value, float) else value) for key, value in row.items()}
-            for row in rows
-        ]
+        ))
+        sums: dict[tuple[int, int], dict[str, list[float]]] = {}
+        for row in rows:
+            bucket = sums.setdefault((row["is_weekend"], row["minute_of_day"] // 60), {})
+            for key in ("load_power", "pv_power", "outdoor_temp"):
+                if row[key] is not None:
+                    bucket.setdefault(key, []).append(row[key])
+            for app_id, watts in row["appliances"].items():
+                if watts is not None:
+                    bucket.setdefault(f"appliance:{app_id}", []).append(watts)
+        out = []
+        for (is_weekend, hour), values in sorted(sums.items()):
+            entry: dict[str, Any] = {"is_weekend": is_weekend, "hour": hour, "appliances_w": {}}
+            for key, items in values.items():
+                avg = round(sum(items) / len(items), 1)
+                if key.startswith("appliance:"):
+                    entry["appliances_w"][key.split(":", 1)[1]] = avg
+                else:
+                    entry[key] = avg
+            out.append(entry)
+        return out
 
     # Analyses -----------------------------------------------------------
 
@@ -478,6 +516,19 @@ class Database:
         self._execute(
             "UPDATE analyses SET status = 'error', error = 'Interrupted by add-on restart' WHERE status = 'running'"
         )
+
+
+def _encode(field: str, value: Any) -> Any:
+    if field == "appliances":
+        return json.dumps(value) if value else None
+    return value
+
+
+def _decode_appliances(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    for row in rows:
+        raw = row.get("appliances")
+        row["appliances"] = json.loads(raw) if isinstance(raw, str) and raw else {}
+    return rows
 
 
 def accuracy_report(db: Database, days: int, today: date, tz: tzinfo) -> dict[str, Any]:

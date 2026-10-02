@@ -13,7 +13,7 @@ from ha import HAError, HomeAssistant
 
 UNAVAILABLE = {"", "unknown", "unavailable", "none", "null"}
 MAX_ATTRIBUTES_CHARS = 4000
-POWER_FIELDS = ("load_power", "pv_power", "heat_pump_power", "boiler_power", "ev_power")
+POWER_FIELDS = ("load_power", "pv_power")
 NUMERIC_FIELDS = (
     "battery_soc",
     "today_forecast",
@@ -195,8 +195,9 @@ async def collect(ha: HomeAssistant, opts: Options, tz: tzinfo) -> dict[str, Any
     sensors = opts.sensor_map()
     program_entities = [(p.time_entity, p.soc_entity, p.charge_entity) for p in opts.deye_programs]
 
-    sensor_states, program_states, weather = await asyncio.gather(
+    sensor_states, appliance_states, program_states, weather = await asyncio.gather(
         asyncio.gather(*(ha.state(entity) for entity in sensors.values())),
+        asyncio.gather(*(ha.state(a.entity) for a in opts.appliances)),
         asyncio.gather(*(asyncio.gather(ha.state(t), ha.state(s), ha.state(c)) for t, s, c in program_entities)),
         weather_details(ha, opts.weather_entity, tz) if opts.weather_entity else asyncio.sleep(0, {}),
     )
@@ -229,6 +230,15 @@ async def collect(ha: HomeAssistant, opts: Options, tz: tzinfo) -> dict[str, Any
         snapshot[name] = value
         if state:
             snapshot["units"][name] = unit
+    snapshot["appliances"] = {}
+    for appliance, state in zip(opts.appliances, appliance_states):
+        if not appliance.entity:
+            continue
+        unit = (state.get("attributes") or {}).get("unit_of_measurement") if state else None
+        value = to_watts(to_float(state.get("state")) if state else None, unit)
+        snapshot["appliances"][appliance.id] = value
+        if value is None:
+            missing.append(appliance.entity)
     snapshot["outdoor_temp"] = weather.get("outdoor_temp")
     snapshot["units"]["outdoor_temp"] = weather.get("unit")
     snapshot["weather"] = weather

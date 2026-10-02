@@ -171,7 +171,10 @@ def build_prompt(opts: Options, snapshot: dict[str, Any], baseline: dict[str, An
         "forecast": {
             "consumption_tomorrow_kwh": baseline["predicted_consumption_tomorrow_kwh"],
             "pv_tomorrow_kwh": baseline["predicted_pv_tomorrow_kwh"],
-            "appliances": baseline["appliance_forecast"],
+            "appliances": [
+                {**a, "name": next((x.name for x in opts.appliances if x.id == a["appliance"]), a["appliance"])}
+                for a in baseline["appliance_forecast"]
+            ],
             "hourly_tomorrow": hourly,
         },
         "programs": programs,

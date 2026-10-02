@@ -28,14 +28,6 @@ const SENSOR_GROUPS = [
       { key: "outages_sensor", label: "Probable outages", hint: "optional, any state", kind: "text" },
     ],
   },
-  {
-    title: "Appliances (optional)",
-    rows: [
-      { key: "heat_pump_power_sensor", label: "Heat pump", hint: "power, W", kind: "numeric" },
-      { key: "boiler_power_sensor", label: "Boiler", hint: "power, W", kind: "numeric" },
-      { key: "ev_power_sensor", label: "EV charger", hint: "power, W", kind: "numeric" },
-    ],
-  },
 ];
 const SENSORS = SENSOR_GROUPS.flatMap((g) => g.rows);
 const NUMBER_FIELDS = ["record_interval_minutes", "history_days", "detail_days", "local_llm_threads", "prediction_margin_percent", "min_soc_percent",
@@ -92,6 +84,73 @@ const PROGRAMS = 6;
 const form = $("settingsForm");
 const field = (name) => form.elements.namedItem(name);
 let settingsLoaded = false;
+
+// Appliances: a list the user builds with + / −. Each row keeps its id (database key)
+// in data-id; new rows get an id from the server when saved.
+const MAX_APPLIANCES = 12;
+
+function applianceRow(appliance = {}) {
+  const row = el("div", { class: "appliance-row" });
+  row.dataset.id = appliance.id || "";
+  const name = el("input", { type: "text", placeholder: "Name, e.g. Heat pump", maxlength: "40", "data-role": "name" });
+  name.value = appliance.name || "";
+  const entityInput = el("input", { type: "text", list: "entityList", placeholder: "sensor.example_power", autocomplete: "off", spellcheck: "false", "data-role": "entity" });
+  entityInput.value = appliance.entity || "";
+  const temp = el("input", { type: "checkbox", "data-role": "temp" });
+  temp.checked = !!appliance.temperature_dependent;
+  const result = el("div", { class: "result" });
+  const test = el("button", { type: "button", class: "secondary" }, "Test");
+  const remove = el("button", { type: "button", class: "secondary remove", title: "Remove this appliance", "aria-label": "Remove appliance" }, "−");
+  const testRow = { querySelector: (sel) => (sel === "input" ? entityInput : result), dataset: { kind: "numeric" } };
+  test.addEventListener("click", () => testEntity(testRow));
+  entityInput.addEventListener("change", () => testEntity(testRow));
+  remove.addEventListener("click", () => {
+    row.remove();
+    renumberAppliances();
+  });
+  row.append(
+    el("div", { class: "appliance-fields" },
+      el("label", {}, "Name", name),
+      el("label", {}, "Power sensor", entityInput),
+      el("label", { class: "inline-row temp-toggle", title: "Heats or cools the house, so its use follows the outdoor temperature" }, temp, "Depends on outdoor temperature"),
+      el("span", { class: "appliance-buttons" }, test, remove)),
+    result,
+  );
+  if (appliance.entity) testEntity(testRow);
+  return row;
+}
+
+// Field names carry the row index so validation errors ("appliances.2.entity") find their input.
+function renumberAppliances() {
+  const rows = [...$("applianceRows").children];
+  rows.forEach((row, i) => {
+    row.querySelector('[data-role="name"]').name = `appliances.${i}.name`;
+    row.querySelector('[data-role="entity"]').name = `appliances.${i}.entity`;
+  });
+  $("addAppliance").disabled = rows.length >= MAX_APPLIANCES;
+  if (!rows.length) $("applianceRows").replaceChildren();
+}
+
+function fillAppliances(list) {
+  $("applianceRows").replaceChildren(...list.map((a) => applianceRow(a)));
+  renumberAppliances();
+}
+
+function readAppliances() {
+  return [...$("applianceRows").children].map((row) => ({
+    id: row.dataset.id,
+    name: row.querySelector('[data-role="name"]').value.trim(),
+    entity: row.querySelector('[data-role="entity"]').value.trim(),
+    temperature_dependent: row.querySelector('[data-role="temp"]').checked,
+  }));
+}
+
+$("addAppliance").addEventListener("click", () => {
+  const row = applianceRow();
+  $("applianceRows").append(row);
+  renumberAppliances();
+  row.querySelector('[data-role="name"]').focus();
+});
 
 // Rendering ----------------------------------------------------------------------
 
@@ -152,6 +211,7 @@ function buildForm() {
 function fillForm(s) {
   for (const key of [...TEXT_FIELDS, ...NUMBER_FIELDS, ...PRICE_FIELDS, ...SENSORS.map((x) => x.key)]) field(key).value = s[key] ?? "";
   field("tariff_offpeak_windows").value = (s.tariff_offpeak_windows || []).join(", ");
+  fillAppliances(s.appliances || []);
   field("analysis_times_list").value = (s.analysis_times_list || []).join(", ");
   field("notify_services").value = (s.notify_services || []).join(", ");
   for (const key of CHECKBOXES) field(key).checked = !!s[key];
@@ -180,6 +240,7 @@ function readForm() {
     analysis_times_list: value("analysis_times_list"),
     notify_services: value("notify_services"),
     tariff_offpeak_windows: value("tariff_offpeak_windows"),
+    appliances: readAppliances(),
     deye_programs: [],
   };
   for (const key of TEXT_FIELDS) data[key] = value(key);

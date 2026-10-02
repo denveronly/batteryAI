@@ -71,7 +71,13 @@ All settings are stored in `/data/settings.json` and apply immediately when save
   - *Charge all SOC* – the value used by *Charge all* (98% by default).
 - **Sensors** – battery SOC, solar forecast today/tomorrow, PV power (W), PV production
   today (kWh), load power (W, kW is converted), consumption today (kWh), grid import
-  today (kWh), weather, probable outages, heat pump / boiler / EV power (W).
+  today (kWh), weather, probable outages.
+- **Appliances** – your own list of devices with a power sensor (W or kW is converted):
+  a name, the sensor, and *Depends on outdoor temperature* for anything that heats or
+  cools (heat pump, AC). Add rows with **+ Add appliance**, remove them with **−**.
+  Each appliance gets its own tile, chart line and daily bar, and the predictions
+  forecast when it will run. Renaming keeps its history; a newly added appliance starts
+  recording now (or use Settings → History → Import to fill it from Home Assistant).
 - **Deye programs** – for each of the 6 programs: time entity, SOC entity (number,
   input_number or select) and an optional grid charge switch. *Program time
   marks* says how the inverter reads the times: **end** (default) – a program's time is

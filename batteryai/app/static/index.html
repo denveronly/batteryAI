@@ -87,7 +87,7 @@
     <section class="card">
       <div class="card-head">
         <h2>Power</h2>
-        <span class="muted">Load, PV, heat pump, boiler and EV (W) with outdoor temperature</span>
+        <span class="muted">Load, PV and your appliances (W) with outdoor temperature</span>
       </div>
       <div class="chart"><canvas id="loadChart"></canvas><div class="chart-empty" hidden></div></div>
     </section>
@@ -318,6 +318,17 @@
           <button type="button" class="secondary small" id="testAll">Test all</button>
         </div>
         <div id="sensorRows"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Appliances</h2>
+          <span class="muted">Devices with their own power sensor (W or kW) – shown on the dashboard and used by the predictions</span>
+        </div>
+        <div id="applianceRows"></div>
+        <div class="test-row">
+          <button type="button" class="secondary" id="addAppliance">+ Add appliance</button>
+        </div>
       </section>
 
       <section class="card">

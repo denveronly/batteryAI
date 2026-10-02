@@ -236,10 +236,8 @@ function renderPower(rows, predicted = []) {
   }
   const pv = pts("pv_power");
   if (pv.some((p) => p.y !== null)) datasets.push(line("PV", css("--series-pv"), pv, { fill: "origin", backgroundColor: css("--series-pv") + "22" }));
-  const appliances = status?.appliances || {};
-  if (appliances.heat_pump_power) datasets.push(line("Heat pump", css("--series-heatpump"), pts("heat_pump_power")));
-  if (appliances.boiler_power) datasets.push(line("Boiler", css("--series-boiler"), pts("boiler_power")));
-  if (appliances.ev_power) datasets.push(line("EV", css("--series-ev"), pts("ev_power")));
+  appliancesList().forEach((a, i) =>
+    datasets.push(line(a.name, applianceColor(i), rows.map((r) => ({ x: r.ts * 1000, y: r.appliances?.[a.id] ?? null })))));
   const temps = pts("outdoor_temp");
   const hasTemp = temps.some((p) => p.y !== null);
   if (hasTemp) datasets.push(line("Outdoor temp", css("--series-temp"), temps, { yAxisID: "y2", borderDash: [4, 4], borderWidth: 1.5, backgroundColor: "transparent" }));
@@ -287,11 +285,9 @@ function bar(label, color, data, extra = {}) {
 
 function renderDaily(days) {
   const col = (key) => days.map((d) => d[key]);
-  const appliances = status?.appliances || {};
   const datasets = [bar("Consumption", css("--series-consumption"), col("consumption_kwh"))];
-  if (appliances.heat_pump_power) datasets.push(bar("Heat pump", css("--series-heatpump"), col("heat_pump_kwh")));
-  if (appliances.boiler_power) datasets.push(bar("Boiler", css("--series-boiler"), col("boiler_kwh")));
-  if (appliances.ev_power) datasets.push(bar("EV", css("--series-ev"), col("ev_kwh")));
+  appliancesList().forEach((a, i) =>
+    datasets.push(bar(a.name, applianceColor(i), days.map((d) => d.appliances?.[a.id]?.kwh ?? null))));
   if (col("pv_kwh").some((v) => v !== null)) datasets.push(bar("PV", css("--series-pv"), col("pv_kwh")));
   datasets.push({ type: "line", label: "Solar forecast", data: col("solar_forecast_kwh"), borderColor: css("--series-forecast"), backgroundColor: css("--series-forecast"), borderDash: [5, 4], pointRadius: 3, borderWidth: 1.5 });
   const hasTemp = col("temp_avg").some((v) => v !== null);
@@ -390,7 +386,6 @@ function renderStatus() {
   $("warnings").replaceChildren(...warnings.map((w) => el("div", { class: "banner" }, w)));
 
   const weekday = latest.weekday ? latest.weekday[0].toUpperCase() + latest.weekday.slice(1) : "—";
-  const appliances = status.appliances || {};
   const tiles = [
     tile("Battery SOC", fmt(latest.battery_soc, 0), "%"),
     tile("Load", fmt(latest.load_power, 0), "W"),
@@ -400,9 +395,7 @@ function renderStatus() {
     tile("Solar tomorrow", fmt(latest.tomorrow_forecast), unit("tomorrow_forecast", "kWh")),
   ];
   if (latest.pv_today !== null && latest.pv_today !== undefined) tiles.push(tile("PV today", fmt(latest.pv_today), "kWh"));
-  if (appliances.heat_pump_power) tiles.push(tile("Heat pump", fmt(latest.heat_pump_power, 0), "W"));
-  if (appliances.boiler_power) tiles.push(tile("Boiler", fmt(latest.boiler_power, 0), "W"));
-  if (appliances.ev_power) tiles.push(tile("EV", fmt(latest.ev_power, 0), "W"));
+  for (const a of appliancesList()) tiles.push(tile(a.name, fmt(latest.appliances?.[a.id], 0), "W"));
   if (latest.outdoor_temp !== null && latest.outdoor_temp !== undefined) tiles.push(tile("Outside", fmt(latest.outdoor_temp), status.weather?.unit || "°"));
   const tomorrowWeather = weatherText(status.weather);
   if (tomorrowWeather) tiles.push(tile("Tomorrow", tomorrowWeather, status.weather.tomorrow.condition || ""));
@@ -544,7 +537,12 @@ $("chargeAll").addEventListener("click", () => {
 
 // Latest prediction -------------------------------------------------------------
 
-const APPLIANCE_LABEL = { heat_pump: "Heat pump", boiler: "Boiler", ev: "EV" };
+// Appliances come from Settings (custom names); predictions refer to them by id.
+const LEGACY_APPLIANCE_NAMES = { heat_pump: "Heat pump", boiler: "Boiler", ev: "EV charger" };
+const APPLIANCE_COLORS = ["--series-heatpump", "--series-boiler", "--series-ev", "--series-app4", "--series-app5", "--series-app6"];
+const appliancesList = () => (Array.isArray(status?.appliances) ? status.appliances : []);
+const applianceColor = (i) => css(APPLIANCE_COLORS[i % APPLIANCE_COLORS.length]);
+const applianceName = (id) => appliancesList().find((a) => a.id === id)?.name || LEGACY_APPLIANCE_NAMES[id] || id;
 
 function predictionChips(r) {
   return el(
@@ -583,7 +581,7 @@ function renderPrediction(analysis) {
     r.weather_impact ? el("p", { class: "muted prediction-meta" }, "Weather: ", r.weather_impact) : null,
     r.appliance_forecast?.length
       ? el("ul", { class: "appliances" }, ...r.appliance_forecast.map((a) =>
-        el("li", {}, el("b", {}, APPLIANCE_LABEL[a.appliance] || a.appliance), ` ${fmt(a.expected_kwh_tomorrow)} kWh tomorrow · ${a.expected_usage_windows}`)))
+        el("li", {}, el("b", {}, applianceName(a.appliance)), ` ${fmt(a.expected_kwh_tomorrow)} kWh tomorrow · ${a.expected_usage_windows}`)))
       : null,
     r.hourly_forecast_tomorrow?.length ? el("div", { class: "chart small" }, el("canvas", { id: "forecastChart" })) : null,
     programTable(r) ? el("details", {}, el("summary", {}, "Suggested Deye programs"), programTable(r)) : null,
@@ -592,11 +590,10 @@ function renderPrediction(analysis) {
   if (r.hourly_forecast_tomorrow?.length) {
     delete charts.forecastChart;
     const hours = r.hourly_forecast_tomorrow.slice().sort((a, b) => a.hour - b.hour);
-    const appliances = status?.appliances || {};
     const series = [["Load", "load_w", "--series-load"]];
-    if (appliances.heat_pump_power) series.push(["Heat pump", "heat_pump_w", "--series-heatpump"]);
-    if (appliances.boiler_power) series.push(["Boiler", "boiler_w", "--series-boiler"]);
-    if (appliances.ev_power) series.push(["EV", "ev_w", "--series-ev"]);
+    appliancesList().forEach((a, i) => {
+      if (hours.some((h) => h[`${a.id}_w`] !== undefined)) series.push([a.name, `${a.id}_w`, APPLIANCE_COLORS[i % APPLIANCE_COLORS.length]]);
+    });
     const text = css("--muted");
     charts.forecastChart = typeof Chart === "undefined" ? undefined : new Chart($("forecastChart"), {
       type: "line",
