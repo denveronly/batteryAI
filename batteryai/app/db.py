@@ -279,6 +279,27 @@ class Database:
         with self._lock:
             self._conn.execute("VACUUM")
 
+    def relocalize(self, tz: tzinfo, weekend_days: list[str]) -> int:
+        """Recomputes local_date / minute_of_day / weekday / is_weekend from ts in tz."""
+        weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, ts, local_date, minute_of_day, weekday, is_weekend FROM readings"
+            ).fetchall()
+            updates = []
+            for row in rows:
+                local = datetime.fromtimestamp(row["ts"], tz)
+                weekday = weekdays[local.weekday()]
+                values = (local.date().isoformat(), local.hour * 60 + local.minute, weekday, int(weekday in weekend_days))
+                if values != (row["local_date"], row["minute_of_day"], row["weekday"], row["is_weekend"]):
+                    updates.append((*values, row["id"]))
+            self._conn.executemany(
+                "UPDATE readings SET local_date = ?, minute_of_day = ?, weekday = ?, is_weekend = ? WHERE id = ?",
+                updates,
+            )
+            self._conn.commit()
+        return len(updates)
+
     def recompute_targets(self, target_for: Callable[[list[dict[str, Any]], int], float | None]) -> int:
         """Re-derives target_soc of every reading from its stored programs (after the
         program-time meaning changes, or for rows recorded before programs were configured)."""

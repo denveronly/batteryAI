@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import shutil
 from collections import deque
@@ -27,7 +28,7 @@ import notify
 from collector import UNAVAILABLE, active_program, collect, has_data, parse_hhmm, to_float, weather_details
 from config import DATA_DIR, Options, SettingsError, load_settings, parse_settings, save_settings
 from db import READING_FIELDS, Database, accuracy_report, economy_report
-from ha import HAError, HomeAssistant
+from ha import HAError, HomeAssistant, container_env
 from history import import_history
 
 PORT = int(os.environ.get("BATTERYAI_PORT", "8099"))
@@ -46,6 +47,7 @@ class BatteryAI:
         self.ha = ha
         self.tz = tz
         self.next_analysis: datetime | None = None
+        self.tz_source = "home_assistant"
         self.last_snapshot: dict[str, Any] | None = None
         self._analysis_lock = asyncio.Lock()
         self._loops: list[asyncio.Task] = []
@@ -138,6 +140,30 @@ class BatteryAI:
             task.cancel()
         self._loops = []
 
+    def relocalize(self) -> None:
+        """Re-derives local date, time of day and weekday of stored readings for the current
+        time zone and weekend days (fixes rows recorded while the time zone was wrong)."""
+        changed = self.db.relocalize(self.tz, self.opts.weekend_days)
+        if changed:
+            _LOGGER.info("Corrected local date/time of %d readings for %s", changed, self.tz)
+        self.recompute_targets()
+
+    async def retry_time_zone(self) -> None:
+        """Keeps asking Home Assistant for its time zone until it answers, then switches to it."""
+        while True:
+            await asyncio.sleep(120)
+            zone = _zone(await self.ha.time_zone())
+            if zone is None:
+                continue
+            if str(zone) != str(self.tz):
+                _LOGGER.info("Time zone is now %s (was %s)", zone, self.tz)
+                self.tz = zone
+                self.relocalize()
+                self.stop_loops()
+                self.start_loops()
+            self.tz_source = "home_assistant"
+            return
+
     def recompute_targets(self) -> None:
         time_is_end = self.opts.program_time_marks == "end"
 
@@ -151,8 +177,11 @@ class BatteryAI:
     def apply_settings(self, opts: Options) -> None:
         """Use new settings right away: new Claude client, new schedule and recording interval."""
         marks_changed = opts.program_time_marks != self.opts.program_time_marks
+        weekend_changed = opts.weekend_days != self.opts.weekend_days
         self.opts = opts
-        if marks_changed:
+        if weekend_changed:
+            self.relocalize()
+        elif marks_changed:
             self.recompute_targets()
         self._client = self._make_client(opts.claude_api_key)
         self.stop_loops()
@@ -353,9 +382,35 @@ def _int_param(request: web.Request, name: str, default: int, low: int, high: in
         return default
 
 
+def _asset_version() -> str:
+    """Changes whenever a UI file changes, so browsers fetch new files after an update."""
+    digest = hashlib.sha1()
+    for path in sorted(STATIC_DIR.rglob("*")):
+        if path.is_file():
+            digest.update(path.name.encode())
+            digest.update(path.read_bytes())
+    return digest.hexdigest()[:10]
+
+
+ASSET_VERSION = _asset_version()
+NO_CACHE = {"Cache-Control": "no-cache, must-revalidate"}
+
+
 @routes.get("/")
-async def index(_: web.Request) -> web.FileResponse:
-    return web.FileResponse(STATIC_DIR / "index.html")
+async def index(_: web.Request) -> web.Response:
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    for asset in ("static/style.css", "static/app.js", "static/settings.js", "static/vendor/chart.umd.js"):
+        html = html.replace(f'"{asset}"', f'"{asset}?v={ASSET_VERSION}"')
+    return web.Response(text=html, content_type="text/html", headers=NO_CACHE)
+
+
+@web.middleware
+async def revalidate_static(request: web.Request, handler: Any) -> web.StreamResponse:
+    """Make browsers check UI files with the add-on (cheap 304s) instead of using stale copies."""
+    response = await handler(request)
+    if request.path.startswith("/static/"):
+        response.headers.update(NO_CACHE)
+    return response
 
 
 @routes.get("/api/status")
@@ -364,6 +419,11 @@ async def status(request: web.Request) -> web.Response:
     opts = app.opts
     latest = app.db.latest_reading()
     warnings = []
+    if app.tz_source == "fallback":
+        warnings.append(
+            "Home Assistant has not reported its time zone yet, so times are in UTC "
+            "(tariff, schedule and programs may be off). Retrying every 2 minutes."
+        )
     if opts.prediction_engine == "claude" and not opts.claude_api_key:
         warnings.append("Claude API key is not set.")
     if opts.prediction_engine == "local_llm":
@@ -386,6 +446,7 @@ async def status(request: web.Request) -> web.Response:
     return web.json_response(
         {
             "time_zone": str(app.tz),
+            "time_zone_source": app.tz_source,
             "model": app.engine_label,
             "engine": opts.prediction_engine,
             "analysis_times": [f"{h:02d}:{m:02d}" for h, m in opts.analysis_times()],
@@ -903,15 +964,31 @@ async def test_claude(request: web.Request) -> web.Response:
 # Startup --------------------------------------------------------------------
 
 
-async def resolve_time_zone(ha: HomeAssistant) -> tzinfo:
-    for name in (await ha.time_zone(), os.environ.get("TZ")):
-        if name:
-            try:
-                return ZoneInfo(name)
-            except ZoneInfoNotFoundError:
-                _LOGGER.warning("Unknown time zone %s", name)
-    _LOGGER.warning("Could not determine the Home Assistant time zone; using UTC")
-    return timezone.utc
+def _zone(name: str | None) -> tzinfo | None:
+    if not name:
+        return None
+    try:
+        return ZoneInfo(name)
+    except ZoneInfoNotFoundError:
+        _LOGGER.warning("Unknown time zone %s", name)
+        return None
+
+
+async def resolve_time_zone(ha: HomeAssistant, attempts: int = 20) -> tuple[tzinfo, str]:
+    """(time zone, where it came from). Home Assistant may still be starting when the add-on
+    starts, so it is asked several times before falling back."""
+    for attempt in range(attempts):
+        zone = _zone(await ha.time_zone())
+        if zone:
+            return zone, "home_assistant"
+        if attempt + 1 < attempts:
+            await asyncio.sleep(3)
+    zone = _zone(container_env("TZ"))
+    if zone:
+        _LOGGER.warning("Home Assistant did not report its time zone; using the container's TZ (%s)", zone)
+        return zone, "container"
+    _LOGGER.error("Could not determine the time zone; using UTC until Home Assistant answers")
+    return timezone.utc, "fallback"
 
 
 async def main() -> None:
@@ -925,10 +1002,11 @@ async def main() -> None:
 
     async with aiohttp.ClientSession() as session:
         ha = HomeAssistant(session)
-        tz = await resolve_time_zone(ha)
+        tz, tz_source = await resolve_time_zone(ha)
         batteryai = BatteryAI(opts, db, ha, tz)
+        batteryai.tz_source = tz_source
 
-        app = web.Application()
+        app = web.Application(middlewares=[revalidate_static])
         app["batteryai"] = batteryai
         app["background"] = set()
         app.add_routes(routes)
@@ -943,8 +1021,10 @@ async def main() -> None:
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, stop.set)
 
-        batteryai.recompute_targets()
+        batteryai.relocalize()
         batteryai.start_loops()
+        if tz_source != "home_assistant":
+            batteryai.spawn(batteryai.retry_time_zone())
         batteryai.import_history_if_empty()
         await stop.wait()
         _LOGGER.info("Shutting down")

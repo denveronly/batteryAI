@@ -377,7 +377,7 @@ function renderStatus() {
   const latest = status.latest || {};
   const next = status.next_analysis ? new Date(status.next_analysis) : null;
   $("schedule").textContent =
-    `Predictions daily at ${status.analysis_times.join(", ")} · model ${status.model}` +
+    `Predictions daily at ${status.analysis_times.join(", ")} (${status.time_zone}) · model ${status.model}` +
     (next ? ` · next ${next.toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })}` : "");
 
   const warnings = [...status.warnings];

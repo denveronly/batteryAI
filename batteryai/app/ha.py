@@ -19,6 +19,20 @@ _LOGGER = logging.getLogger(__name__)
 S6_ENV_DIRS = ("/run/s6/container_environment", "/var/run/s6/container_environment")
 
 
+def container_env(name: str) -> str | None:
+    """An environment variable the Supervisor set for the container (also under s6)."""
+    if os.environ.get(name):
+        return os.environ[name]
+    for directory in S6_ENV_DIRS:
+        try:
+            value = Path(directory, name).read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if value:
+            return value
+    return None
+
+
 def find_token() -> tuple[str, str]:
     """Returns (token, where it came from)."""
     for name in ("SUPERVISOR_TOKEN", "HASSIO_TOKEN", "HA_TOKEN"):

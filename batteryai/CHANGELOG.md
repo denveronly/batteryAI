@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.2
+
+- Fix: when Home Assistant was still starting, the add-on fell back to UTC, so the
+  tariff (peak/off-peak), prediction times and active program were off by the UTC
+  offset. It now retries Home Assistant, falls back to the container's time zone, keeps
+  retrying in the background, and corrects the local date/time of stored readings. The
+  header shows the time zone in use.
+- Fix: browsers kept old copies of the panel after an update (missing Logs tab, old
+  appliance settings). UI files are now versioned and always revalidated.
+
 ## 0.4.1
 
 - Appliances are a list you manage in Settings → Appliances: custom name, power sensor
