@@ -27,7 +27,7 @@ batteryai/
     analyzer.py           Claude request and response schema
     ha.py                 Home Assistant REST client
     config.py             settings validation and storage (/data/settings.json)
-    control.py            writes SOC / force charge to the Deye programs
+    control.py            writes SOC / grid charge to the Deye programs
     history.py            imports past values from the HA recorder
     notify.py             phone notifications
     static/               panel UI: dashboard, economy, settings (bundled Chart.js)

@@ -418,19 +418,7 @@ function renderStatus() {
   );
   $("tiles").replaceChildren(...tiles);
 
-  const programs = latest.deye_programs || [];
-  const spans = programSpans(programs);
-  const hasCharge = programs.some((p) => p.grid_charge !== undefined);
-  $("programs").replaceChildren(
-    el("tr", {}, el("th", {}, "Program"), el("th", {}, "Time range"), el("th", {}, "SOC capacity"), hasCharge ? el("th", {}, "Force charge") : null),
-    ...(programs.length
-      ? programs.map((p) => el("tr", { class: p.slot === status.active_program_slot ? "active" : "" },
-        el("td", {}, `#${p.slot}`),
-        el("td", {}, rangeText(spans[p.slot])),
-        el("td", {}, p.soc === null ? "—" : `${fmt(p.soc, 0)} %`),
-        hasCharge ? el("td", {}, p.grid_charge === "on" ? "⚡ on" : p.grid_charge ?? "—") : null))
-      : [el("tr", {}, el("td", { colspan: "3", class: "empty" }, "No Deye program data yet."))]),
-  );
+  renderPrograms(latest.deye_programs || []);
 
   $("analyze").disabled = status.analysis_running;
   $("analyze").textContent = status.analysis_running ? "Predicting…" : "Predict now";
@@ -461,12 +449,71 @@ function renderControl() {
         : "Claude only advises; nothing is written to the inverter. Use Apply on a prediction to write it once.";
 }
 
+// Deye programs in the Battery control card: SOC and grid charge can be changed here.
+function renderPrograms(programs) {
+  const table = $("programs");
+  // Don't throw away a value the user is typing.
+  if (table.querySelector("input.dirty, input:focus")) return;
+  const spans = programSpans(programs);
+  const configured = status.programs_configured || {};
+  const hasCharge = Object.values(configured).some((p) => p.charge) || programs.some((p) => p.grid_charge !== undefined);
+  if (!programs.length) {
+    table.replaceChildren(el("tr", {}, el("td", { class: "empty" }, "No Deye program data yet. Configure the programs in Settings.")));
+    return;
+  }
+  table.replaceChildren(
+    el("tr", {}, el("th", {}, "Program"), el("th", {}, "Time range"), el("th", {}, "SOC"), hasCharge ? el("th", {}, "Grid charge") : null),
+    ...programs.map((p) => {
+      const conf = configured[p.slot] || {};
+      const input = el("input", { type: "number", min: "0", max: "100", step: "1", "aria-label": `Program ${p.slot} SOC` });
+      input.value = p.soc === null || p.soc === undefined ? "" : String(Math.round(p.soc));
+      const setButton = el("button", { type: "button", class: "secondary" }, "Set");
+      setButton.disabled = true;
+      input.disabled = !conf.soc;
+      input.addEventListener("input", () => {
+        const changed = input.value !== "" && Number(input.value) !== Math.round(p.soc ?? -1);
+        input.classList.toggle("dirty", changed);
+        setButton.disabled = !changed;
+      });
+      const save = () => {
+        if (setButton.disabled) return;
+        input.classList.remove("dirty");
+        setProgram(p.slot, { soc: Number(input.value) }, [input, setButton]);
+      };
+      setButton.addEventListener("click", save);
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter") save(); });
+
+      let chargeCell = null;
+      if (hasCharge) {
+        if (conf.charge) {
+          const box = el("input", { type: "checkbox", "aria-label": `Program ${p.slot} grid charge` });
+          box.checked = p.grid_charge === "on";
+          box.addEventListener("change", () => setProgram(p.slot, { grid_charge: box.checked }, [box]));
+          chargeCell = el("td", {}, el("label", { class: "toggle", title: "Grid charge" }, box, el("span")));
+        } else {
+          chargeCell = el("td", { class: "muted" }, "—");
+        }
+      }
+      return el("tr", { class: p.slot === status.active_program_slot ? "active" : "" },
+        el("td", {}, `#${p.slot}`),
+        el("td", { class: "nowrap" }, rangeText(spans[p.slot])),
+        el("td", {}, el("span", { class: "soc-cell" }, input, "%", setButton)),
+        chargeCell);
+    }),
+  );
+}
+
+async function setProgram(slot, body, controls) {
+  controls.forEach((c) => (c.disabled = true));
+  await controlAction(`api/programs/${slot}`, body);
+}
+
 function actionsList(actions) {
   if (!actions?.length) return null;
   return el("ul", { class: "actions-list" }, ...actions.map((a) =>
     el("li", { class: a.status === "error" ? "error" : "" },
       a.slot ? `Program ${a.slot}: ` : "",
-      a.kind === "grid_charge" ? "force charge " : "",
+      a.kind === "grid_charge" ? "grid charge " : "",
       a.status === "set" ? `${a.entity_id} ${a.from ?? ""} → ${a.to}` :
         a.status === "unchanged" ? (a.kind === "grid_charge" ? `${a.entity_id} already ${a.value}` : `${a.entity_id} kept at ${fmt(a.value, 0)} (suggested ${fmt(a.suggested, 0)}, below threshold)`) :
           `${a.entity_id}: ${a.error}`)));
@@ -579,7 +626,7 @@ function programTable(r) {
     el(
       "table",
       { class: "programs" },
-      el("tr", {}, el("th", {}, "Program"), el("th", {}, "Time range"), el("th", {}, "SOC"), el("th", {}, "Force charge"), el("th", {}, "Why")),
+      el("tr", {}, el("th", {}, "Program"), el("th", {}, "Time range"), el("th", {}, "SOC"), el("th", {}, "Grid charge"), el("th", {}, "Why")),
       ...r.deye_programs.map((p) => el("tr", {}, el("td", { class: "nowrap" }, `#${p.slot}`), el("td", { class: "nowrap" }, rangeText(spans[p.slot])), el("td", { class: "nowrap" }, `${fmt(p.soc_percent, 0)} %`), el("td", { class: "nowrap" }, charge(p.grid_charge)), el("td", {}, p.reason))),
     ),
   );
@@ -653,6 +700,113 @@ async function refreshEconomy() {
   );
 }
 $("economyRange").addEventListener("change", refreshEconomy);
+
+// Logs tab ----------------------------------------------------------------------
+
+let logTimer = null;
+let logLines = [];
+let lastLogId = 0;
+
+const fmtBytes = (n) => {
+  if (n === null || n === undefined) return "—";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return `${n.toFixed(i ? 1 : 0)} ${units[i]}`;
+};
+
+async function refreshStorage() {
+  let s;
+  try {
+    s = await api("api/storage");
+  } catch (err) {
+    $("storageInfo").textContent = `Could not load storage info: ${err.message}`;
+    return;
+  }
+  const db = s.database;
+  $("storageInfo").textContent = s.data_dir;
+  $("storageTiles").replaceChildren(
+    tile("Database", fmtBytes(db.file_bytes), db.free_bytes ? `${fmtBytes(db.free_bytes)} reusable` : ""),
+    tile("Readings", db.rows.readings.toLocaleString(), ""),
+    tile("Predictions", db.rows.analyses.toLocaleString(), ""),
+    tile("Data from", db.first_reading ? new Date(db.first_reading * 1000).toLocaleDateString([], { day: "numeric", month: "short" }) : "—",
+      db.detail_since ? `detail since ${new Date(db.detail_since * 1000).toLocaleDateString([], { day: "numeric", month: "short" })}` : ""),
+    tile("Add-on data", fmtBytes(s.data_bytes), `${s.data_files} files`),
+    tile("Add-on code", fmtBytes(s.app_bytes), ""),
+    tile("Disk free", fmtBytes(s.disk.free), `of ${fmtBytes(s.disk.total)}`),
+  );
+  $("dbTable").replaceChildren(
+    el("tr", {}, el("th", {}, "Database"), el("th", { class: "num" }, "")),
+    el("tr", {}, el("td", {}, "Readings (recorded live)"), el("td", { class: "num" }, (db.reading_sources.live || 0).toLocaleString())),
+    el("tr", {}, el("td", {}, "Readings (imported from Home Assistant)"), el("td", { class: "num" }, (db.reading_sources.history || 0).toLocaleString())),
+    el("tr", {}, el("td", {}, "Readings (compressed to hourly)"), el("td", { class: "num" }, (db.reading_sources.hourly || 0).toLocaleString())),
+    el("tr", {}, el("td", {}, "Predictions"), el("td", { class: "num" }, db.rows.analyses.toLocaleString())),
+    el("tr", {}, el("td", {}, "First / last reading"), el("td", { class: "num" }, db.first_reading ? `${fmtDateTime(db.first_reading)} – ${fmtDateTime(db.last_reading)}` : "—")),
+    ...Object.entries(db.files).map(([suffix, bytes]) => el("tr", {}, el("td", {}, `batteryai.db${suffix}`), el("td", { class: "num" }, fmtBytes(bytes)))),
+  );
+  $("filesTable").replaceChildren(
+    el("tr", {}, el("th", {}, "File in /data"), el("th", { class: "num" }, "Size")),
+    ...s.files.map((f) => el("tr", {}, el("td", {}, f.name), el("td", { class: "num" }, fmtBytes(f.bytes)))),
+  );
+}
+
+function renderLogLines() {
+  const query = $("logSearch").value.trim().toLowerCase();
+  const view = $("logView");
+  const atBottom = view.scrollHeight - view.scrollTop - view.clientHeight < 40;
+  const shown = query ? logLines.filter((l) => `${l.logger} ${l.message}`.toLowerCase().includes(query)) : logLines;
+  $("logCount").textContent = `${shown.length} lines`;
+  view.replaceChildren(
+    ...(shown.length
+      ? shown.map((l) =>
+        el("div", { class: "log-line" },
+          el("span", { class: "time" }, new Date(l.ts * 1000).toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" })),
+          el("span", { class: `lvl-${l.level}` }, l.level),
+          el("span", { class: "msg" }, el("span", { class: "src" }, `${l.logger}: `), l.message)))
+      : [el("div", { class: "empty" }, "No log lines.")]),
+  );
+  if (atBottom) view.scrollTop = view.scrollHeight;
+}
+
+async function refreshLogs(reset = false) {
+  clearTimeout(logTimer);
+  if (reset) { logLines = []; lastLogId = 0; }
+  try {
+    const fresh = await api(`api/logs?level=${$("logLevel").value}&after=${lastLogId}`);
+    if (fresh.length) {
+      lastLogId = fresh[fresh.length - 1].id;
+      logLines = logLines.concat(fresh).slice(-1000);
+    }
+    renderLogLines();
+  } catch (err) {
+    $("logCount").textContent = `Could not load logs: ${err.message}`;
+  }
+  if ($("logFollow").checked && location.hash === "#logs") logTimer = setTimeout(() => refreshLogs(), 5000);
+}
+
+$("logLevel").addEventListener("change", () => refreshLogs(true));
+$("logSearch").addEventListener("input", renderLogLines);
+$("logFollow").addEventListener("change", () => refreshLogs());
+$("compressDb").addEventListener("click", async () => {
+  $("compressDb").disabled = true;
+  $("vacuumResult").className = "result";
+  $("vacuumResult").textContent = "Compressing…";
+  const r = await api("api/storage/compress", { method: "POST" }).catch((err) => ({ error: err.message }));
+  $("compressDb").disabled = false;
+  $("vacuumResult").className = `result ${r.error ? "error" : "ok"}`;
+  $("vacuumResult").textContent = r.error ? `✕ ${r.error}` : r.removed ? `✓ ${r.removed.toLocaleString()} readings → ${r.added.toLocaleString()} hourly rows. Use “Compact database” to give the space back to the disk.` : "✓ Nothing older than the detail period.";
+  refreshStorage();
+});
+$("vacuumDb").addEventListener("click", async () => {
+  $("vacuumDb").disabled = true;
+  $("vacuumResult").className = "result";
+  $("vacuumResult").textContent = "Compacting…";
+  const r = await api("api/storage/vacuum", { method: "POST" }).catch((err) => ({ error: err.message }));
+  $("vacuumDb").disabled = false;
+  $("vacuumResult").className = `result ${r.error ? "error" : "ok"}`;
+  $("vacuumResult").textContent = r.error ? `✕ ${r.error}` : `✓ ${fmtBytes(r.before)} → ${fmtBytes(r.after)}`;
+  refreshStorage();
+});
 
 // Analysis log ----------------------------------------------------------------
 
@@ -827,23 +981,28 @@ applyTheme(currentTheme());
 // Tabs ---------------------------------------------------------------------------
 
 function showTab() {
-  const tab = ["#settings", "#economy"].includes(location.hash) ? location.hash.slice(1) : "dashboard";
+  const tab = ["#settings", "#economy", "#logs"].includes(location.hash) ? location.hash.slice(1) : "dashboard";
   $("view-dashboard").hidden = tab !== "dashboard";
   $("view-economy").hidden = tab !== "economy";
   $("view-settings").hidden = tab !== "settings";
+  $("view-logs").hidden = tab !== "logs";
   $("dashActions").hidden = tab !== "dashboard";
   document.querySelectorAll(".tabs a").forEach((a) => {
     a.classList.toggle("active", a.dataset.tab === tab);
     a.setAttribute("aria-selected", a.dataset.tab === tab);
   });
   // Charts created while the dashboard was hidden have no size yet.
-  if (tab !== "settings") requestAnimationFrame(() => Object.values(charts).forEach((c) => c?.resize()));
+  if (tab === "dashboard" || tab === "economy") requestAnimationFrame(() => Object.values(charts).forEach((c) => c?.resize()));
   if (tab === "economy") refreshEconomy();
+  if (tab === "logs") {
+    refreshStorage();
+    refreshLogs(true);
+  }
   window.dispatchEvent(new CustomEvent("batteryai:tab", { detail: tab }));
 }
 window.addEventListener("hashchange", () => {
   showTab();
-  if (location.hash !== "#settings" && location.hash !== "#economy") refresh();
+  if (!["#settings", "#economy", "#logs"].includes(location.hash)) refresh();
 });
 
 showTab();

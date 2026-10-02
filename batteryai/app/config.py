@@ -56,6 +56,8 @@ class Options:
     analysis_times_list: list[str] = field(default_factory=lambda: ["12:00", "23:00"])
     record_interval_minutes: int = 5
     history_days: int = 14
+    # Readings older than this are compressed to hourly rows to keep the database small.
+    detail_days: int = 30
     today_forecast_sensor: str = ""
     tomorrow_forecast_sensor: str = ""
     battery_soc_sensor: str = ""
@@ -198,7 +200,8 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         claude_effort=text("claude_effort"),
         response_language=text("response_language") or "English",
         record_interval_minutes=integer("record_interval_minutes", 1, 60),
-        history_days=integer("history_days", 1, 90),
+        history_days=integer("history_days", 1, 365),
+        detail_days=integer("detail_days", 2, 365),
         extra_instructions=text("extra_instructions"),
         prediction_margin_percent=integer("prediction_margin_percent", 0, 100),
         min_soc_percent=integer("min_soc_percent", 0, 100),

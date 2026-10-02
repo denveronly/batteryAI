@@ -104,7 +104,7 @@ async def apply_prediction(ha: HomeAssistant, opts: Options, result: dict[str, A
 
 
 async def _apply_switch(ha: HomeAssistant, slot: int, entity_id: str, on: bool) -> dict[str, Any]:
-    """Force (grid) charge of one program, only touched when it differs from what Claude wants."""
+    """Grid charge of one program, only touched when it differs from what Claude wants."""
     action: dict[str, Any] = {"slot": slot, "entity_id": entity_id, "kind": "grid_charge", "time": time.time()}
     try:
         current = (await ha.fetch_state(entity_id)).get("state")

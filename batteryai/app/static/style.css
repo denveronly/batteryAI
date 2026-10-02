@@ -279,3 +279,40 @@ td.num, th.num { text-align: right; white-space: nowrap; }
 .saved { color: var(--ok); font-weight: 600; }
 td.nowrap { white-space: nowrap; }
 #modelSelect { max-width: 190px; }
+
+/* Editable programs ----------------------------------------------------------- */
+.program-edit td { vertical-align: middle; }
+.soc-cell { display: flex; gap: 6px; align-items: center; }
+.soc-cell input { width: 72px; padding: 4px 8px; }
+.soc-cell button { padding: 4px 10px; font-size: 13px; }
+.toggle { position: relative; display: inline-block; width: 40px; height: 22px; flex: none; }
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle span { position: absolute; inset: 0; border-radius: 22px; background: var(--chip); border: 1px solid var(--border); cursor: pointer; transition: background 0.15s; }
+.toggle span::before { content: ""; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px; border-radius: 50%; background: var(--muted); transition: transform 0.15s; }
+.toggle input:checked + span { background: var(--accent); border-color: var(--accent); }
+.toggle input:checked + span::before { transform: translateX(18px); background: var(--accent-text); }
+.toggle input:disabled + span { opacity: 0.5; cursor: progress; }
+
+/* Logs tab ---------------------------------------------------------------------- */
+.log-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.log-controls input[type="search"] { width: 180px; }
+.log-view {
+  max-height: 70vh;
+  overflow: auto;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+}
+.log-line { display: grid; grid-template-columns: 150px 64px minmax(0, 1fr); gap: 8px; padding: 1px 0; }
+.log-line .msg { white-space: pre-wrap; overflow-wrap: anywhere; }
+.log-line .lvl-WARNING { color: var(--warn); }
+.log-line .lvl-ERROR, .log-line .lvl-CRITICAL { color: var(--error); }
+.log-line .lvl-INFO { color: var(--ok); }
+.log-line .time, .log-line .src { color: var(--muted); }
+@media (max-width: 640px) { .log-line { grid-template-columns: 1fr; gap: 0; padding: 4px 0; border-bottom: 1px solid var(--border); } }
+.storage-tables { margin-top: 12px; }
+.header-right { min-width: 0; }
+.tabs { flex-wrap: wrap; }
+@media (max-width: 480px) { .tabs a { padding: 6px 10px; } #modelSelect { max-width: 150px; } }

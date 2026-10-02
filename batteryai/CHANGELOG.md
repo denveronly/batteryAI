@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.2
+
+- Logs tab: live add-on log with level filter and search; storage overview (database
+  size, rows, data range, add-on data and disk use) with "Compress old readings" and
+  "Compact database".
+- History up to 365 days. Readings older than "Keep full detail" (30 days by default)
+  are compressed to hourly rows; outage attributes are stored only when they change.
+  A year of data stays a few MB.
+- Deye programs merged into the Battery control card: set each program's SOC and switch
+  its grid charge directly from the dashboard.
+- "Force charge" renamed to "Grid charge".
+
 ## 0.3.1
 
 - Deye program ranges: a program's time is the END of its range, which starts at the

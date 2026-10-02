@@ -24,6 +24,7 @@
       <a href="#dashboard" role="tab" data-tab="dashboard">Dashboard</a>
       <a href="#economy" role="tab" data-tab="economy">Economy</a>
       <a href="#settings" role="tab" data-tab="settings">Settings</a>
+      <a href="#logs" role="tab" data-tab="logs">Logs</a>
     </nav>
     <select id="modelSelect" aria-label="Claude model" title="Claude model used for predictions"></select>
     <button type="button" class="secondary" id="themeToggle" title="Switch theme">Auto</button>
@@ -33,6 +34,8 @@
         <option value="48" selected>48 hours</option>
         <option value="168">7 days</option>
         <option value="720">30 days</option>
+        <option value="2160">90 days</option>
+        <option value="8760">365 days</option>
       </select>
       <button id="analyze" type="button">Predict now</button>
     </div>
@@ -58,6 +61,9 @@
           <button type="button" id="chargeAll" class="warn-button">Charge all to 98%</button>
         </div>
         <p class="muted" id="controlInfo"></p>
+        <h3 class="group-title">Deye programs</h3>
+        <div class="table-scroll"><table class="programs program-edit" id="programs"></table></div>
+        <p class="hint">Changes are written to the inverter right away. With AI auto-control on, the next prediction may change them again.</p>
         <div class="result" id="controlResult"></div>
       </section>
 
@@ -86,21 +92,12 @@
       <div class="chart"><canvas id="loadChart"></canvas><div class="chart-empty" hidden></div></div>
     </section>
 
-    <section class="grid-2">
-      <section class="card">
-        <div class="card-head">
-          <h2>Daily energy</h2>
-          <span class="muted">Weekends are shaded</span>
-        </div>
-        <div class="chart"><canvas id="dailyChart"></canvas><div class="chart-empty" hidden></div></div>
-      </section>
-      <section class="card">
-        <div class="card-head">
-          <h2>Deye programs</h2>
-          <span class="muted">Current inverter settings</span>
-        </div>
-        <table class="programs" id="programs"></table>
-      </section>
+    <section class="card">
+      <div class="card-head">
+        <h2>Daily energy</h2>
+        <span class="muted">Weekends are shaded</span>
+      </div>
+      <div class="chart"><canvas id="dailyChart"></canvas><div class="chart-empty" hidden></div></div>
     </section>
 
     <section class="card">
@@ -132,6 +129,7 @@
           <option value="14">14 days</option>
           <option value="30" selected>30 days</option>
           <option value="90">90 days</option>
+          <option value="365">365 days</option>
         </select>
       </div>
       <div id="economyNotes"></div>
@@ -147,6 +145,42 @@
     <section class="card">
       <div class="card-head"><h2>Days</h2></div>
       <div class="table-scroll"><table class="programs" id="economyTable"></table></div>
+    </section>
+  </main>
+
+  <main id="view-logs" hidden>
+    <section class="card">
+      <div class="card-head">
+        <h2>Storage</h2>
+        <span class="muted" id="storageInfo"></span>
+        <span class="log-controls push-right">
+          <button type="button" class="secondary small" id="compressDb">Compress old readings</button>
+          <button type="button" class="secondary small" id="vacuumDb">Compact database</button>
+        </span>
+      </div>
+      <section class="tiles" id="storageTiles"></section>
+      <div class="grid-2 storage-tables">
+        <div class="table-scroll"><table class="programs" id="dbTable"></table></div>
+        <div class="table-scroll"><table class="programs" id="filesTable"></table></div>
+      </div>
+      <div class="result" id="vacuumResult"></div>
+    </section>
+    <section class="card">
+      <div class="card-head">
+        <h2>Logs</h2>
+        <span class="muted" id="logCount"></span>
+        <span class="log-controls push-right">
+          <select id="logLevel" aria-label="Log level">
+            <option value="DEBUG">All</option>
+            <option value="INFO" selected>Info and above</option>
+            <option value="WARNING">Warnings and errors</option>
+            <option value="ERROR">Errors only</option>
+          </select>
+          <input type="search" id="logSearch" placeholder="Filter…" aria-label="Filter log lines">
+          <label class="inline-row"><input type="checkbox" id="logFollow" checked> Live</label>
+        </span>
+      </div>
+      <div class="log-view" id="logView"></div>
     </section>
   </main>
 
@@ -209,7 +243,8 @@
             <input type="number" name="record_interval_minutes" min="1" max="60" step="1">
           </label>
           <label>History sent to Claude (days)
-            <input type="number" name="history_days" min="1" max="90" step="1">
+            <input type="number" name="history_days" min="1" max="365" step="1">
+            <span class="hint">Up to 365. More days give Claude more to learn from but cost more tokens.</span>
           </label>
         </div>
         <fieldset class="weekend">
@@ -250,7 +285,7 @@
       </section>
 
       <section class="card">
-        <div class="card-head"><h2>Deye programs</h2><span class="muted">Time, SOC capacity and force-charge entity for each of the 6 programs</span></div>
+        <div class="card-head"><h2>Deye programs</h2><span class="muted">Time, SOC capacity and grid-charge entity for each of the 6 programs</span></div>
         <label>Program time marks
           <select name="program_time_marks">
             <option value="end">the END of its range — range starts at the previous program's time (P1 05:00 after P6 23:15 = 23:15–05:00)</option>
@@ -291,7 +326,7 @@
         <fieldset class="weekend">
           <legend>Send a notification for</legend>
           <label><input type="checkbox" name="notify_predictions"> every prediction</label>
-          <label><input type="checkbox" name="notify_soc_changes"> every SOC / force-charge change</label>
+          <label><input type="checkbox" name="notify_soc_changes"> every SOC / grid-charge change</label>
           <label><input type="checkbox" name="notify_errors"> failed predictions</label>
         </fieldset>
         <div class="test-row">
@@ -302,9 +337,15 @@
 
       <section class="card">
         <div class="card-head"><h2>History</h2></div>
+        <div class="form-grid">
+          <label>Keep full detail for (days)
+            <input type="number" name="detail_days" min="2" max="365" step="1">
+            <span class="hint">Older readings are compressed to one row per hour (averages and last counter values). They still show in charts, totals and predictions; the database stays a few MB per year.</span>
+          </label>
+        </div>
         <p class="muted">Rebuild the recorded data from the Home Assistant recorder (Home Assistant keeps 10 days by default). This replaces BatteryAI's readings for that period.</p>
         <div class="test-row">
-          <label class="inline-row">Days <input type="number" id="importDays" min="1" max="90" value="10"></label>
+          <label class="inline-row">Days <input type="number" id="importDays" min="1" max="365" value="10"></label>
           <button type="button" class="secondary" id="importHistory">Import history from Home Assistant</button>
           <div class="result" id="importResult"></div>
         </div>

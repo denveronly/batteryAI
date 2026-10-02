@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import threading
 import time
@@ -59,6 +60,7 @@ NEW_READING_COLUMNS = {
     "pv_power": "REAL",
     "control_mode": "TEXT",
     "source": "TEXT DEFAULT 'live'",
+    "resolution_s": "INTEGER",
 }
 NEW_ANALYSIS_COLUMNS = {"actions_json": "TEXT"}
 
@@ -76,7 +78,11 @@ READING_FIELDS = (
     "grid_import_today",
     "pv_power",
     "control_mode",
+    "resolution_s",
 )
+# Older readings are compressed to one row per hour (see compress_before).
+HOURLY = 3600
+AVERAGED = ("battery_soc", "load_power", "heat_pump_power", "boiler_power", "ev_power", "outdoor_temp", "pv_power")
 APPLIANCES = ("load_power", "heat_pump_power", "boiler_power", "ev_power")
 
 # Daily energy counters may still show yesterday's total for a few minutes after midnight.
@@ -92,6 +98,7 @@ class Database:
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._lock = threading.Lock()
+        self._last_attrs: str | None = None
         with self._lock:
             self._conn.executescript(SCHEMA)
             self._migrate()
@@ -154,7 +161,14 @@ class Database:
     )
 
     def add_reading(self, snap: dict[str, Any], tz: tzinfo) -> None:
-        self._execute(self._INSERT, self._reading_values(snap, tz, "live"))
+        values = list(self._reading_values(snap, tz, "live"))
+        # Outage attributes can be large and rarely change: store them only when they do.
+        attrs_index = 5 + len(READING_FIELDS) + 1
+        if values[attrs_index] == self._last_attrs:
+            values[attrs_index] = None
+        else:
+            self._last_attrs = values[attrs_index]
+        self._execute(self._INSERT, tuple(values))
 
     def replace_range(self, start_ts: int, end_ts: int, snaps: list[dict[str, Any]], tz: tzinfo) -> None:
         """Replaces all readings in [start_ts, end_ts) with imported history."""
@@ -162,6 +176,89 @@ class Database:
             self._conn.execute("DELETE FROM readings WHERE ts >= ? AND ts < ?", (start_ts, end_ts))
             self._conn.executemany(self._INSERT, [self._reading_values(s, tz, "history") for s in snaps])
             self._conn.commit()
+
+    def stats(self) -> dict[str, Any]:
+        path = self._conn.execute("PRAGMA database_list").fetchone()["file"]
+        files = {suffix: os.path.getsize(path + suffix) for suffix in ("", "-wal", "-shm") if os.path.exists(path + suffix)}
+        tables = {}
+        for name in ("readings", "analyses"):
+            tables[name] = self._query(f"SELECT COUNT(*) AS n FROM {name}")[0]["n"]
+        span = self._query("SELECT MIN(ts) AS first, MAX(ts) AS last FROM readings")[0]
+        sources = {row["source"] or "live": row["n"] for row in self._query("SELECT source, COUNT(*) AS n FROM readings GROUP BY source")}
+        detail_since = self._query("SELECT MIN(ts) AS ts FROM readings WHERE resolution_s IS NULL OR resolution_s < 3600")[0]["ts"]
+        page = self._query("PRAGMA page_count")[0]["page_count"] * self._query("PRAGMA page_size")[0]["page_size"]
+        free = self._query("PRAGMA freelist_count")[0]["freelist_count"] * self._query("PRAGMA page_size")[0]["page_size"]
+        return {
+            "path": path,
+            "file_bytes": sum(files.values()),
+            "files": files,
+            "allocated_bytes": page,
+            "free_bytes": free,
+            "rows": tables,
+            "reading_sources": sources,
+            "first_reading": span["first"],
+            "detail_since": detail_since,
+            "last_reading": span["last"],
+        }
+
+    def compress_before(self, cutoff_ts: int) -> dict[str, int]:
+        """Replaces detailed readings older than cutoff_ts by one row per hour.
+
+        Power, SOC and temperature become the hour's average (so energy totals stay right);
+        counters, forecasts, programs and states keep the hour's last value. Outage
+        attributes are dropped from compressed rows.
+        """
+        removed = added = 0
+        while True:
+            with self._lock:
+                rows = [
+                    dict(r)
+                    for r in self._conn.execute(
+                        "SELECT * FROM readings WHERE ts < ? AND (resolution_s IS NULL OR resolution_s < ?) "
+                        "ORDER BY ts LIMIT 20000",
+                        (cutoff_ts, HOURLY),
+                    ).fetchall()
+                ]
+            if not rows:
+                break
+            # Don't split the last hour of a batch across two batches.
+            last_bucket = rows[-1]["ts"] // HOURLY
+            if len(rows) == 20000:
+                rows = [r for r in rows if r["ts"] // HOURLY < last_bucket] or rows
+            buckets: dict[int, list[dict[str, Any]]] = {}
+            for row in rows:
+                buckets.setdefault(row["ts"] // HOURLY, []).append(row)
+            new_rows = []
+            for bucket, items in buckets.items():
+                last = items[-1]
+                merged = dict(last)
+                merged["ts"] = bucket * HOURLY
+                merged["minute_of_day"] = items[0]["minute_of_day"] - items[0]["minute_of_day"] % 60
+                merged["local_date"] = items[0]["local_date"]
+                for name in AVERAGED:
+                    values = [r[name] for r in items if r[name] is not None]
+                    merged[name] = sum(values) / len(values) if values else None
+                merged["outages_attrs"] = None
+                merged["resolution_s"] = HOURLY
+                merged["source"] = "hourly"
+                new_rows.append(merged)
+            columns = [c for c in new_rows[0] if c != "id"]
+            with self._lock:
+                self._conn.executemany(
+                    "DELETE FROM readings WHERE id = ?", [(r["id"],) for items in buckets.values() for r in items]
+                )
+                self._conn.executemany(
+                    f"INSERT INTO readings ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})",
+                    [tuple(r[c] for c in columns) for r in new_rows],
+                )
+                self._conn.commit()
+            removed += sum(len(items) for items in buckets.values())
+            added += len(new_rows)
+        return {"removed": removed, "added": added}
+
+    def vacuum(self) -> None:
+        with self._lock:
+            self._conn.execute("VACUUM")
 
     def recompute_targets(self, target_for: Callable[[list[dict[str, Any]], int], float | None]) -> int:
         """Re-derives target_soc of every reading from its stored programs (after the
@@ -190,6 +287,11 @@ class Database:
             return None
         row = rows[0]
         row["deye_programs"] = json.loads(row["deye_programs"] or "[]")
+        if row["outages_attrs"] is None:  # unchanged since an earlier reading
+            earlier = self._query(
+                "SELECT outages_attrs FROM readings WHERE outages_attrs IS NOT NULL ORDER BY ts DESC LIMIT 1"
+            )
+            row["outages_attrs"] = earlier[0]["outages_attrs"] if earlier else None
         row["outages_attrs"] = json.loads(row["outages_attrs"] or "{}")
         return row
 
@@ -250,7 +352,7 @@ class Database:
 
             # Integrate power (W) over time until the next reading.
             if index + 1 < len(rows):
-                gap = min(rows[index + 1]["ts"] - row["ts"], MAX_INTEGRATION_GAP)
+                gap = min(rows[index + 1]["ts"] - row["ts"], max(MAX_INTEGRATION_GAP, row["resolution_s"] or 0))
                 hour = row["minute_of_day"] // 60
                 for name in APPLIANCES:
                     if row[name] is not None:
@@ -458,7 +560,7 @@ def economy_report(
     first = (today - timedelta(days=days - 1)).isoformat()
     rows = db._query(
         """SELECT ts, local_date, weekday, is_weekend, minute_of_day, load_power, pv_power,
-                  grid_import_today, control_mode
+                  grid_import_today, control_mode, resolution_s
            FROM readings WHERE local_date >= ? ORDER BY ts""",
         (first,),
     )
@@ -484,10 +586,22 @@ def economy_report(
             }
         day["_samples"] += 1
         day["_auto"] += row["control_mode"] == "auto"
+        if (
+            day["_samples"] == 1
+            and (row["resolution_s"] or 0) >= HOURLY
+            and row["minute_of_day"] < 60
+            and row["grid_import_today"] is not None
+        ):
+            # The day's first hourly row already includes what was bought since the midnight reset.
+            price0, zone0 = tariff_at(row["minute_of_day"])
+            day["grid_kwh"] += row["grid_import_today"]
+            day[f"grid_{zone0}_kwh"] += row["grid_import_today"]
+            day["paid"] += row["grid_import_today"] * price0
+            day["_grid_samples"] += 1
         if index + 1 >= len(rows):
             continue
         following = rows[index + 1]
-        gap = min(following["ts"] - row["ts"], MAX_INTEGRATION_GAP)
+        gap = min(following["ts"] - row["ts"], max(MAX_INTEGRATION_GAP, row["resolution_s"] or 0))
         price, zone = tariff_at(row["minute_of_day"])
         if row["load_power"] is not None:
             kwh = row["load_power"] * gap / 3_600_000
@@ -504,9 +618,14 @@ def economy_report(
         ):
             delta = following["grid_import_today"] - row["grid_import_today"]
             if delta >= 0:  # a negative step is the midnight reset
+                # Hourly rows hold the counter at the end of their hour, so the step up to the
+                # next row was bought during the next row's hour.
+                grid_price, grid_zone = (
+                    tariff_at(following["minute_of_day"]) if (row["resolution_s"] or 0) >= HOURLY else (price, zone)
+                )
                 day["grid_kwh"] += delta
-                day[f"grid_{zone}_kwh"] += delta
-                day["paid"] += delta * price
+                day[f"grid_{grid_zone}_kwh"] += delta
+                day["paid"] += delta * grid_price
                 day["_grid_samples"] += 1
 
     result = []

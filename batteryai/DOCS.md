@@ -2,7 +2,7 @@
 
 BatteryAI records your battery, solar, load, appliance, weather and outage data, and
 asks Claude at fixed times each day (12:00 and 23:00 by default) to predict consumption
-and plan the SOC and force charge of the six Deye time-of-use programs. With AI
+and plan the SOC and grid charge of the six Deye time-of-use programs. With AI
 auto-control on, the plan is written to the inverter.
 
 ## Tabs
@@ -12,12 +12,14 @@ auto-control on, the plan is written to the inverter.
 - **Tiles** – battery SOC, load, PV power and PV surplus (positive = the battery is
   charging from the sun), consumption, solar forecasts, heat pump / boiler / EV power,
   outdoor temperature, tomorrow's weather, current tariff, outages.
-- **Battery control**
+- **Battery control** – also lists the six Deye programs with their time ranges; type a
+  new SOC and press *Set*, or flip the *Grid charge* switch, to change the inverter
+  directly.
   - *AI auto-control* – when on, every prediction writes Claude's SOC values and force
     charge settings to the Deye programs. When off, Claude only advises.
   - *Charge all to 98%* – sets every program to the “Charge all” SOC, turns on each
-    program's force-charge switch and turns AI auto-control off. Turning auto-control
-    back on restores the force-charge switches and applies the latest prediction.
+    program's grid-charge switch and turns AI auto-control off. Turning auto-control
+    back on restores the grid-charge switches and applies the latest prediction.
 - **Latest prediction** – consumption today/tomorrow, PV tomorrow, lowest SOC, outage
   risk, estimated grid cost, the effect of the weather, when the heat pump, boiler and
   EV will run, an hourly power forecast for tomorrow, the suggested programs, and
@@ -41,6 +43,12 @@ consumption would have cost without PV and battery, and what was saved — split
 *AI control* column shows how much of the day auto-control was on.
 Requires the *Grid import today* and *PV power* sensors and the tariff settings.
 
+### Logs
+
+The add-on's recent log lines (filter by level, search, live update) and the storage
+used: database size and rows, how far back the data goes, everything in `/data`, and
+free disk space. *Compress old readings* and *Compact database* shrink the database.
+
 ### Settings
 
 All settings are stored in `/data/settings.json` and apply immediately when saved.
@@ -62,17 +70,17 @@ All settings are stored in `/data/settings.json` and apply immediately when save
   today (kWh), load power (W, kW is converted), consumption today (kWh), grid import
   today (kWh), weather, probable outages, heat pump / boiler / EV power (W).
 - **Deye programs** – for each of the 6 programs: time entity, SOC entity (number,
-  input_number or select) and an optional force (grid) charge switch. *Program time
+  input_number or select) and an optional grid charge switch. *Program time
   marks* says how the inverter reads the times: **end** (default) – a program's time is
   the end of its range, which starts at the previous program's time (P1 05:00 after
   P6 23:15 covers 23:15 – 05:00); **start** – the range lasts until the next program's
   time. Two programs with the same time leave one of them unused. BatteryAI never
-  changes program times, only SOC and force charge.
+  changes program times, only SOC and grid charge.
 - **Tariff** – currency, peak and off-peak price per kWh, off-peak windows such as
   `23:00-07:00` (every other time is peak).
 - **Phone notifications** – one or more notify services (phones from the Home Assistant
   Companion app appear as `mobile_app_…`), with a test button. Notifications are normal
-  priority, not critical alerts: every prediction, every SOC / force-charge change, and
+  priority, not critical alerts: every prediction, every SOC / grid-charge change, and
   failed predictions can each be switched on or off.
 - **History** – rebuild the data from the Home Assistant recorder (10 days by default).
 - **Extra instructions** for Claude.
@@ -93,7 +101,13 @@ prediction (at most once every 30 minutes). Claude raises the SOC and turns on f
 charge before an outage when the battery would not otherwise cover the load — unless
 the outage falls in daylight and PV is expected to cover it.
 
-## History
+## History and database size
+
+Readings are kept in full detail (every few minutes) for *Keep full detail* days (30 by
+default, Settings → History). Older readings are compressed to one row per hour: power,
+SOC and temperature become hourly averages, energy counters keep their last value, so
+daily totals and costs stay the same. Charts, the Economy tab and predictions use both.
+A year of data takes a few MB. History sent to Claude can be up to 365 days.
 
 On first start (less than a day of data) BatteryAI imports the configured entities from
 the Home Assistant recorder, so the charts and Claude have data right away. New values

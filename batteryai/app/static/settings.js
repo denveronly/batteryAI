@@ -38,7 +38,7 @@ const SENSOR_GROUPS = [
   },
 ];
 const SENSORS = SENSOR_GROUPS.flatMap((g) => g.rows);
-const NUMBER_FIELDS = ["record_interval_minutes", "history_days", "prediction_margin_percent", "min_soc_percent",
+const NUMBER_FIELDS = ["record_interval_minutes", "history_days", "detail_days", "prediction_margin_percent", "min_soc_percent",
   "max_soc_percent", "apply_threshold_percent", "charge_all_soc_percent"];
 const TEXT_FIELDS = ["claude_effort", "response_language", "extra_instructions", "tariff_currency", "program_time_marks"];
 const PRICE_FIELDS = ["tariff_peak_price", "tariff_offpeak_price"];
@@ -93,7 +93,7 @@ function buildForm() {
         el("h3", {}, `Program ${slot}`),
         entityRow({ name: `deye_programs.${slot}.time_entity`, label: "Start time", hint: "time / select / sensor", kind: "time" }),
         entityRow({ name: `deye_programs.${slot}.soc_entity`, label: "SOC capacity", hint: "% (number or select)", kind: "numeric" }),
-        entityRow({ name: `deye_programs.${slot}.charge_entity`, label: "Force charge", hint: "grid charge switch (optional)", kind: "switch" }),
+        entityRow({ name: `deye_programs.${slot}.charge_entity`, label: "Grid charge", hint: "grid charge switch (optional)", kind: "switch" }),
       ),
     );
   }

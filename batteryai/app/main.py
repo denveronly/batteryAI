@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
+from collections import deque
 import logging
 import os
 import signal
@@ -50,6 +52,7 @@ class BatteryAI:
         self.history_import: dict[str, Any] = {"running": False, "result": None, "error": None}
         self._background: set[asyncio.Task] = set()
         self._last_outage_key: str | None = None
+        self._last_compress = 0.0
         self._last_outage_run = 0.0
 
     def spawn(self, coro: Any) -> asyncio.Task:
@@ -185,6 +188,17 @@ class BatteryAI:
     async def notify_actions(self, actions: list[dict[str, Any]], reason: str) -> None:
         await self.notify(f"BatteryAI: {reason}", notify.actions_message(actions), self.opts.notify_soc_changes)
 
+    async def compress_old(self) -> dict[str, int]:
+        cutoff = int(time.time()) - self.opts.detail_days * 86400
+        result = await asyncio.to_thread(self.db.compress_before, cutoff)
+        if result["removed"]:
+            _LOGGER.info(
+                "Compressed %d readings older than %d days into %d hourly rows",
+                result["removed"], self.opts.detail_days, result["added"],
+            )
+        self._last_compress = time.time()
+        return result
+
     async def recorder_loop(self) -> None:
         interval = self.opts.record_interval_minutes * 60
         while True:
@@ -192,6 +206,11 @@ class BatteryAI:
                 await self.record()
             except Exception:  # keep recording even if one cycle fails
                 _LOGGER.exception("Recording failed")
+            if time.time() - self._last_compress > 6 * 3600:
+                try:
+                    await self.compress_old()
+                except Exception:
+                    _LOGGER.exception("Compressing old readings failed")
             await asyncio.sleep(interval - time.time() % interval)
 
     async def scheduler_loop(self) -> None:
@@ -263,6 +282,27 @@ class BatteryAI:
 routes = web.RouteTableDef()
 
 
+class MemoryLogHandler(logging.Handler):
+    """Keeps the most recent log records for the Logs tab."""
+
+    def __init__(self, capacity: int = 2000) -> None:
+        super().__init__()
+        self.records: deque[dict[str, Any]] = deque(maxlen=capacity)
+        self.counter = 0
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.counter += 1
+        message = record.getMessage()
+        if record.exc_info:
+            message += "\n" + logging.Formatter().formatException(record.exc_info)
+        self.records.append(
+            {"id": self.counter, "ts": record.created, "level": record.levelname, "logger": record.name, "message": message}
+        )
+
+
+LOG_BUFFER = MemoryLogHandler()
+
+
 def _app(request: web.Request) -> BatteryAI:
     return request.app["batteryai"]
 
@@ -311,6 +351,9 @@ async def status(request: web.Request) -> web.Response:
             "units": app.last_snapshot["units"] if app.last_snapshot else {},
             "active_program_slot": app.last_snapshot["active_program_slot"] if app.last_snapshot else None,
             "program_time_marks": opts.program_time_marks,
+            "programs_configured": {
+                p.slot: {"soc": bool(p.soc_entity), "charge": bool(p.charge_entity)} for p in opts.deye_programs
+            },
             "sensors": opts.sensor_map(),
             "tariff": {**opts.tariff_dict(), "now": opts.tariff_at(datetime.now(app.tz).hour * 60 + datetime.now(app.tz).minute)[1]},
             "appliances": {
@@ -379,6 +422,110 @@ async def economy(request: web.Request) -> web.Response:
     return web.json_response(report)
 
 
+@routes.get("/api/logs")
+async def logs(request: web.Request) -> web.Response:
+    """Recent log lines; ?after=<id> returns only newer ones, ?level=WARNING filters."""
+    levels = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40, "CRITICAL": 50}
+    minimum = levels.get(request.query.get("level", "INFO").upper(), 20)
+    after = _int_param(request, "after", 0, 0, 1 << 62)
+    entries = [r for r in LOG_BUFFER.records if r["id"] > after and levels.get(r["level"], 0) >= minimum]
+    return web.json_response(entries[-1000:])
+
+
+def _dir_size(path: Path) -> tuple[int, int]:
+    total = files = 0
+    for item in path.rglob("*"):
+        try:
+            if item.is_file():
+                total += item.stat().st_size
+                files += 1
+        except OSError:
+            pass
+    return total, files
+
+
+@routes.get("/api/storage")
+async def storage(request: web.Request) -> web.Response:
+    app = _app(request)
+    data_dir = Path(DATA_DIR)
+
+    def collect() -> dict[str, Any]:
+        files = []
+        for item in sorted(data_dir.iterdir()) if data_dir.exists() else []:
+            if item.is_file():
+                files.append({"name": item.name, "bytes": item.stat().st_size})
+        data_total, data_files = _dir_size(data_dir)
+        app_total, _ = _dir_size(Path(__file__).parent)
+        disk = shutil.disk_usage(data_dir)
+        return {
+            "database": app.db.stats(),
+            "data_dir": str(data_dir),
+            "data_bytes": data_total,
+            "data_files": data_files,
+            "files": files,
+            "app_bytes": app_total,
+            "disk": {"total": disk.total, "used": disk.used, "free": disk.free},
+        }
+
+    return web.json_response(await asyncio.to_thread(collect))
+
+
+@routes.post("/api/storage/vacuum")
+async def vacuum(request: web.Request) -> web.Response:
+    app = _app(request)
+    before = app.db.stats()["file_bytes"]
+    await asyncio.to_thread(app.db.vacuum)
+    after = app.db.stats()["file_bytes"]
+    _LOGGER.info("Database compacted: %d -> %d bytes", before, after)
+    return web.json_response({"before": before, "after": after})
+
+
+@routes.post("/api/storage/compress")
+async def compress(request: web.Request) -> web.Response:
+    return web.json_response(await _app(request).compress_old())
+
+
+@routes.post(r"/api/programs/{slot:\d}")
+async def set_program(request: web.Request) -> web.Response:
+    """Manual change from the Battery control card: {"soc": 60} and/or {"grid_charge": true}."""
+    app = _app(request)
+    slot = int(request.match_info["slot"])
+    program = next((p for p in app.opts.deye_programs if p.slot == slot), None)
+    if program is None:
+        raise web.HTTPNotFound()
+    body = await request.json()
+    actions: list[dict[str, Any]] = []
+    if "soc" in body:
+        try:
+            soc = float(body["soc"])
+        except (TypeError, ValueError):
+            return web.json_response({"error": "SOC must be a number"}, status=400)
+        if not 0 <= soc <= 100:
+            return web.json_response({"error": "SOC must be between 0 and 100"}, status=400)
+        if not program.soc_entity:
+            return web.json_response({"error": f"Program {slot} has no SOC entity in Settings."}, status=400)
+        action: dict[str, Any] = {"slot": slot, "entity_id": program.soc_entity, "time": time.time(), "manual": True}
+        try:
+            action.update(status="set", **await control.set_soc(app.ha, program.soc_entity, soc))
+        except HAError as err:
+            action.update(status="error", error=str(err))
+        actions.append(action)
+    if "grid_charge" in body:
+        if not program.charge_entity:
+            return web.json_response({"error": f"Program {slot} has no grid charge switch in Settings."}, status=400)
+        action = {"slot": slot, "entity_id": program.charge_entity, "kind": "grid_charge", "time": time.time(), "manual": True}
+        try:
+            action.update(status="set", **await control.set_switch(app.ha, program.charge_entity, bool(body["grid_charge"])))
+        except HAError as err:
+            action.update(status="error", error=str(err))
+        actions.append(action)
+    _LOGGER.info("Manual program change: %s", actions)
+    await app.notify_actions(actions, "program changed manually")
+    await asyncio.sleep(1)  # let the inverter integration report the new state
+    await app.record()
+    return web.json_response({"actions": actions})
+
+
 @routes.post("/api/control")
 async def set_control(request: web.Request) -> web.Response:
     """Body {"mode": "off" | "auto"}; Charge all has its own endpoint."""
@@ -415,7 +562,7 @@ async def history_import(request: web.Request) -> web.Response:
     app = _app(request)
     body = await request.json() if request.can_read_body else {}
     try:
-        days = max(1, min(90, int(body.get("days") or app.opts.history_days)))
+        days = max(1, min(365, int(body.get("days") or app.opts.history_days)))
     except (TypeError, ValueError):
         return web.json_response({"error": "days must be a number"}, status=400)
     if not app.start_history_import(days):
@@ -678,6 +825,8 @@ async def resolve_time_zone(ha: HomeAssistant) -> tzinfo:
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger().addHandler(LOG_BUFFER)
+    logging.getLogger("httpx2").setLevel(logging.WARNING)  # one line per HTTP request is noise
     opts = load_settings()
     os.makedirs(DATA_DIR, exist_ok=True)
     db = Database(os.path.join(DATA_DIR, "batteryai.db"))

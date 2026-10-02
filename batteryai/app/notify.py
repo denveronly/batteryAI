@@ -63,7 +63,7 @@ def actions_message(actions: list[dict[str, Any]]) -> str | None:
         prefix = f"P{action['slot']} " if action.get("slot") else ""
         if action.get("status") == "set":
             if action.get("kind") == "grid_charge":
-                lines.append(f"{prefix}force charge {action.get('from') or '?'} → {action.get('to')}")
+                lines.append(f"{prefix}grid charge {action.get('from') or '?'} → {action.get('to')}")
             else:
                 lines.append(f"{prefix}SOC {_num(action.get('from'), 0)}% → {_num(action.get('to'), 0)}%")
         elif action.get("status") == "error":
