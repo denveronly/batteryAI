@@ -6,8 +6,8 @@ marked temperature-dependent (heat pump, AC) are scaled with a temperature regre
 solar forecast.
 
 Planner: for each Deye program range it estimates how much energy the battery must hold
-for the following peak-tariff hours that PV will not cover, adds the safety margin, and
-turns that into an SOC target; grid charge is switched on in off-peak programs when PV
+for the following more expensive tariff hours that PV will not cover, adds the safety margin, and
+turns that into an SOC target; grid charge is switched on in cheapest-tariff programs when PV
 will not refill the battery, and before outages.
 """
 
@@ -210,7 +210,10 @@ def plan(opts: Options, snapshot: dict[str, Any], fc: dict[str, Any]) -> dict[st
     pv = fc["pv_hourly"]
     deficit = [max(0, load[h] - pv[h]) / 1000 for h in range(24)]  # kWh the grid/battery must cover
     surplus = [max(0, pv[h] - load[h]) / 1000 for h in range(24)]
-    offpeak = [opts.tariff_at(h * 60 + 30)[1] == "offpeak" for h in range(24)]
+    # "Cheap" hours are those of the cheapest tariff: the time to charge from the grid.
+    offpeak = [opts.is_cheap(h * 60 + 30) for h in range(24)]
+    prices = [opts.tariff_at(h * 60 + 30)[0] for h in range(24)]
+    names = [opts.tariff_at(h * 60 + 30)[1] for h in range(24)]
     outage = _outage_expected(snapshot)
     pv_short = fc["pv_tomorrow_kwh"] < fc["consumption_tomorrow_kwh"] * 0.8
 
@@ -249,17 +252,17 @@ def plan(opts: Options, snapshot: dict[str, Any], fc: dict[str, Any]) -> dict[st
             soc = opts.min_soc_percent + energy / capacity * 100
             grid = pv_short or energy > 0.2 * capacity
             reason = (
-                f"Off-peak window. The following peak hours need ~{need:.1f} kWh, PV can add ~{refill:.1f} kWh; "
-                f"keeping {energy:.1f} kWh (+{opts.prediction_margin_percent}% margin) in the battery."
+                f"Cheapest tariff ({names[mid]}). The following pricier hours need ~{need:.1f} kWh, PV can add "
+                f"~{refill:.1f} kWh; keeping {energy:.1f} kWh (+{opts.prediction_margin_percent}% margin) in the battery."
             )
         else:
             daytime_pv = sum(surplus[h] for h in hours)
             soc = opts.min_soc_percent
             grid = False
             reason = (
-                f"Peak tariff: use the battery. PV surplus in this window ~{daytime_pv:.1f} kWh recharges it."
+                f"{names[mid]} tariff: use the battery. PV surplus in this window ~{daytime_pv:.1f} kWh recharges it."
                 if daytime_pv > 0.5
-                else "Peak tariff: use the battery down to the minimum SOC."
+                else f"{names[mid]} tariff: use the battery down to the minimum SOC."
             )
         if outage:
             soc = max(soc, opts.max_soc_percent)
@@ -274,15 +277,19 @@ def plan(opts: Options, snapshot: dict[str, Any], fc: dict[str, Any]) -> dict[st
             "reason": reason,
         })
 
-    # Rough grid cost: deficits bought at the tariff of their hour, plus off-peak grid charging.
-    peak_price, offpeak_price = opts.tariff_peak_price, opts.tariff_offpeak_price
-    cost = sum(deficit[h] * (offpeak_price if offpeak[h] else 0) for h in range(24))
+    # Rough grid cost: deficits in cheap hours bought directly, battery energy charged at the
+    # cheapest price, and whatever the battery can't cover bought at the price of its hour.
+    cheap_price = opts.cheapest_price
+    cost = sum(deficit[h] * prices[h] for h in range(24) if offpeak[h])
     stored = sum(
         max(0, r["soc_percent"] - opts.min_soc_percent) / 100 * capacity
         for r, p in zip(results, programs) if r["grid_charge"]
     )
     peak_deficit = sum(deficit[h] for h in range(24) if not offpeak[h])
-    cost += min(stored, peak_deficit) * offpeak_price + max(0.0, peak_deficit - stored) * peak_price
+    peak_price = (
+        sum(deficit[h] * prices[h] for h in range(24) if not offpeak[h]) / peak_deficit if peak_deficit else cheap_price
+    )
+    cost += min(stored, peak_deficit) * cheap_price + max(0.0, peak_deficit - stored) * peak_price
     return {"programs": results, "outage": outage, "pv_short": pv_short, "cost": round(cost, 2)}
 
 
@@ -302,11 +309,12 @@ def analyze(db: Database, opts: Options, snapshot: dict[str, Any], tz: tzinfo) -
             "reason": "Average of the most similar recorded days"
             + (", adjusted for temperature." if appliance.temperature_dependent else "."),
         })
-        peak_hours = [h for h in active if opts.tariff_at(h * 60 + 30)[1] == "peak"]
+        peak_hours = [h for h in active if not opts.is_cheap(h * 60 + 30)]
         if peak_hours and not appliance.temperature_dependent:
-            recommendations.append(f"If possible, move {appliance.name} from peak hours ({_windows(peak_hours)}) to off-peak.")
+            cheapest = opts.tariff_dict()["cheapest"]
+            recommendations.append(f"If possible, move {appliance.name} from pricier hours ({_windows(peak_hours)}) to the {cheapest} tariff.")
     if p["pv_short"]:
-        recommendations.append("PV will not cover tomorrow's use: charge from the grid in off-peak hours.")
+        recommendations.append(f"PV will not cover tomorrow's use: charge from the grid during the {opts.tariff_dict()['cheapest']} tariff.")
     else:
         recommendations.append("PV should cover most of tomorrow: run flexible loads in the sunniest hours.")
 
@@ -322,8 +330,8 @@ def analyze(db: Database, opts: Options, snapshot: dict[str, Any], tz: tzinfo) -
         "Local fast engine (statistical, no AI). Similar days used: "
         + (", ".join(fc["similar_days"]) or "none")
         + f". {fc['weather_note']} PV hourly shape from recorded PV power, scaled to the forecast. "
-        "Off-peak programs keep enough energy for the following peak hours not covered by PV; "
-        "peak programs let the battery discharge to the minimum SOC."
+        "Programs in the cheapest tariff keep enough energy for the following pricier hours not covered by PV; "
+        "programs in pricier tariffs let the battery discharge to the minimum SOC."
     )
     return {
         "summary": summary,

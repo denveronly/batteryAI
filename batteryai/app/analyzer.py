@@ -39,7 +39,7 @@ Each request gives you one JSON document with:
 - recent_hourly: hourly samples from the last 48 hours.
 - accuracy: your earlier predictions compared with what actually happened, as percentages.
 - tuning: the owner's settings for planning (safety margin, allowed SOC range).
-- tariff: grid prices per kWh with currency; off-peak windows are cheap, every other time is peak.
+- tariff: the grid tariffs (name, price per kWh, time windows; one applies at all other times), the currency, the cheapest tariff and the one in effect now.
 - user_notes: optional instructions from the owner.
 
 Weekends usually use less energy than weekdays in this home. For temperature-dependent appliances, relate their energy to the outdoor temperature in the history and use tomorrow's forecast temperatures to predict it. Check every assumption against the data instead of assuming it.
@@ -50,7 +50,7 @@ Your tasks:
 3. Judge the outage risk from the outages sensor and make sure the battery will hold enough charge to cover the expected outage windows.
 4. Propose an SOC capacity for each Deye program. Plan for the predicted consumption increased by tuning.prediction_margin_percent, keep every SOC between tuning.min_soc_percent and tuning.max_soc_percent, balance outage backup, solar self-consumption and grid charging, and explain every change. Program times are fixed by the owner and are never changed by BatteryAI: return each program's current time unchanged and do not suggest moving times.
 5. Decide grid charge (grid_charge) for each program that has a switch. Turn it on and raise the SOC before an expected outage when the battery would otherwise not cover the load until power returns, taking into account the time of day: if the outage falls in daylight hours and the PV forecast covers the load and recharges the battery, grid charging is not needed. Turn it off when PV is expected to be enough, so the battery is charged by the sun. For programs without a switch return null.
-6. Minimise what is paid for grid energy: charge from the grid in off-peak windows rather than peak, use PV first, and cover peak-time load from the battery. Estimate tomorrow's grid cost in the tariff currency.
+6. Minimise what is paid for grid energy: charge from the grid in the cheapest tariff windows, use PV first, and cover the load in the more expensive tariff periods from the battery. Estimate tomorrow's grid cost in the tariff currency.
 7. Give short, practical recommendations.
 
 Use the units the sensors report (W for power, kWh for energy, % for SOC). If data is missing, stale or implausible, say so in the summary and lower your confidence; never invent values. """
@@ -237,6 +237,7 @@ def build_input(
         "recent_hourly": list(hourly.values()),
         "accuracy": report,
         "tariff": {**opts.tariff_dict(), "now": opts.tariff_at(now.hour * 60 + now.minute)[1]},
+        "tariff_by_hour": [opts.tariff_at(h * 60 + 30)[1] for h in range(24)],
         "tuning": {
             "battery_capacity_kwh": opts.battery_capacity_kwh,
             "prediction_margin_percent": opts.prediction_margin_percent,

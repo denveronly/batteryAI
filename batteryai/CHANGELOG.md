@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.6
+
+- Tariffs are a list you manage in Settings → Tariffs: any number of named tariffs (up
+  to 8) with their own price and time windows, one of them covering "all other times".
+  Add rows with **+ Add tariff**, remove them with **−**. Existing peak / off-peak
+  settings are carried over as *Off-peak* and *Peak*.
+- The dashboard tile shows the current tariff's name and price; the Economy table has a
+  grid energy column per tariff; Claude and the local engines get the price of every
+  hour and charge in the cheapest tariff.
+- Negative savings are shown in red.
+
 ## 0.4.5
 
 - Seasons: a monthly summary over all stored history (consumption, PV, grid, appliances,

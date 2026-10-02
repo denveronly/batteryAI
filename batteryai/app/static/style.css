@@ -286,6 +286,7 @@ button.warn-button { background: var(--warn); border-color: var(--warn); color: 
 .notes { margin-bottom: 12px; }
 td.num, th.num { text-align: right; white-space: nowrap; }
 .saved { color: var(--ok); font-weight: 600; }
+.saved.loss { color: var(--error); }
 td.nowrap { white-space: nowrap; }
 #modelSelect { max-width: 190px; }
 
@@ -329,7 +330,7 @@ td.nowrap { white-space: nowrap; }
 .progress { width: 100%; height: 8px; border-radius: 4px; background: var(--chip); overflow: hidden; margin-top: 6px; }
 .progress > div { height: 100%; background: var(--accent); }
 .form-grid > label, label { min-width: 0; }
-label select, label input:not([type="checkbox"]) { width: 100%; max-width: 100%; min-width: 0; }
+label select, label input:not([type="checkbox"]):not([type="radio"]) { width: 100%; max-width: 100%; min-width: 0; }
 
 /* Appliance editor -------------------------------------------------------------- */
 .appliance-row { padding: 10px 0; border-bottom: 1px solid var(--border); }
@@ -343,3 +344,6 @@ button.remove { font-size: 18px; line-height: 1; padding: 6px 12px; }
 h1 .version { font-size: 12px; font-weight: 500; color: var(--muted); vertical-align: middle; }
 .brand { display: flex; align-items: center; gap: 10px; }
 .brand .logo { width: 34px; height: 34px; flex: none; }
+.tariff-row { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(100px, 0.7fr) minmax(180px, 2fr) auto auto; gap: 8px 12px; align-items: end; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.tariff-row input:disabled { opacity: 0.55; }
+@media (max-width: 760px) { .tariff-row { grid-template-columns: 1fr 1fr; } .tariff-row .tariff-windows { grid-column: 1 / -1; } .tariff-row .appliance-buttons { justify-self: end; } }

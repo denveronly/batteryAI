@@ -649,8 +649,7 @@ def economy_report(
                 "pv_direct_kwh": 0.0,
                 "pv_saved": 0.0,
                 "grid_kwh": 0.0,
-                "grid_peak_kwh": 0.0,
-                "grid_offpeak_kwh": 0.0,
+                "grid_by_tariff": {},  # tariff name -> kWh bought
                 "paid": 0.0,
                 "_grid_samples": 0,
                 "_auto": 0,
@@ -667,7 +666,7 @@ def economy_report(
             # The day's first hourly row already includes what was bought since the midnight reset.
             price0, zone0 = tariff_at(row["minute_of_day"])
             day["grid_kwh"] += row["grid_import_today"]
-            day[f"grid_{zone0}_kwh"] += row["grid_import_today"]
+            day["grid_by_tariff"][zone0] = day["grid_by_tariff"].get(zone0, 0.0) + row["grid_import_today"]
             day["paid"] += row["grid_import_today"] * price0
             day["_grid_samples"] += 1
         if index + 1 >= len(rows):
@@ -696,7 +695,7 @@ def economy_report(
                     tariff_at(following["minute_of_day"]) if (row["resolution_s"] or 0) >= HOURLY else (price, zone)
                 )
                 day["grid_kwh"] += delta
-                day[f"grid_{grid_zone}_kwh"] += delta
+                day["grid_by_tariff"][grid_zone] = day["grid_by_tariff"].get(grid_zone, 0.0) + delta
                 day["paid"] += delta * grid_price
                 day["_grid_samples"] += 1
 
@@ -706,7 +705,8 @@ def economy_report(
         samples = day.pop("_samples")
         day["ai_control_share"] = round(day.pop("_auto") / samples * 100) if samples else 0
         if not has_grid:
-            day["paid"] = day["grid_kwh"] = day["grid_peak_kwh"] = day["grid_offpeak_kwh"] = None
+            day["paid"] = day["grid_kwh"] = None
+            day["grid_by_tariff"] = {}
         day["total_saved"] = day["without_system"] - day["paid"] if has_grid else None
         day["battery_saved"] = day["total_saved"] - day["pv_saved"] if has_grid else None
         day["saved_percent"] = (
@@ -717,6 +717,7 @@ def economy_report(
         for key, value in list(day.items()):
             if isinstance(value, float):
                 day[key] = round(value, 2)
+        day["grid_by_tariff"] = {k: round(v, 2) for k, v in day["grid_by_tariff"].items()}
         result.append(day)
 
     def total(key: str) -> float | None:
@@ -725,8 +726,13 @@ def economy_report(
 
     totals = {key: total(key) for key in (
         "load_kwh", "without_system", "paid", "pv_saved", "battery_saved", "total_saved",
-        "grid_kwh", "grid_peak_kwh", "grid_offpeak_kwh", "pv_direct_kwh",
+        "grid_kwh", "pv_direct_kwh",
     )}
+    by_tariff: dict[str, float] = {}
+    for day in result:
+        for name, kwh in day["grid_by_tariff"].items():
+            by_tariff[name] = round(by_tariff.get(name, 0.0) + kwh, 2)
+    totals["grid_by_tariff"] = by_tariff
     totals["saved_percent"] = (
         round(totals["total_saved"] / totals["without_system"] * 100, 1)
         if totals["total_saved"] is not None and totals["without_system"]

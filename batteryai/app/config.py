@@ -53,6 +53,28 @@ class Appliance:
     temperature_dependent: bool = False  # heats or cools: energy follows outdoor temperature
 
 
+@dataclass
+class Tariff:
+    """A grid price that applies in its time windows; the default one applies at all other times."""
+
+    name: str
+    price: float
+    windows: list[str] = field(default_factory=list)  # "HH:MM-HH:MM", may cross midnight
+    default: bool = False
+
+
+MAX_TARIFFS = 8
+
+
+def _window_minutes(window: str) -> tuple[int, int]:
+    start, end = window.split("-")
+    return int(start[:2]) * 60 + int(start[3:5]), int(end[:2]) * 60 + int(end[3:5])
+
+
+def _in_window(minute: int, start: int, end: int) -> bool:
+    return start <= minute < end if start < end else minute >= start or minute < end
+
+
 MAX_APPLIANCES = 12
 # Up to 0.4.0 there were three fixed appliance settings; they become the first entries.
 LEGACY_APPLIANCES = (
@@ -97,9 +119,10 @@ class Options:
     pv_power_sensor: str = ""
     grid_import_sensor: str = ""
     tariff_currency: str = "UAH"
-    tariff_peak_price: float = 4.32
-    tariff_offpeak_price: float = 2.16
-    tariff_offpeak_windows: list[str] = field(default_factory=lambda: ["23:00-07:00"])
+    tariffs: list[Tariff] = field(default_factory=lambda: [
+        Tariff(name="Off-peak", price=2.16, windows=["23:00-07:00"]),
+        Tariff(name="Peak", price=4.32, default=True),
+    ])
     prediction_margin_percent: int = 10
     min_soc_percent: int = 20
     max_soc_percent: int = 100
@@ -149,29 +172,34 @@ class Options:
                     candidates.append(candidate)
         return min(candidates)
 
-    def offpeak_ranges(self) -> list[tuple[int, int]]:
-        """Off-peak windows as (start, end) minutes; a window may wrap past midnight."""
-        ranges = []
-        for window in self.tariff_offpeak_windows:
-            start, end = window.split("-")
-            ranges.append((int(start[:2]) * 60 + int(start[3:5]), int(end[:2]) * 60 + int(end[3:5])))
-        return ranges
+    def tariff_for(self, minute_of_day: int) -> Tariff | None:
+        """The tariff in effect: the first one whose window contains the minute, else the default."""
+        for tariff in self.tariffs:
+            if not tariff.default and any(_in_window(minute_of_day, *_window_minutes(w)) for w in tariff.windows):
+                return tariff
+        return next((t for t in self.tariffs if t.default), None)
 
     def tariff_at(self, minute_of_day: int) -> tuple[float, str]:
-        """(price per kWh, "offpeak" | "peak") at a minute of the day."""
-        for start, end in self.offpeak_ranges():
-            inside = start <= minute_of_day < end if start < end else minute_of_day >= start or minute_of_day < end
-            if inside:
-                return self.tariff_offpeak_price, "offpeak"
-        return self.tariff_peak_price, "peak"
+        """(price per kWh, tariff name) at a minute of the day."""
+        tariff = self.tariff_for(minute_of_day)
+        return (tariff.price, tariff.name) if tariff else (0.0, "")
+
+    @property
+    def cheapest_price(self) -> float:
+        return min((t.price for t in self.tariffs), default=0.0)
+
+    def is_cheap(self, minute_of_day: int) -> bool:
+        """True in the cheapest tariff's hours: the best time to charge from the grid."""
+        return self.tariff_at(minute_of_day)[0] <= self.cheapest_price + 1e-9
 
     def tariff_dict(self) -> dict[str, Any]:
         return {
             "currency": self.tariff_currency,
-            "peak_price_per_kwh": self.tariff_peak_price,
-            "offpeak_price_per_kwh": self.tariff_offpeak_price,
-            "offpeak_windows": self.tariff_offpeak_windows,
-            "peak": "all other times",
+            "tariffs": [
+                {"name": t.name, "price_per_kwh": t.price, "windows": "all other times" if t.default else t.windows}
+                for t in self.tariffs
+            ],
+            "cheapest": next((t.name for t in self.tariffs if t.price == self.cheapest_price), None),
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -276,20 +304,59 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         errors["prediction_engine"] = "must be one of " + ", ".join(ENGINES)
     opts.local_llm_threads = integer("local_llm_threads", 0, 64)
     opts.tariff_currency = text("tariff_currency")[:8]
-    opts.tariff_peak_price = price("tariff_peak_price")
-    opts.tariff_offpeak_price = price("tariff_offpeak_price")
-    windows = raw.get("tariff_offpeak_windows", base.tariff_offpeak_windows)
-    if isinstance(windows, str):
-        windows = windows.replace(";", ",").split(",")
-    opts.tariff_offpeak_windows = []
-    for window in (str(w).replace(" ", "").replace("–", "-") for w in windows or []):
-        if not window:
+    items = raw.get("tariffs")
+    if items is None and any(k in raw for k in ("tariff_peak_price", "tariff_offpeak_price", "tariff_offpeak_windows")):
+        # Up to 0.4.5 there was one peak and one off-peak price.
+        windows = raw.get("tariff_offpeak_windows") or ["23:00-07:00"]
+        items = [
+            {"name": "Off-peak", "price": raw.get("tariff_offpeak_price", 2.16), "windows": windows},
+            {"name": "Peak", "price": raw.get("tariff_peak_price", 4.32), "windows": [], "default": True},
+        ]
+    if items is None:
+        items = [asdict(t) for t in base.tariffs]
+    opts.tariffs = []
+    names: set[str] = set()
+    for index, item in enumerate(items[:MAX_TARIFFS] if isinstance(items, list) else []):
+        if not isinstance(item, dict):
             continue
-        parts = window.split("-")
-        if len(parts) != 2 or not all(TIME_RE.match(p.zfill(5)) for p in parts):
-            errors["tariff_offpeak_windows"] = f"'{window}' must look like 23:00-07:00"
-            continue
-        opts.tariff_offpeak_windows.append("-".join(p.zfill(5) for p in parts))
+        name = str(item.get("name") or "").strip()[:30]
+        raw_windows = item.get("windows") or []
+        if isinstance(raw_windows, str):
+            raw_windows = raw_windows.replace(";", ",").split(",")
+        if not name and not str(item.get("price") or "").strip() and not any(str(w).strip() for w in raw_windows):
+            continue  # an empty row added with + and never filled in
+        if not name:
+            errors[f"tariffs.{index}.name"] = "give the tariff a name"
+        elif name.lower() in names:
+            errors[f"tariffs.{index}.name"] = "two tariffs have the same name"
+        names.add(name.lower())
+        try:
+            tariff_price = float(str(item.get("price")).replace(",", "."))
+            if tariff_price < 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            errors[f"tariffs.{index}.price"] = "enter a price per kWh"
+            tariff_price = 0.0
+        windows = []
+        for window in (str(w).replace(" ", "").replace("–", "-") for w in raw_windows):
+            if not window:
+                continue
+            parts = window.split("-")
+            if len(parts) != 2 or not all(TIME_RE.match(p.zfill(5)) for p in parts):
+                errors[f"tariffs.{index}.windows"] = f"'{window}' must look like 23:00-07:00"
+                continue
+            windows.append("-".join(p.zfill(5) for p in parts))
+        is_default = bool(item.get("default"))
+        if not is_default and not windows and f"tariffs.{index}.windows" not in errors:
+            errors[f"tariffs.{index}.windows"] = "add a time window, or mark it as “all other times”"
+        opts.tariffs.append(Tariff(name=name, price=tariff_price, windows=[] if is_default else windows, default=is_default))
+    defaults = [t for t in opts.tariffs if t.default]
+    if not opts.tariffs:
+        errors["tariffs"] = "add at least one tariff"
+    elif len(opts.tariffs) == 1 and not defaults:
+        opts.tariffs[0].default, opts.tariffs[0].windows = True, []
+    elif len(defaults) != 1:
+        errors["tariffs"] = "mark exactly one tariff as “all other times”"
 
     items = raw.get("appliances")
     if items is None:
@@ -387,8 +454,13 @@ def _lenient(raw: dict[str, Any]) -> Options:
                 opts = parse_settings({item.name: raw[item.name]}, opts)
             except SettingsError:
                 pass
-    legacy = {key: raw[key] for _, _, key, _ in LEGACY_APPLIANCES if key in raw}
-    if legacy and "appliances" not in raw:
+    legacy = {key: raw[key] for _, _, key, _ in LEGACY_APPLIANCES if key in raw and "appliances" not in raw}
+    legacy.update({
+        key: raw[key]
+        for key in ("tariff_peak_price", "tariff_offpeak_price", "tariff_offpeak_windows")
+        if key in raw and "tariffs" not in raw
+    })
+    if legacy:
         try:
             opts = parse_settings(legacy, opts)
         except SettingsError:

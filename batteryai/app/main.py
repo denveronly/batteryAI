@@ -463,7 +463,11 @@ async def status(request: web.Request) -> web.Response:
                 p.slot: {"soc": bool(p.soc_entity), "charge": bool(p.charge_entity)} for p in opts.deye_programs
             },
             "sensors": opts.sensor_map(),
-            "tariff": {**opts.tariff_dict(), "now": opts.tariff_at(datetime.now(app.tz).hour * 60 + datetime.now(app.tz).minute)[1]},
+            "tariff": {
+                **opts.tariff_dict(),
+                "now": opts.tariff_at(datetime.now(app.tz).hour * 60 + datetime.now(app.tz).minute)[1],
+                "now_price": opts.tariff_at(datetime.now(app.tz).hour * 60 + datetime.now(app.tz).minute)[0],
+            },
             "appliances": [
                 {"id": a.id, "name": a.name, "temperature_dependent": a.temperature_dependent}
                 for a in opts.appliances

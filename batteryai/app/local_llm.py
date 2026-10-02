@@ -64,8 +64,8 @@ SYSTEM_PROMPT = """You plan the battery of a home with solar panels and a Deye h
 The inverter has six programs. Each covers a time range and keeps the battery at or above its SOC (%). grid_charge=true lets it charge from the grid up to that SOC.
 
 Rules:
-- Grid power is cheap in off-peak hours and expensive in peak hours. Charge from the grid in off-peak programs only as much as the following peak hours need beyond what PV covers.
-- In peak programs let the battery discharge (low SOC, grid_charge false).
+- Grid power costs what the tariff of the hour says (see tariff and tariff_by_hour). Charge from the grid in the cheapest tariff's programs only as much as the following pricier hours need beyond what PV covers.
+- In programs of pricier tariffs let the battery discharge (low SOC, grid_charge false).
 - If PV tomorrow covers the use, keep grid charging low and let the sun charge the battery.
 - If an outage is expected, keep the battery high and enable grid charge before it.
 - Keep every SOC between min_soc and max_soc. Programs marked unused: return their current SOC and grid_charge false.
@@ -165,6 +165,7 @@ def build_prompt(opts: Options, snapshot: dict[str, Any], baseline: dict[str, An
         "max_soc": opts.max_soc_percent,
         "safety_margin_percent": opts.prediction_margin_percent,
         "tariff": opts.tariff_dict(),
+        "tariff_by_hour": [opts.tariff_at(h * 60 + 30)[1] for h in range(24)],
         "outages_state": snapshot.get("outages_state"),
         "outages_details": snapshot.get("outages_attrs"),
         "weather_tomorrow": (snapshot.get("weather") or {}).get("tomorrow"),

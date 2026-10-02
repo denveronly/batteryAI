@@ -33,7 +33,7 @@ const SENSORS = SENSOR_GROUPS.flatMap((g) => g.rows);
 const NUMBER_FIELDS = ["record_interval_minutes", "history_days", "detail_days", "local_llm_threads", "prediction_margin_percent", "min_soc_percent",
   "max_soc_percent", "apply_threshold_percent", "charge_all_soc_percent"];
 const TEXT_FIELDS = ["claude_effort", "response_language", "extra_instructions", "tariff_currency", "program_time_marks", "prediction_engine"];
-const PRICE_FIELDS = ["tariff_peak_price", "tariff_offpeak_price", "battery_capacity_kwh"];
+const PRICE_FIELDS = ["battery_capacity_kwh"];
 
 const ENGINE_HELP = {
   claude: "Claude reads all recorded history, weather, tariffs and outages and writes the plan. Needs internet and an API key; each prediction costs API tokens.",
@@ -152,6 +152,74 @@ $("addAppliance").addEventListener("click", () => {
   row.querySelector('[data-role="name"]').focus();
 });
 
+// Tariffs: a list with + / −. Each has a name, a price and time windows; exactly one is
+// "all other times" (radio button).
+const MAX_TARIFFS = 8;
+
+function tariffRow(tariff = {}) {
+  const row = el("div", { class: "tariff-row" });
+  const name = el("input", { type: "text", placeholder: "Name, e.g. Night", maxlength: "30", "data-role": "name" });
+  name.value = tariff.name || "";
+  const price = el("input", { type: "number", min: "0", step: "0.0001", placeholder: "0.00", "data-role": "price" });
+  price.value = tariff.price ?? "";
+  const windows = el("input", { type: "text", placeholder: "23:00-07:00", "data-role": "windows" });
+  windows.value = (tariff.windows || []).join(", ");
+  const isDefault = el("input", { type: "radio", name: "tariff_default", "data-role": "default" });
+  isDefault.checked = !!tariff.default;
+  const sync = () => {
+    windows.disabled = isDefault.checked;
+    if (isDefault.checked) windows.value = "";
+    windows.placeholder = isDefault.checked ? "all other times" : "23:00-07:00";
+  };
+  isDefault.addEventListener("change", () => $("tariffRows").querySelectorAll('[data-role="default"]').forEach((r) => r.dispatchEvent(new Event("sync"))));
+  isDefault.addEventListener("sync", sync);
+  const remove = el("button", { type: "button", class: "secondary remove", title: "Remove this tariff", "aria-label": "Remove tariff" }, "−");
+  remove.addEventListener("click", () => {
+    row.remove();
+    renumberTariffs();
+  });
+  row.append(
+    el("label", {}, "Name", name),
+    el("label", {}, "Price per kWh", price),
+    el("label", { class: "tariff-windows" }, "Time windows", windows),
+    el("label", { class: "inline-row temp-toggle" }, isDefault, "All other times"),
+    el("span", { class: "appliance-buttons" }, remove),
+  );
+  sync();
+  return row;
+}
+
+function renumberTariffs() {
+  const rows = [...$("tariffRows").children];
+  rows.forEach((row, i) => {
+    row.querySelector('[data-role="name"]').name = `tariffs.${i}.name`;
+    row.querySelector('[data-role="price"]').name = `tariffs.${i}.price`;
+    row.querySelector('[data-role="windows"]').name = `tariffs.${i}.windows`;
+  });
+  $("addTariff").disabled = rows.length >= MAX_TARIFFS;
+}
+
+function fillTariffs(list) {
+  $("tariffRows").replaceChildren(...list.map((t) => tariffRow(t)));
+  renumberTariffs();
+}
+
+function readTariffs() {
+  return [...$("tariffRows").children].map((row) => ({
+    name: row.querySelector('[data-role="name"]').value.trim(),
+    price: row.querySelector('[data-role="price"]').value.trim(),
+    windows: row.querySelector('[data-role="windows"]').value.trim(),
+    default: row.querySelector('[data-role="default"]').checked,
+  }));
+}
+
+$("addTariff").addEventListener("click", () => {
+  const row = tariffRow();
+  $("tariffRows").append(row);
+  renumberTariffs();
+  row.querySelector('[data-role="name"]').focus();
+});
+
 // Rendering ----------------------------------------------------------------------
 
 function entityRow({ name, label, hint, kind }) {
@@ -210,7 +278,7 @@ function buildForm() {
 
 function fillForm(s) {
   for (const key of [...TEXT_FIELDS, ...NUMBER_FIELDS, ...PRICE_FIELDS, ...SENSORS.map((x) => x.key)]) field(key).value = s[key] ?? "";
-  field("tariff_offpeak_windows").value = (s.tariff_offpeak_windows || []).join(", ");
+  fillTariffs(s.tariffs || []);
   fillAppliances(s.appliances || []);
   field("analysis_times_list").value = (s.analysis_times_list || []).join(", ");
   field("notify_services").value = (s.notify_services || []).join(", ");
@@ -239,7 +307,7 @@ function readForm() {
     weekend_days: [...form.querySelectorAll('input[name="weekend_days"]:checked')].map((b) => b.value),
     analysis_times_list: value("analysis_times_list"),
     notify_services: value("notify_services"),
-    tariff_offpeak_windows: value("tariff_offpeak_windows"),
+    tariffs: readTariffs(),
     appliances: readAppliances(),
     deye_programs: [],
   };

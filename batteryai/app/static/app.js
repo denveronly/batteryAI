@@ -402,8 +402,7 @@ function renderStatus() {
   if (tomorrowWeather) tiles.push(tile("Tomorrow", tomorrowWeather, status.weather.tomorrow.condition || ""));
   if (status.tariff) {
     const t = status.tariff;
-    const price = t.now === "offpeak" ? t.offpeak_price_per_kwh : t.peak_price_per_kwh;
-    tiles.push(tile("Tariff now", t.now === "offpeak" ? "Off-peak" : "Peak", `${price} ${t.currency}/kWh`));
+    tiles.push(tile("Tariff now", t.now || "—", `${t.now_price} ${t.currency}/kWh`));
   }
   tiles.push(
     tile("Probable outages", latest.outages_state ?? "—"),
@@ -649,15 +648,18 @@ async function refreshEconomy() {
   if (!report.has_pv_power_sensor) notes.push("Set a “PV power” sensor in Settings to split savings into PV and battery.");
   $("economyNotes").replaceChildren(...notes.map((n) => el("div", { class: "banner" }, n)));
   $("economyInfo").textContent = status?.tariff
-    ? `Peak ${status.tariff.peak_price_per_kwh} ${cur}/kWh · off-peak ${status.tariff.offpeak_price_per_kwh} ${cur}/kWh (${status.tariff.offpeak_windows.join(", ")})`
+    ? status.tariff.tariffs.map((x) => `${x.name} ${x.price_per_kwh} ${cur}/kWh (${Array.isArray(x.windows) ? x.windows.join(", ") : x.windows})`).join(" · ")
     : "";
+  const tariffNames = (status?.tariff?.tariffs || []).map((x) => x.name);
+  const cheapest = status?.tariff?.cheapest;
   $("economyTiles").replaceChildren(
     tile("Saved", money(t.total_saved), t.saved_percent !== null ? `${fmt(t.saved_percent, 0)} %` : ""),
     tile("Saved by PV", money(t.pv_saved)),
     tile("Saved by battery & AI plan", money(t.battery_saved)),
     tile("Paid for grid", money(t.paid)),
     tile("Without PV & battery", money(t.without_system)),
-    tile("Grid energy", t.grid_kwh === null ? "—" : fmt(t.grid_kwh), t.grid_kwh === null ? "" : `kWh (${fmt(t.grid_offpeak_kwh)} off-peak)`),
+    tile("Grid energy", t.grid_kwh === null ? "—" : fmt(t.grid_kwh),
+      t.grid_kwh === null ? "" : `kWh (${fmt(t.grid_by_tariff?.[cheapest] ?? 0)} at ${cheapest})`),
     tile("Consumption", fmt(t.load_kwh), "kWh"),
   );
 
@@ -679,20 +681,19 @@ async function refreshEconomy() {
     plugins: [weekendShading],
   }, NO_READINGS);
 
-  const header = ["Day", "Consumption", "Grid peak", "Grid off-peak", "Paid", "Without system", "PV saved", "Battery/AI saved", "Saved", "AI control"];
+  const header = ["Day", "Consumption", ...tariffNames.map((n) => `Grid ${n}`), "Paid", "Without system", "PV saved", "Battery/AI saved", "Saved", "AI control"];
   $("economyTable").replaceChildren(
     el("tr", {}, ...header.map((h, i) => el("th", { class: i ? "num" : "" }, h))),
     ...rows.slice().reverse().map((d) =>
       el("tr", {},
         el("td", {}, shortDate(d.date)),
         el("td", { class: "num" }, `${fmt(d.load_kwh)} kWh`),
-        el("td", { class: "num" }, d.grid_peak_kwh === null ? "—" : `${fmt(d.grid_peak_kwh)} kWh`),
-        el("td", { class: "num" }, d.grid_offpeak_kwh === null ? "—" : `${fmt(d.grid_offpeak_kwh)} kWh`),
+        ...tariffNames.map((n) => el("td", { class: "num" }, d.grid_kwh === null ? "—" : `${fmt(d.grid_by_tariff?.[n] ?? 0)} kWh`)),
         el("td", { class: "num" }, money(d.paid)),
         el("td", { class: "num" }, money(d.without_system)),
         el("td", { class: "num" }, money(d.pv_saved)),
         el("td", { class: "num" }, money(d.battery_saved)),
-        el("td", { class: "num saved" }, d.total_saved === null ? "—" : `${money(d.total_saved)} (${fmt(d.saved_percent, 0)} %)`),
+        el("td", { class: d.total_saved < 0 ? "num saved loss" : "num saved" }, d.total_saved === null ? "—" : `${money(d.total_saved)} (${fmt(d.saved_percent, 0)} %)`),
         el("td", { class: "num" }, `${d.ai_control_share} %`),
       )),
   );
@@ -745,7 +746,7 @@ async function refreshMonths() {
         el("td", { class: "num" }, `${fmt(m.grid_import_kwh, 0)} kWh`),
         el("td", { class: "num" }, m.temp_avg === null ? "—" : `${fmt(m.temp_avg)}°`),
         el("td", { class: "num" }, money(m.paid)),
-        el("td", { class: "num saved" }, m.total_saved === null ? "—" : `${money(m.total_saved)} (${fmt(m.saved_percent, 0)} %)`),
+        el("td", { class: m.total_saved < 0 ? "num saved loss" : "num saved" }, m.total_saved === null ? "—" : `${money(m.total_saved)} (${fmt(m.saved_percent, 0)} %)`),
       )),
   );
 }

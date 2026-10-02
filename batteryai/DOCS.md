@@ -36,10 +36,10 @@ auto-control on, the plan is written to the inverter.
 
 ### Economy
 
-Per day and in total: what was paid for grid energy (peak / off-peak), what the same
+Per day and in total: grid energy per tariff and what was paid for it, what the same
 consumption would have cost without PV and battery, and what was saved — split into
 **saved by PV** (load covered directly by PV power) and **saved by battery & AI plan**
-(battery energy and cheap off-peak charging replacing peak-time grid energy). The
+(battery energy and charging in the cheapest tariff replacing pricier grid energy). The
 *AI control* column shows how much of the day auto-control was on.
 Requires the *Grid import today* and *PV power* sensors and the tariff settings.
 
@@ -85,8 +85,14 @@ All settings are stored in `/data/settings.json` and apply immediately when save
   P6 23:15 covers 23:15 – 05:00); **start** – the range lasts until the next program's
   time. Two programs with the same time leave one of them unused. BatteryAI never
   changes program times, only SOC and grid charge.
-- **Tariff** – currency, peak and off-peak price per kWh, off-peak windows such as
-  `23:00-07:00` (every other time is peak).
+- **Tariffs** – the currency and your own list of tariffs (up to 8): a name, the price
+  per kWh and the time windows, such as `23:00-07:00` or several separated by commas
+  (`07:00-08:00, 11:00-17:00`). Exactly one tariff is marked **All other times** and
+  needs no windows. Add rows with **+ Add tariff**, remove them with **−**. The
+  dashboard shows the current tariff, the Economy tab splits grid energy per tariff, and
+  every prediction engine charges from the grid in the cheapest tariff. Settings from
+  older versions become *Off-peak* (your off-peak windows and price) and *Peak* (all
+  other times).
 - **Phone notifications** – one or more notify services (phones from the Home Assistant
   Companion app appear as `mobile_app_…`), with a test button. Notifications are normal
   priority, not critical alerts: every prediction, every SOC / grid-charge change, and
@@ -107,8 +113,8 @@ Every entity has a **Test** button showing its current value or why it fails.
 **Local fast** averages the hourly load of the 5 most similar recorded days (same
 weekday/weekend type, closest outdoor temperature, recent days preferred), scales heat
 pump use with a temperature regression, and shapes PV from your recorded PV power. For
-each off-peak program it keeps enough energy (plus the safety margin, using *Battery
-capacity*) for the following peak hours that PV will not cover; peak programs let the
+each program in the cheapest tariff it keeps enough energy (plus the safety margin, using
+*Battery capacity*) for the following pricier hours that PV will not cover; other programs let the
 battery discharge; an expected outage keeps the battery full with grid charge on.
 
 **Local slow** uses Qwen2.5-3B-Instruct (Q4_K_M, about 2 GB). llama.cpp is compiled into

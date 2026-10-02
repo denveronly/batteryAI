@@ -370,21 +370,16 @@
       </section>
 
       <section class="card">
-        <div class="card-head"><h2>Tariff</h2><span class="muted">Used for the Economy tab and for planning grid charging</span></div>
+        <div class="card-head"><h2>Tariffs</h2><span class="muted">Grid prices by time of day – used for the Economy tab and for planning grid charging</span></div>
         <div class="form-grid">
           <label>Currency
             <input type="text" name="tariff_currency" maxlength="8" placeholder="UAH">
           </label>
-          <label>Peak price per kWh
-            <input type="number" name="tariff_peak_price" min="0" step="0.0001">
-          </label>
-          <label>Off-peak price per kWh
-            <input type="number" name="tariff_offpeak_price" min="0" step="0.0001">
-          </label>
-          <label>Off-peak windows (comma separated)
-            <input type="text" name="tariff_offpeak_windows" placeholder="23:00-07:00">
-            <span class="hint">Every other time is peak.</span>
-          </label>
+        </div>
+        <div id="tariffRows"></div>
+        <div class="test-row">
+          <button type="button" class="secondary" id="addTariff">+ Add tariff</button>
+          <span class="hint">Windows like 23:00-07:00 (several separated by commas). Mark one tariff “all other times”.</span>
         </div>
       </section>
 
