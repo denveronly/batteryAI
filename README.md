@@ -30,6 +30,9 @@ batteryai/
     control.py            writes SOC / grid charge to the Deye programs
     history.py            imports past values from the HA recorder
     notify.py             phone notifications
+    local_fast.py         local engine: similar-day forecast + rule planner
+    local_llm.py          local engine: Qwen2.5 3B via llama.cpp (model download, worker)
+    llm_worker.py         runs one local LLM request in its own process
     static/               panel UI: dashboard, economy, settings (bundled Chart.js)
 ```
 

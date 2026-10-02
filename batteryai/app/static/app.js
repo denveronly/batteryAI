@@ -443,10 +443,10 @@ function renderControl() {
   $("controlInfo").textContent = !c.can_write
     ? "Configure the Deye program SOC entities in Settings to control the inverter."
     : c.mode === "auto"
-      ? `Claude's SOC suggestions are written to the inverter after every prediction${since}.`
+      ? `Every prediction's SOC and grid charge are written to the inverter${since}.`
       : c.mode === "charge_all"
-        ? `All programs are held at ${c.charge_all_soc}%${since}. Turn on AI auto-control to hand control back to Claude.`
-        : "Claude only advises; nothing is written to the inverter. Use Apply on a prediction to write it once.";
+        ? `All programs are held at ${c.charge_all_soc}%${since}. Turn on AI auto-control to hand control back to the predictions.`
+        : "Predictions only advise; nothing is written to the inverter. Use Apply on a prediction to write it once.";
 }
 
 // Deye programs in the Battery control card: SOC and grid charge can be changed here.
@@ -833,7 +833,7 @@ function renderEntry(a) {
     el("span", { class: "muted" }, [a.model, duration, tokens].filter(Boolean).join(" · ")),
   );
 
-  if (a.status === "running") return el("div", { class: "entry" }, head, el("div", { class: "muted" }, "Claude is analysing the data…"));
+  if (a.status === "running") return el("div", { class: "entry" }, head, el("div", { class: "muted" }, "Predicting…"));
   if (a.status === "error") return el("div", { class: "entry error" }, head, el("div", { class: "error-text" }, a.error));
 
   const programs = programTable(r);
@@ -928,9 +928,19 @@ function fillModelSelect(select, models, current, short = false) {
   if (current) select.value = current;
 }
 
-async function initModelSelect() {
-  const data = await loadModels();
-  fillModelSelect($("modelSelect"), data.models, data.current, true);
+// Header: one dropdown for the engine and, for Claude, the model.
+function fillEngineSelect(data) {
+  const select = $("modelSelect");
+  const claude = el("optgroup", { label: "Claude (cloud)" }, ...data.models.map((m) => el("option", { value: `claude:${m.id}`, title: m.id }, m.display_name || m.id)));
+  const local = el("optgroup", { label: "Local (inside the add-on)" },
+    el("option", { value: "local_fast" }, "Local fast (light CPU)"),
+    el("option", { value: "local_llm" }, "Local LLM (heavy CPU)"));
+  select.replaceChildren(claude, local);
+  select.value = data.engine === "claude" ? `claude:${data.current}` : data.engine;
+}
+
+async function initModelSelect(force = false) {
+  fillEngineSelect(await loadModels(force));
 }
 
 $("modelSelect").addEventListener("change", async (e) => {
@@ -939,12 +949,20 @@ $("modelSelect").addEventListener("change", async (e) => {
   const resp = await fetch("api/settings", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ claude_model: select.value }),
+    body: JSON.stringify(select.value.startsWith("claude:")
+      ? { prediction_engine: "claude", claude_model: select.value.slice(7) }
+      : { prediction_engine: select.value }),
   }).catch(() => null);
   select.disabled = false;
-  if (!resp?.ok) alert("Could not change the model.");
-  const settingsModel = document.querySelector('#settingsForm select[name="claude_model"]');
-  if (settingsModel) settingsModel.value = select.value;
+  if (!resp?.ok) alert("Could not change the prediction engine.");
+  const saved = resp?.ok ? await resp.json() : null;
+  if (saved) {
+    const settingsEngine = document.querySelector('#settingsForm select[name="prediction_engine"]');
+    const settingsModel = document.querySelector('#settingsForm select[name="claude_model"]');
+    if (settingsEngine) { settingsEngine.value = saved.prediction_engine; settingsEngine.dispatchEvent(new Event("change")); }
+    if (settingsModel) settingsModel.value = saved.claude_model;
+  }
+  initModelSelect(true);
   refresh();
 });
 initModelSelect();

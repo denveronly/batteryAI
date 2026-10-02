@@ -229,6 +229,7 @@ def build_input(
         "accuracy": report,
         "tariff": {**opts.tariff_dict(), "now": opts.tariff_at(now.hour * 60 + now.minute)[1]},
         "tuning": {
+            "battery_capacity_kwh": opts.battery_capacity_kwh,
             "prediction_margin_percent": opts.prediction_margin_percent,
             "min_soc_percent": opts.min_soc_percent,
             "max_soc_percent": opts.max_soc_percent,

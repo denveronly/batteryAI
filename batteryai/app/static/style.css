@@ -316,3 +316,8 @@ td.nowrap { white-space: nowrap; }
 .header-right { min-width: 0; }
 .tabs { flex-wrap: wrap; }
 @media (max-width: 480px) { .tabs a { padding: 6px 10px; } #modelSelect { max-width: 150px; } }
+.engine-box { margin-top: 8px; }
+.progress { width: 100%; height: 8px; border-radius: 4px; background: var(--chip); overflow: hidden; margin-top: 6px; }
+.progress > div { height: 100%; background: var(--accent); }
+.form-grid > label, label { min-width: 0; }
+label select, label input:not([type="checkbox"]) { width: 100%; max-width: 100%; min-width: 0; }

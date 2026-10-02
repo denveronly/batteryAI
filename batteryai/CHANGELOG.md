@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0
+
+- Prediction engine selection (Settings → Prediction engine, and the header dropdown):
+  - **Claude** (cloud).
+  - **Local fast** – runs in the add-on without internet or AI: forecasts tomorrow from
+    the most similar recorded days (day type, outdoor temperature; heat pump scaled by a
+    temperature regression) and plans each program with tariff/PV/outage rules. Instant.
+  - **Local slow** – Qwen2.5-3B-Instruct (Q4_K_M) running on the CPU inside the add-on
+    via llama.cpp, which is compiled into the add-on image. The model (~2 GB) is
+    downloaded once into /data/models from the Settings tab and excluded from backups.
+    It runs in a separate process only during a prediction.
+- Battery capacity setting (used by the local engines and given to Claude).
+
 ## 0.3.2
 
 - Logs tab: live add-on log with level filter and search; storage overview (database

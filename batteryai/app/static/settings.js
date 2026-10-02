@@ -38,10 +38,53 @@ const SENSOR_GROUPS = [
   },
 ];
 const SENSORS = SENSOR_GROUPS.flatMap((g) => g.rows);
-const NUMBER_FIELDS = ["record_interval_minutes", "history_days", "detail_days", "prediction_margin_percent", "min_soc_percent",
+const NUMBER_FIELDS = ["record_interval_minutes", "history_days", "detail_days", "local_llm_threads", "prediction_margin_percent", "min_soc_percent",
   "max_soc_percent", "apply_threshold_percent", "charge_all_soc_percent"];
-const TEXT_FIELDS = ["claude_effort", "response_language", "extra_instructions", "tariff_currency", "program_time_marks"];
-const PRICE_FIELDS = ["tariff_peak_price", "tariff_offpeak_price"];
+const TEXT_FIELDS = ["claude_effort", "response_language", "extra_instructions", "tariff_currency", "program_time_marks", "prediction_engine"];
+const PRICE_FIELDS = ["tariff_peak_price", "tariff_offpeak_price", "battery_capacity_kwh"];
+
+const ENGINE_HELP = {
+  claude: "Claude reads all recorded history, weather, tariffs and outages and writes the plan. Needs internet and an API key; each prediction costs API tokens.",
+  local_fast: "Runs inside the add-on with no internet and no AI: averages your most similar past days (weekday/weekend, temperature) and plans each program with fixed rules. Instant and light on the CPU.",
+  local_llm: "Runs Qwen2.5 3B inside the add-on (no internet after the one-time model download): the local fast forecast is its input and the LLM writes the plan. Needs ~3 GB RAM and takes minutes per prediction on a small CPU.",
+};
+
+function updateEngineView() {
+  const engine = field("prediction_engine").value;
+  $("engineHelp").textContent = ENGINE_HELP[engine] || "";
+  $("localLlmBox").hidden = engine !== "local_llm";
+  $("claudeBox").hidden = engine !== "claude";
+  if (engine === "local_llm") refreshLlmStatus();
+}
+
+let llmTimer = null;
+async function refreshLlmStatus() {
+  clearTimeout(llmTimer);
+  let st;
+  try {
+    st = await api("api/local_llm");
+  } catch (err) {
+    showResult($("llmStatus"), "error", `✕ ${err.message}`);
+    return;
+  }
+  const d = st.download;
+  $("llmThreadsHint").textContent = `This machine has ${st.cpu_count} CPU cores.`;
+  $("llmDownload").hidden = st.model || d.running;
+  $("llmCancel").hidden = !d.running;
+  $("llmDelete").hidden = !st.model;
+  if (!st.runtime) {
+    showResult($("llmStatus"), "error", "✕ llama.cpp is not built into this add-on image (check the add-on build log, then rebuild).");
+  } else if (d.running) {
+    const pct = d.total ? (d.done / d.total) * 100 : 0;
+    showResult($("llmStatus"), "", `Downloading ${st.model_name}: ${fmtBytes(d.done)} of ${fmtBytes(d.total)}`,
+      el("div", { class: "progress" }, el("div", { style: `width:${pct.toFixed(1)}%` })));
+    llmTimer = setTimeout(refreshLlmStatus, 2000);
+  } else if (st.model) {
+    showResult($("llmStatus"), "ok", `✓ ${st.model_name} ready (${fmtBytes(st.model_bytes)}). It loads only while a prediction runs.`);
+  } else {
+    showResult($("llmStatus"), d.error ? "error" : "warn", d.error ? `✕ Download failed: ${d.error}` : `⚠ Model not downloaded yet (about 2 GB, stored in the add-on's /data, excluded from backups).`);
+  }
+}
 const CHECKBOXES = ["notify_predictions", "notify_soc_changes", "notify_errors"];
 const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 const PROGRAMS = 6;
@@ -112,6 +155,7 @@ function fillForm(s) {
   field("analysis_times_list").value = (s.analysis_times_list || []).join(", ");
   field("notify_services").value = (s.notify_services || []).join(", ");
   for (const key of CHECKBOXES) field(key).checked = !!s[key];
+  updateEngineView();
   field("claude_api_key").value = "";
   loadModels().then((data) => {
     fillModelSelect(field("claude_model"), data.models, s.claude_model);
@@ -337,7 +381,7 @@ form.addEventListener("submit", async (event) => {
     } else {
       await loadModels(true);
       fillForm(body);
-      fillModelSelect($("modelSelect"), (await loadModels()).models, body.claude_model, true);
+      initModelSelect(true);
       showResult(result, "ok", "✓ Saved and applied");
     }
   } catch (err) {
@@ -347,6 +391,21 @@ form.addEventListener("submit", async (event) => {
   }
 });
 
+field("prediction_engine").addEventListener("change", updateEngineView);
+$("llmDownload").addEventListener("click", async () => {
+  await api("api/local_llm/download", { method: "POST" }).catch(() => null);
+  refreshLlmStatus();
+});
+$("llmCancel").addEventListener("click", async () => {
+  await api("api/local_llm/cancel", { method: "POST" }).catch(() => null);
+  setTimeout(refreshLlmStatus, 500);
+});
+$("llmDelete").addEventListener("click", async () => {
+  if (!confirm("Delete the downloaded model file?")) return;
+  const r = await api("api/local_llm/model", { method: "DELETE" }).catch((err) => ({ error: err.message }));
+  if (r.error) alert(r.error);
+  refreshLlmStatus();
+});
 $("testHa").addEventListener("click", testHa);
 $("testClaude").addEventListener("click", testClaude);
 $("testAll").addEventListener("click", testAllEntities);

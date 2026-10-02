@@ -21,6 +21,8 @@ from aiohttp import web
 
 from analyzer import AnalysisError, analyze, build_input
 import control
+import local_fast
+import local_llm
 import notify
 from collector import UNAVAILABLE, active_program, collect, has_data, parse_hhmm, to_float, weather_details
 from config import DATA_DIR, Options, SettingsError, load_settings, parse_settings, save_settings
@@ -53,6 +55,7 @@ class BatteryAI:
         self._background: set[asyncio.Task] = set()
         self._last_outage_key: str | None = None
         self._last_compress = 0.0
+        self.model_download = local_llm.ModelDownloader()
         self._last_outage_run = 0.0
 
     def spawn(self, coro: Any) -> asyncio.Task:
@@ -173,7 +176,7 @@ class BatteryAI:
             return
         key = json.dumps([snapshot["outages_state"], snapshot["outages_attrs"]], sort_keys=True, default=str)
         previous, self._last_outage_key = self._last_outage_key, key
-        if previous is None or previous == key or self._client is None or self.analysis_running:
+        if previous is None or previous == key or not self.can_predict or self.analysis_running:
             return
         if time.time() - self._last_outage_run < OUTAGE_RERUN_SECONDS:
             return
@@ -227,23 +230,59 @@ class BatteryAI:
                 _LOGGER.exception("Scheduled analysis failed")
 
     @property
+    def can_predict(self) -> bool:
+        return self.opts.prediction_engine != "claude" or self._client is not None
+
+    @property
+    def engine_label(self) -> str:
+        return {
+            "claude": self.opts.claude_model,
+            "local_fast": "local-fast (statistics + rules)",
+            "local_llm": f"local {local_llm.MODEL_NAME}",
+        }[self.opts.prediction_engine]
+
+    async def _predict(self, snapshot: dict[str, Any], trigger: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Runs the selected engine; returns (outcome, input data stored with the analysis)."""
+        engine = self.opts.prediction_engine
+        if engine == "claude":
+            if self._client is None:
+                raise AnalysisError("Set the Claude API key in the Settings tab.")
+            data = build_input(self.db, self.opts, snapshot, self.tz, trigger)
+            return await analyze(self._client, self.opts, data), data
+
+        baseline = await asyncio.to_thread(local_fast.analyze, self.db, self.opts, snapshot, self.tz)
+        if engine == "local_fast":
+            return {"result": baseline, "model": self.engine_label, "input_tokens": None, "output_tokens": None}, {
+                "engine": engine, "snapshot": snapshot,
+            }
+        try:
+            answer = await local_llm.run(self.opts, snapshot, baseline)
+        except (RuntimeError, ValueError) as err:
+            raise AnalysisError(str(err)) from err
+        result = local_llm.merge(self.opts, baseline, answer["result"])
+        usage = answer.get("usage") or {}
+        return {
+            "result": result,
+            "model": self.engine_label,
+            "input_tokens": usage.get("prompt_tokens"),
+            "output_tokens": usage.get("completion_tokens"),
+        }, {"engine": engine, "prompt": local_llm.build_prompt(self.opts, snapshot, baseline)}
+
+    @property
     def analysis_running(self) -> bool:
         return self._analysis_lock.locked()
 
     async def run_analysis(self, trigger: str) -> int:
         async with self._analysis_lock:
-            analysis_id = self.db.start_analysis(trigger, self.opts.claude_model)
+            analysis_id = self.db.start_analysis(trigger, self.engine_label)
             _LOGGER.info("Starting analysis #%d (%s)", analysis_id, trigger)
             data: dict[str, Any] | None = None
             try:
-                if self._client is None:
-                    raise AnalysisError("Set the Claude API key in the Settings tab.")
                 # record() may itself trigger an outage run; that waits for this lock.
                 snapshot = await self.record() or self.last_snapshot
                 if snapshot is None or not has_data(snapshot):
                     raise AnalysisError("No sensor data available from Home Assistant.")
-                data = build_input(self.db, self.opts, snapshot, self.tz, trigger)
-                outcome = await analyze(self._client, self.opts, data)
+                outcome, data = await self._predict(snapshot, trigger)
             except AnalysisError as err:
                 _LOGGER.error("Analysis #%d failed: %s", analysis_id, err)
                 self.db.finish_analysis(analysis_id, status="error", error=str(err), input_data=data)
@@ -325,8 +364,14 @@ async def status(request: web.Request) -> web.Response:
     opts = app.opts
     latest = app.db.latest_reading()
     warnings = []
-    if not opts.claude_api_key:
+    if opts.prediction_engine == "claude" and not opts.claude_api_key:
         warnings.append("Claude API key is not set.")
+    if opts.prediction_engine == "local_llm":
+        llm = local_llm.available()
+        if not llm["runtime"]:
+            warnings.append("The local LLM runtime is missing from this add-on build; predictions will fail.")
+        elif not llm["model"]:
+            warnings.append("The local model is not downloaded yet (Settings → Prediction engine).")
     if app.ha.last_error:
         warnings.append(app.ha.last_error)
     elif app.last_snapshot and app.last_snapshot["missing_entities"]:
@@ -341,7 +386,8 @@ async def status(request: web.Request) -> web.Response:
     return web.json_response(
         {
             "time_zone": str(app.tz),
-            "model": opts.claude_model,
+            "model": app.engine_label,
+            "engine": opts.prediction_engine,
             "analysis_times": [f"{h:02d}:{m:02d}" for h, m in opts.analysis_times()],
             "next_analysis": app.next_analysis.isoformat(timespec="minutes") if app.next_analysis else None,
             "analysis_running": app.analysis_running,
@@ -759,7 +805,52 @@ async def models(request: web.Request) -> web.Response:
     models_list = found or FALLBACK_MODEL_LIST
     if current and current not in {m["id"] for m in models_list}:
         models_list = [{"id": current, "display_name": current}, *models_list]
-    return web.json_response({"models": models_list, "current": current, "live": bool(found), "error": error})
+    return web.json_response({
+        "models": models_list,
+        "current": current,
+        "live": bool(found),
+        "error": error,
+        "engine": app.opts.prediction_engine,
+        "engines": [
+            {"id": "claude", "name": "Claude (cloud)"},
+            {"id": "local_fast", "name": "Local fast – statistics + rules (light CPU)"},
+            {"id": "local_llm", "name": f"Local slow – {local_llm.MODEL_NAME} LLM (heavy CPU)"},
+        ],
+    })
+
+
+@routes.get("/api/local_llm")
+async def local_llm_status(request: web.Request) -> web.Response:
+    app = _app(request)
+    return web.json_response({
+        **local_llm.available(),
+        "download": app.model_download.state,
+        "url": local_llm.MODEL_URL,
+        "cpu_count": os.cpu_count(),
+    })
+
+
+@routes.post("/api/local_llm/download")
+async def local_llm_download(request: web.Request) -> web.Response:
+    started = _app(request).model_download.start()
+    return web.json_response({"started": started}, status=202 if started else 409)
+
+
+@routes.post("/api/local_llm/cancel")
+async def local_llm_cancel(request: web.Request) -> web.Response:
+    _app(request).model_download.cancel()
+    return web.json_response({"cancelled": True})
+
+
+@routes.delete("/api/local_llm/model")
+async def local_llm_delete(request: web.Request) -> web.Response:
+    app = _app(request)
+    if app.model_download.state["running"]:
+        return web.json_response({"error": "A download is running."}, status=409)
+    if app.opts.prediction_engine == "local_llm" and app.analysis_running:
+        return web.json_response({"error": "A prediction is using the model."}, status=409)
+    local_llm.delete_model()
+    return web.json_response({"deleted": True})
 
 
 @routes.get("/api/predicted_load")

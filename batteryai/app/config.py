@@ -14,6 +14,7 @@ DATA_DIR = os.environ.get("BATTERYAI_DATA", "/data")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 
 WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+ENGINES = ("claude", "local_fast", "local_llm")
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 DEYE_PROGRAM_COUNT = 6
 SENSOR_KEYS = (
@@ -80,6 +81,10 @@ class Options:
     max_soc_percent: int = 100
     apply_threshold_percent: int = 5
     charge_all_soc_percent: int = 98
+    battery_capacity_kwh: float = 10.0
+    # "claude" | "local_fast" (statistics + rules) | "local_llm" (Qwen2.5 3B in the add-on)
+    prediction_engine: str = "claude"
+    local_llm_threads: int = 0  # 0 = all CPU cores
     weekend_days: list[str] = field(default_factory=lambda: ["saturday", "sunday"])
     deye_programs: list[DeyeProgram] = field(default_factory=list)
     # "end": a program's time is the END of its period, which starts at the previous
@@ -242,6 +247,13 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
             errors[key] = "must not be negative"
         return number
 
+    opts.battery_capacity_kwh = price("battery_capacity_kwh")
+    if opts.battery_capacity_kwh <= 0:
+        errors["battery_capacity_kwh"] = "must be more than 0"
+    opts.prediction_engine = text("prediction_engine") or "claude"
+    if opts.prediction_engine not in ENGINES:
+        errors["prediction_engine"] = "must be one of " + ", ".join(ENGINES)
+    opts.local_llm_threads = integer("local_llm_threads", 0, 64)
     opts.tariff_currency = text("tariff_currency")[:8]
     opts.tariff_peak_price = price("tariff_peak_price")
     opts.tariff_offpeak_price = price("tariff_offpeak_price")

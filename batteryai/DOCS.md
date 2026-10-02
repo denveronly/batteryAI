@@ -55,6 +55,9 @@ All settings are stored in `/data/settings.json` and apply immediately when save
 
 - **Home Assistant connection** – test shows the version and time zone, or why the
   add-on cannot read data.
+- **Prediction engine** – *Claude* (cloud), *Local fast* (statistics + rules, light
+  CPU) or *Local slow* (Qwen2.5 3B LLM on the CPU). Also switchable from the header
+  dropdown. See *Prediction engines* below.
 - **Claude** – API key (never sent back to the browser), model (dropdown with the models
   your key can use; also in the header), effort, language.
 - **Prediction schedule** – the times of the daily runs (default 12:00 and 23:00), or
@@ -86,6 +89,28 @@ All settings are stored in `/data/settings.json` and apply immediately when save
 - **Extra instructions** for Claude.
 
 Every entity has a **Test** button showing its current value or why it fails.
+
+## Prediction engines
+
+| Engine | Runs | Speed / load | Quality |
+| --- | --- | --- | --- |
+| Claude | Anthropic cloud, API key | ~1 min, nothing local | Best: reads all history, weather, outages, tariffs |
+| Local fast | inside the add-on | instant, negligible CPU | Solid baseline: similar-day forecast + fixed rules |
+| Local slow | inside the add-on (llama.cpp) | minutes, ~3 GB RAM, all cores | Plans and explains like an AI, from the local fast forecast |
+
+**Local fast** averages the hourly load of the 5 most similar recorded days (same
+weekday/weekend type, closest outdoor temperature, recent days preferred), scales heat
+pump use with a temperature regression, and shapes PV from your recorded PV power. For
+each off-peak program it keeps enough energy (plus the safety margin, using *Battery
+capacity*) for the following peak hours that PV will not cover; peak programs let the
+battery discharge; an expected outage keeps the battery full with grid charge on.
+
+**Local slow** uses Qwen2.5-3B-Instruct (Q4_K_M, about 2 GB). llama.cpp is compiled into
+the add-on when it is installed or updated (this takes 10–30 minutes on a Raspberry Pi;
+if the build fails the add-on still works and this engine reports it is unavailable).
+Download the model once in Settings → Prediction engine; it is stored in `/data/models`
+and excluded from backups. The model is loaded in a separate process only while a
+prediction runs, so the memory is free the rest of the time.
 
 ## Weather
 
