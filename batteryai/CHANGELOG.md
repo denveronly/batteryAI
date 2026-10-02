@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.3
+
+- The panel header shows the running add-on version.
+
 ## 0.4.2
 
 - Fix: when Home Assistant was still starting, the add-on fell back to UTC, so the

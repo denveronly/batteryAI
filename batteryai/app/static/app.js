@@ -375,6 +375,7 @@ function weatherText(w) {
 
 function renderStatus() {
   const latest = status.latest || {};
+  $("version").textContent = status.version ? `v${status.version}` : "";
   const next = status.next_analysis ? new Date(status.next_analysis) : null;
   $("schedule").textContent =
     `Predictions daily at ${status.analysis_times.join(", ")} (${status.time_zone}) · model ${status.model}` +

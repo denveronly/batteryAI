@@ -1,6 +1,10 @@
 ARG BUILD_FROM
 FROM ${BUILD_FROM}
 
+# The Supervisor passes the add-on version from config.yaml; shown in the panel header.
+ARG BUILD_VERSION=dev
+ENV BATTERYAI_VERSION=${BUILD_VERSION}
+
 WORKDIR /app
 
 COPY requirements.txt /app/requirements.txt

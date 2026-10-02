@@ -445,6 +445,7 @@ async def status(request: web.Request) -> web.Response:
         warnings.append("Not configured yet: " + ", ".join(k.replace("_", " ") for k in unset) + ".")
     return web.json_response(
         {
+            "version": os.environ.get("BATTERYAI_VERSION", "dev"),
             "time_zone": str(app.tz),
             "time_zone_source": app.tz_source,
             "model": app.engine_label,

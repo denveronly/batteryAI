@@ -340,3 +340,4 @@ button.remove { font-size: 18px; line-height: 1; padding: 6px 12px; }
 .temp-toggle { padding-bottom: 8px; color: var(--muted); font-size: 13px; }
 .temp-toggle input { width: auto; }
 @media (max-width: 760px) { .appliance-fields { grid-template-columns: 1fr; } }
+h1 .version { font-size: 12px; font-weight: 500; color: var(--muted); vertical-align: middle; }
