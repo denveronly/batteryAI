@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.4
+
+- New BatteryAI logo (battery with a green brain and the sun) in the panel header, the
+  browser tab and the Home Assistant add-on store.
+
 ## 0.4.3
 
 - The panel header shows the running add-on version.

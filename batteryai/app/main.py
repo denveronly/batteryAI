@@ -399,7 +399,7 @@ NO_CACHE = {"Cache-Control": "no-cache, must-revalidate"}
 @routes.get("/")
 async def index(_: web.Request) -> web.Response:
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
-    for asset in ("static/style.css", "static/app.js", "static/settings.js", "static/vendor/chart.umd.js"):
+    for asset in ("static/style.css", "static/app.js", "static/settings.js", "static/vendor/chart.umd.js", "static/logo.svg"):
         html = html.replace(f'"{asset}"', f'"{asset}?v={ASSET_VERSION}"')
     return web.Response(text=html, content_type="text/html", headers=NO_CACHE)
 

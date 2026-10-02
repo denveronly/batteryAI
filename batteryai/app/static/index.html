@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BatteryAI</title>
+  <link rel="icon" type="image/svg+xml" href="static/logo.svg">
   <link rel="stylesheet" href="static/style.css">
   <script>
     // Apply the saved theme before first paint to avoid a flash.
@@ -16,7 +17,25 @@
 <body>
   <header class="topbar">
     <div>
-      <h1>BatteryAI <span class="version" id="version"></span></h1>
+      <h1 class="brand">
+        <svg class="logo" viewBox="0 0 64 64" aria-hidden="true">
+          <circle cx="11" cy="11" r="6" fill="#f2a900"/>
+          <g stroke="#f2a900" stroke-width="2.5" stroke-linecap="round">
+            <line x1="11" y1="1" x2="11" y2="2.5"/><line x1="1" y1="11" x2="2.5" y2="11"/><line x1="3.9" y1="3.9" x2="5" y2="5"/><line x1="18.1" y1="3.9" x2="17" y2="5"/><line x1="3.9" y1="18.1" x2="5" y2="17"/>
+          </g>
+          <rect x="5" y="22" width="47" height="34" rx="8" fill="var(--card)" stroke="var(--accent)" stroke-width="4.5"/>
+          <rect x="54" y="32" width="6" height="14" rx="2.5" fill="var(--accent)"/>
+          <g fill="#21a85a">
+            <path d="M28 28 C24 25.5 18.5 26 16.5 29.5 C13 30 11.5 33.5 13 36.5 C11 39 12.5 43 15.5 43.5 C16.5 47 20.5 48.5 23.5 46.5 C25 48 27 48 28 47 Z"/>
+            <path d="M29.5 28 C33.5 25.5 39 26 41 29.5 C44.5 30 46 33.5 44.5 36.5 C46.5 39 45 43 42 43.5 C41 47 37 48.5 34 46.5 C32.5 48 30.5 48 29.5 47 Z"/>
+          </g>
+          <g fill="none" stroke="var(--card)" stroke-width="1.8" stroke-linecap="round">
+            <path d="M17 34 C19.5 33 21 34.5 22.5 33"/><path d="M16.5 40 C19 41 21.5 39 24 40.5"/><path d="M22 29.5 C21.5 31 23 32 24.5 31.5"/>
+            <path d="M41 34 C38.5 33 37 34.5 35.5 33"/><path d="M41.5 40 C39 41 36.5 39 34 40.5"/><path d="M36 29.5 C36.5 31 35 32 33.5 31.5"/>
+          </g>
+        </svg>
+        BatteryAI <span class="version" id="version"></span>
+      </h1>
       <p class="muted" id="schedule">Loading…</p>
     </div>
     <div class="header-right">
