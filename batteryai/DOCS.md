@@ -88,7 +88,10 @@ All settings are stored in `/data/settings.json` and apply immediately when save
 - **Tariffs** – the currency and your own list of tariffs (up to 8): a name, the price
   per kWh and the time windows, such as `23:00-07:00` or several separated by commas
   (`07:00-08:00, 11:00-17:00`). Exactly one tariff is marked **All other times** and
-  needs no windows. Add rows with **+ Add tariff**, remove them with **−**. The
+  needs no windows. Add rows with **+ Add tariff**, remove them with **−**. Keep just
+  one tariff for a **single price all day**: charging from the grid then saves nothing,
+  so the battery is only used for PV and kept for outages, never charged from the grid
+  for price reasons. The
   dashboard shows the current tariff, the Economy tab splits grid energy per tariff, and
   every prediction engine charges from the grid in the cheapest tariff. Settings from
   older versions become *Off-peak* (your off-peak windows and price) and *Peak* (all

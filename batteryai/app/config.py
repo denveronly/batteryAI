@@ -188,6 +188,11 @@ class Options:
     def cheapest_price(self) -> float:
         return min((t.price for t in self.tariffs), default=0.0)
 
+    @property
+    def single_price(self) -> bool:
+        """One price at all times (one tariff, or all at the same price): no point in shifting."""
+        return len({t.price for t in self.tariffs}) <= 1
+
     def is_cheap(self, minute_of_day: int) -> bool:
         """True in the cheapest tariff's hours: the best time to charge from the grid."""
         return self.tariff_at(minute_of_day)[0] <= self.cheapest_price + 1e-9
@@ -196,10 +201,11 @@ class Options:
         return {
             "currency": self.tariff_currency,
             "tariffs": [
-                {"name": t.name, "price_per_kwh": t.price, "windows": "all other times" if t.default else t.windows}
+                {"name": t.name, "price_per_kwh": t.price, "windows": ("all day" if len(self.tariffs) == 1 else "all other times") if t.default else t.windows}
                 for t in self.tariffs
             ],
             "cheapest": next((t.name for t in self.tariffs if t.price == self.cheapest_price), None),
+            "single_price": self.single_price,
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -316,15 +322,26 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         items = [asdict(t) for t in base.tariffs]
     opts.tariffs = []
     names: set[str] = set()
-    for index, item in enumerate(items[:MAX_TARIFFS] if isinstance(items, list) else []):
-        if not isinstance(item, dict):
+
+    def _windows_of(item: dict[str, Any]) -> list[Any]:
+        raw_windows = item.get("windows") or []
+        return raw_windows.replace(";", ",").split(",") if isinstance(raw_windows, str) else list(raw_windows)
+
+    def _is_empty(item: dict[str, Any]) -> bool:  # a row added with + and never filled in
+        return (
+            not str(item.get("name") or "").strip()
+            and not str(item.get("price") or "").strip()
+            and not any(str(w).strip() for w in _windows_of(item))
+        )
+
+    rows = [item for item in (items[:MAX_TARIFFS] if isinstance(items, list) else []) if isinstance(item, dict)]
+    # A single tariff is one price all day, whatever its windows say.
+    single = sum(not _is_empty(item) for item in rows) == 1
+    for index, item in enumerate(rows):
+        if _is_empty(item):
             continue
         name = str(item.get("name") or "").strip()[:30]
-        raw_windows = item.get("windows") or []
-        if isinstance(raw_windows, str):
-            raw_windows = raw_windows.replace(";", ",").split(",")
-        if not name and not str(item.get("price") or "").strip() and not any(str(w).strip() for w in raw_windows):
-            continue  # an empty row added with + and never filled in
+        raw_windows = _windows_of(item)
         if not name:
             errors[f"tariffs.{index}.name"] = "give the tariff a name"
         elif name.lower() in names:
@@ -346,7 +363,9 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
                 errors[f"tariffs.{index}.windows"] = f"'{window}' must look like 23:00-07:00"
                 continue
             windows.append("-".join(p.zfill(5) for p in parts))
-        is_default = bool(item.get("default"))
+        is_default = bool(item.get("default")) or single
+        if single:
+            errors.pop(f"tariffs.{index}.windows", None)
         if not is_default and not windows and f"tariffs.{index}.windows" not in errors:
             errors[f"tariffs.{index}.windows"] = "add a time window, or mark it as “all other times”"
         opts.tariffs.append(Tariff(name=name, price=tariff_price, windows=[] if is_default else windows, default=is_default))

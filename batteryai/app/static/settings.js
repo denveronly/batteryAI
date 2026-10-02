@@ -182,7 +182,7 @@ function tariffRow(tariff = {}) {
     el("label", {}, "Name", name),
     el("label", {}, "Price per kWh", price),
     el("label", { class: "tariff-windows" }, "Time windows", windows),
-    el("label", { class: "inline-row temp-toggle" }, isDefault, "All other times"),
+    el("label", { class: "inline-row temp-toggle" }, isDefault, el("span", { "data-role": "default-label" }, "All other times")),
     el("span", { class: "appliance-buttons" }, remove),
   );
   sync();
@@ -197,6 +197,20 @@ function renumberTariffs() {
     row.querySelector('[data-role="windows"]').name = `tariffs.${i}.windows`;
   });
   $("addTariff").disabled = rows.length >= MAX_TARIFFS;
+  // A single tariff is one price at all times: it is the "all other times" tariff and
+  // cannot be removed.
+  const single = rows.length === 1;
+  rows.forEach((row) => {
+    const radio = row.querySelector('[data-role="default"]');
+    if (single && !radio.checked) {
+      radio.checked = true;
+      radio.dispatchEvent(new Event("change"));
+    }
+    radio.disabled = single;
+    row.querySelector('[data-role="windows"]').placeholder = radio.checked ? (single ? "all day" : "all other times") : "23:00-07:00";
+    row.querySelector(".remove").disabled = single;
+    row.querySelector('[data-role="default-label"]').textContent = single ? "All day" : "All other times";
+  });
 }
 
 function fillTariffs(list) {

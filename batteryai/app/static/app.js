@@ -648,7 +648,9 @@ async function refreshEconomy() {
   if (!report.has_pv_power_sensor) notes.push("Set a “PV power” sensor in Settings to split savings into PV and battery.");
   $("economyNotes").replaceChildren(...notes.map((n) => el("div", { class: "banner" }, n)));
   $("economyInfo").textContent = status?.tariff
-    ? status.tariff.tariffs.map((x) => `${x.name} ${x.price_per_kwh} ${cur}/kWh (${Array.isArray(x.windows) ? x.windows.join(", ") : x.windows})`).join(" · ")
+    ? status.tariff.tariffs.length === 1
+      ? `${status.tariff.tariffs[0].name} ${status.tariff.tariffs[0].price_per_kwh} ${cur}/kWh (all day)`
+      : status.tariff.tariffs.map((x) => `${x.name} ${x.price_per_kwh} ${cur}/kWh (${Array.isArray(x.windows) ? x.windows.join(", ") : x.windows})`).join(" · ")
     : "";
   const tariffNames = (status?.tariff?.tariffs || []).map((x) => x.name);
   const cheapest = status?.tariff?.cheapest;
@@ -659,7 +661,7 @@ async function refreshEconomy() {
     tile("Paid for grid", money(t.paid)),
     tile("Without PV & battery", money(t.without_system)),
     tile("Grid energy", t.grid_kwh === null ? "—" : fmt(t.grid_kwh),
-      t.grid_kwh === null ? "" : `kWh (${fmt(t.grid_by_tariff?.[cheapest] ?? 0)} at ${cheapest})`),
+      t.grid_kwh === null ? "" : status?.tariff?.single_price ? "kWh" : `kWh (${fmt(t.grid_by_tariff?.[cheapest] ?? 0)} at ${cheapest})`),
     tile("Consumption", fmt(t.load_kwh), "kWh"),
   );
 
@@ -681,7 +683,7 @@ async function refreshEconomy() {
     plugins: [weekendShading],
   }, NO_READINGS);
 
-  const header = ["Day", "Consumption", ...tariffNames.map((n) => `Grid ${n}`), "Paid", "Without system", "PV saved", "Battery/AI saved", "Saved", "AI control"];
+  const header = ["Day", "Consumption", ...tariffNames.map((n) => (tariffNames.length === 1 ? "Grid" : `Grid ${n}`)), "Paid", "Without system", "PV saved", "Battery/AI saved", "Saved", "AI control"];
   $("economyTable").replaceChildren(
     el("tr", {}, ...header.map((h, i) => el("th", { class: i ? "num" : "" }, h))),
     ...rows.slice().reverse().map((d) =>

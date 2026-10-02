@@ -234,7 +234,15 @@ def plan(opts: Options, snapshot: dict[str, Any], fc: dict[str, Any]) -> dict[st
         hours = sorted({((span[0] + m) // 60) % 24 for m in range(0, duration, 15)}, key=lambda h: (h - span[0] // 60) % 24)
         mid = ((span[0] + duration // 2) // 60) % 24
         end_h = (span[1] // 60) % 24
-        if offpeak[mid]:
+        if opts.single_price:
+            daytime_pv = sum(surplus[h] for h in hours)
+            soc = opts.min_soc_percent
+            grid = False
+            reason = (
+                "Single price all day: charging from the grid saves nothing, the battery stores PV"
+                + (f" (~{daytime_pv:.1f} kWh surplus in this window)." if daytime_pv > 0.5 else " and covers the load.")
+            )
+        elif offpeak[mid]:
             # Charge window: hold enough for the peak hours until the next off-peak period,
             # minus half of the PV surplus expected in between (it can recharge the battery).
             need, refill, h = 0.0, 0.0, end_h
@@ -313,7 +321,9 @@ def analyze(db: Database, opts: Options, snapshot: dict[str, Any], tz: tzinfo) -
         if peak_hours and not appliance.temperature_dependent:
             cheapest = opts.tariff_dict()["cheapest"]
             recommendations.append(f"If possible, move {appliance.name} from pricier hours ({_windows(peak_hours)}) to the {cheapest} tariff.")
-    if p["pv_short"]:
+    if p["pv_short"] and opts.single_price:
+        recommendations.append("PV will not cover tomorrow's use: with a single price, run flexible loads in the sunniest hours.")
+    elif p["pv_short"]:
         recommendations.append(f"PV will not cover tomorrow's use: charge from the grid during the {opts.tariff_dict()['cheapest']} tariff.")
     else:
         recommendations.append("PV should cover most of tomorrow: run flexible loads in the sunniest hours.")

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.7
+
+- Single price: keep just one tariff (shown as "All day") when the grid price is the
+  same all the time. Every prediction engine then keeps grid charge off (except before
+  an outage) and uses the battery for PV.
+
 ## 0.4.6
 
 - Tariffs are a list you manage in Settings → Tariffs: any number of named tariffs (up
