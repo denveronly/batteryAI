@@ -171,6 +171,21 @@ class HomeAssistant:
         result = await self.request(path, timeout=aiohttp.ClientTimeout(total=180))
         return result[0] if result else []
 
+    async def panel_path(self) -> str | None:
+        """The add-on's panel in the Home Assistant frontend (/hassio/ingress/<slug>), from the
+        Supervisor; None outside the Supervisor or when it cannot be asked."""
+        url = os.environ.get("SUPERVISOR_URL", "http://supervisor").rstrip("/") + "/addons/self/info"
+        try:
+            async with self._session.get(url, headers=self._headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    _LOGGER.info("Supervisor add-on info returned HTTP %s; notifications get no panel link", resp.status)
+                    return None
+                slug = ((await resp.json(content_type=None)).get("data") or {}).get("slug")
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
+            _LOGGER.info("Could not read the add-on slug (%s); notifications get no panel link", err or type(err).__name__)
+            return None
+        return f"/hassio/ingress/{slug}" if slug else None
+
     async def call_service(self, domain: str, service: str, data: dict[str, Any]) -> Any:
         return await self.request(f"/services/{domain}/{service}", method="POST", json_body=data)
 

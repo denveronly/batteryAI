@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.9
+
+- New prediction engine: **ChatGPT** through the OpenAI API (Settings → Prediction
+  engine, or the header dropdown). It gets the same data, instructions and answer format
+  as Claude. Settings → ChatGPT: API key, model (listed from your key), reasoning effort
+  and a test button.
+- Phone notifications are easier to read, especially on iPhone:
+  - One notification per prediction instead of two. Before, the "SOC updated" message
+    replaced the prediction on the phone, because both used the same tag.
+  - A short brief first (tomorrow's use, solar, lowest battery, whether it was written
+    to the inverter). Pull the notification down to see the summary and every program as
+    "P1 00:00–03:00 54% · grid charge (was 100%)".
+  - Tap it, or its **Open BatteryAI** button, to open the BatteryAI panel.
+  - A warning icon in the title when an outage is expected.
+
 ## 0.4.8
 
 - Fix: Deye program time ranges. A program runs from its own time until the next

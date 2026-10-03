@@ -45,7 +45,7 @@
       <a href="#settings" role="tab" data-tab="settings">Settings</a>
       <a href="#logs" role="tab" data-tab="logs">Logs</a>
     </nav>
-    <select id="modelSelect" aria-label="Claude model" title="Claude model used for predictions"></select>
+    <select id="modelSelect" aria-label="Prediction engine and model" title="Prediction engine and model"></select>
     <button type="button" class="secondary" id="themeToggle" title="Switch theme">Auto</button>
     <div class="actions" id="dashActions">
       <select id="range" aria-label="Chart range">
@@ -227,6 +227,7 @@
           <label>Engine
             <select name="prediction_engine">
               <option value="claude">Claude (cloud)</option>
+              <option value="openai">ChatGPT (OpenAI cloud)</option>
               <option value="local_fast">Local fast (light CPU)</option>
               <option value="local_llm">Local slow – LLM (heavy CPU)</option>
             </select>
@@ -283,6 +284,32 @@
         </div>
       </section>
 
+      <section class="card" id="openaiBox">
+        <div class="card-head"><h2>ChatGPT (OpenAI)</h2></div>
+        <div class="form-grid">
+          <label>API key
+            <input type="password" name="openai_api_key" autocomplete="off" placeholder="sk-…">
+            <span class="hint" id="openaiKeyHint"></span>
+          </label>
+          <label>Model
+            <select name="openai_model"></select>
+            <span class="hint" id="openaiModelHint"></span>
+          </label>
+          <label>Reasoning effort
+            <select name="openai_effort">
+              <option value="low">low</option>
+              <option value="medium">medium</option>
+              <option value="high">high</option>
+            </select>
+            <span class="hint">Used by reasoning models (GPT-5, o-series).</span>
+          </label>
+        </div>
+        <div class="test-row">
+          <button type="button" class="secondary" id="testOpenai">Test ChatGPT</button>
+          <div class="result" id="openaiResult"></div>
+        </div>
+      </section>
+
       <section class="card">
         <div class="card-head"><h2>Prediction schedule</h2><span class="muted" id="schedulePreview"></span></div>
         <div class="form-grid">
@@ -301,9 +328,9 @@
           <label>Recording interval (minutes)
             <input type="number" name="record_interval_minutes" min="1" max="60" step="1">
           </label>
-          <label>History sent to Claude (days)
+          <label>History sent to the AI (days)
             <input type="number" name="history_days" min="1" max="365" step="1">
-            <span class="hint">Up to 365. More days give the predictions more to learn from (and cost more Claude tokens).</span>
+            <span class="hint">Up to 365. More days give the predictions more to learn from (and cost more API tokens).</span>
           </label>
         </div>
         <fieldset class="weekend">
@@ -421,7 +448,7 @@
       </section>
 
       <section class="card">
-        <div class="card-head"><h2>Extra instructions for Claude</h2></div>
+        <div class="card-head"><h2>Extra instructions for the AI</h2></div>
         <textarea name="extra_instructions" rows="4" placeholder="For example: night tariff 23:00–07:00; keep at least 40% for outages."></textarea>
       </section>
 

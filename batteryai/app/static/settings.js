@@ -32,11 +32,12 @@ const SENSOR_GROUPS = [
 const SENSORS = SENSOR_GROUPS.flatMap((g) => g.rows);
 const NUMBER_FIELDS = ["record_interval_minutes", "history_days", "detail_days", "local_llm_threads", "prediction_margin_percent", "min_soc_percent",
   "max_soc_percent", "apply_threshold_percent", "charge_all_soc_percent"];
-const TEXT_FIELDS = ["claude_effort", "response_language", "extra_instructions", "tariff_currency", "program_time_marks", "prediction_engine"];
+const TEXT_FIELDS = ["claude_effort", "response_language", "extra_instructions", "tariff_currency", "program_time_marks", "prediction_engine", "openai_effort"];
 const PRICE_FIELDS = ["battery_capacity_kwh"];
 
 const ENGINE_HELP = {
   claude: "Claude reads all recorded history, weather, tariffs and outages and writes the plan. Needs internet and an API key; each prediction costs API tokens.",
+  openai: "ChatGPT gets the same data and instructions as Claude (history, weather, tariffs, outages) and writes the plan. Needs internet and an OpenAI API key; each prediction costs API tokens.",
   local_fast: "Runs inside the add-on with no internet and no AI: averages your most similar past days (weekday/weekend, temperature) and plans each program with fixed rules. Instant and light on the CPU.",
   local_llm: "Runs Qwen2.5 3B inside the add-on (no internet after the one-time model download): the local fast forecast is its input and the LLM writes the plan. Needs ~3 GB RAM and takes minutes per prediction on a small CPU.",
 };
@@ -46,6 +47,7 @@ function updateEngineView() {
   $("engineHelp").textContent = ENGINE_HELP[engine] || "";
   $("localLlmBox").hidden = engine !== "local_llm";
   $("claudeBox").hidden = engine !== "claude";
+  $("openaiBox").hidden = engine !== "openai";
   if (engine === "local_llm") refreshLlmStatus();
 }
 
@@ -302,7 +304,11 @@ function fillForm(s) {
   loadModels().then((data) => {
     fillModelSelect(field("claude_model"), data.models, s.claude_model);
     $("modelHint").textContent = data.live ? "Models available to your API key." : data.error ? `Could not list models: ${data.error}` : "Save an API key to list the models it can use.";
+    fillModelSelect(field("openai_model"), data.openai_models || [], s.openai_model);
+    $("openaiModelHint").textContent = data.openai_live ? "Models available to your API key." : data.openai_error ? `Could not list models: ${data.openai_error}` : "Save an API key to list the models it can use.";
   });
+  field("openai_api_key").value = "";
+  $("openaiKeyHint").textContent = s.openai_api_key_set ? "A key is saved. Leave empty to keep it." : "No key saved yet.";
   $("apiKeyHint").textContent = s.claude_api_key_set ? "A key is saved. Leave empty to keep it." : "No key saved yet.";
   form.querySelectorAll('input[name="weekend_days"]').forEach((box) => {
     box.checked = s.weekend_days.includes(box.value);
@@ -327,10 +333,12 @@ function readForm() {
   };
   for (const key of TEXT_FIELDS) data[key] = value(key);
   if (field("claude_model").value) data.claude_model = field("claude_model").value;
+  if (field("openai_model").value) data.openai_model = field("openai_model").value;
   for (const key of NUMBER_FIELDS) data[key] = Number(value(key));
   for (const key of PRICE_FIELDS) data[key] = value(key);
   for (const key of CHECKBOXES) data[key] = field(key).checked;
   if (value("claude_api_key")) data.claude_api_key = value("claude_api_key");
+  if (value("openai_api_key")) data.openai_api_key = value("openai_api_key");
   for (const s of SENSORS) data[s.key] = value(s.key);
   for (let slot = 1; slot <= PROGRAMS; slot++) {
     data.deye_programs.push({
@@ -428,6 +436,18 @@ async function testClaude() {
   try {
     const r = await postJson("api/test/claude", { api_key: field("claude_api_key").value.trim(), model: field("claude_model").value.trim() });
     if (r.ok) showResult(result, "ok", "✓ API key works · ", el("span", { class: "value" }, r.display_name || r.model), ` (${r.model})`);
+    else showResult(result, "error", `✕ ${r.error}`);
+  } catch (err) {
+    showResult(result, "error", `✕ Could not run the test: ${err.message}`);
+  }
+}
+
+async function testOpenai() {
+  const result = $("openaiResult");
+  showResult(result, "", "Testing…");
+  try {
+    const r = await postJson("api/test/openai", { api_key: field("openai_api_key").value.trim(), model: field("openai_model").value.trim() });
+    if (r.ok) showResult(result, "ok", "✓ API key works · ", el("span", { class: "value" }, r.model));
     else showResult(result, "error", `✕ ${r.error}`);
   } catch (err) {
     showResult(result, "error", `✕ Could not run the test: ${err.message}`);
@@ -551,6 +571,7 @@ $("llmDelete").addEventListener("click", async () => {
 });
 $("testHa").addEventListener("click", testHa);
 $("testClaude").addEventListener("click", testClaude);
+$("testOpenai").addEventListener("click", testOpenai);
 $("testAll").addEventListener("click", testAllEntities);
 $("testNotify").addEventListener("click", testNotify);
 $("importHistory").addEventListener("click", importHistory);

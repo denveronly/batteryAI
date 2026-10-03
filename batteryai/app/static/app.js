@@ -907,7 +907,7 @@ function renderEntry(a) {
 
 function inputDetails(id) {
   const pre = el("pre", {}, "Loading…");
-  const details = el("details", {}, el("summary", {}, "Data sent to Claude"), pre);
+  const details = el("details", {}, el("summary", {}, "Data sent to the AI"), pre);
   details.addEventListener("toggle", () => {
     if (!details.open || pre.dataset.loaded) return;
     api(`api/analyses/${id}/input`)
@@ -981,15 +981,16 @@ function fillModelSelect(select, models, current, short = false) {
   if (current) select.value = current;
 }
 
-// Header: one dropdown for the engine and, for Claude, the model.
+// Header: one dropdown for the engine and, for Claude and ChatGPT, the model.
 function fillEngineSelect(data) {
   const select = $("modelSelect");
   const claude = el("optgroup", { label: "Claude (cloud)" }, ...data.models.map((m) => el("option", { value: `claude:${m.id}`, title: m.id }, m.display_name || m.id)));
   const local = el("optgroup", { label: "Local (inside the add-on)" },
     el("option", { value: "local_fast" }, "Local fast (light CPU)"),
     el("option", { value: "local_llm" }, "Local LLM (heavy CPU)"));
-  select.replaceChildren(claude, local);
-  select.value = data.engine === "claude" ? `claude:${data.current}` : data.engine;
+  const openai = el("optgroup", { label: "ChatGPT (OpenAI cloud)" }, ...(data.openai_models || []).map((m) => el("option", { value: `openai:${m.id}`, title: m.id }, m.id)));
+  select.replaceChildren(claude, openai, local);
+  select.value = data.engine === "claude" ? `claude:${data.current}` : data.engine === "openai" ? `openai:${data.openai_current}` : data.engine;
 }
 
 async function initModelSelect(force = false) {
@@ -1004,7 +1005,9 @@ $("modelSelect").addEventListener("change", async (e) => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(select.value.startsWith("claude:")
       ? { prediction_engine: "claude", claude_model: select.value.slice(7) }
-      : { prediction_engine: select.value }),
+      : select.value.startsWith("openai:")
+        ? { prediction_engine: "openai", openai_model: select.value.slice(7) }
+        : { prediction_engine: select.value }),
   }).catch(() => null);
   select.disabled = false;
   if (!resp?.ok) alert("Could not change the prediction engine.");
@@ -1014,6 +1017,8 @@ $("modelSelect").addEventListener("change", async (e) => {
     const settingsModel = document.querySelector('#settingsForm select[name="claude_model"]');
     if (settingsEngine) { settingsEngine.value = saved.prediction_engine; settingsEngine.dispatchEvent(new Event("change")); }
     if (settingsModel) settingsModel.value = saved.claude_model;
+    const settingsOpenai = document.querySelector('#settingsForm select[name="openai_model"]');
+    if (settingsOpenai) settingsOpenai.value = saved.openai_model;
   }
   initModelSelect(true);
   refresh();

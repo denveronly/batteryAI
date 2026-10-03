@@ -1,8 +1,9 @@
-"""BatteryAI add-on: records sensors, runs scheduled Claude analyses, serves the ingress UI."""
+"""BatteryAI add-on: records sensors, runs scheduled AI analyses, serves the ingress UI."""
 
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import json
 import shutil
@@ -25,6 +26,7 @@ import control
 import local_fast
 import local_llm
 import notify
+import openai_engine
 from collector import UNAVAILABLE, active_program, collect, has_data, parse_hhmm, to_float, weather_details
 from config import DATA_DIR, Options, SettingsError, load_settings, parse_settings, save_settings
 from db import READING_FIELDS, Database, accuracy_report, economy_report, monthly_summary
@@ -58,6 +60,7 @@ class BatteryAI:
         self._last_outage_key: str | None = None
         self._last_compress = 0.0
         self.model_download = local_llm.ModelDownloader()
+        self.panel_url: str | None = None  # opened by tapping a notification
         self._last_outage_run = 0.0
 
     def spawn(self, coro: Any) -> asyncio.Task:
@@ -109,12 +112,14 @@ class BatteryAI:
                 applied = await control.apply_prediction(self.ha, self.opts, latest["result"])
                 self.db.add_actions(latest["id"], applied)
                 actions += applied
-        await self.notify(
-            "BatteryAI",
-            {"auto": "AI auto-control turned on.", "off": "AI auto-control turned off."}.get(mode),
-            self.opts.notify_soc_changes,
+        await self.notify_actions(
+            actions,
+            {"auto": "AI auto-control on", "off": "AI auto-control off"}.get(mode, "SOC updated"),
+            {
+                "auto": "The latest plan is written to the inverter after every prediction.",
+                "off": "Predictions only advise; nothing is written to the inverter.",
+            }.get(mode),
         )
-        await self.notify_actions(actions, "SOC updated")
         return actions
 
     async def charge_all(self) -> list[dict[str, Any]]:
@@ -213,12 +218,14 @@ class BatteryAI:
         _LOGGER.info("Outage information changed; running an extra prediction")
         self.spawn(self.run_analysis("outage"))
 
-    async def notify(self, title: str, message: str | None, enabled: bool = True) -> None:
+    async def notify(self, title: str, message: str | None, enabled: bool = True, kind: str = "info") -> None:
         if enabled and message and self.opts.notify_services:
-            await notify.send(self.ha, self.opts, title, message)
+            await notify.send(self.ha, self.opts, title, message, kind=kind, url=self.panel_url)
 
-    async def notify_actions(self, actions: list[dict[str, Any]], reason: str) -> None:
-        await self.notify(f"BatteryAI: {reason}", notify.actions_message(actions), self.opts.notify_soc_changes)
+    async def notify_actions(self, actions: list[dict[str, Any]], reason: str, intro: str | None = None) -> None:
+        await self.notify(
+            f"🔋 BatteryAI: {reason}", notify.actions_message(actions, intro), self.opts.notify_soc_changes, "changes"
+        )
 
     async def compress_old(self) -> dict[str, int]:
         cutoff = int(time.time()) - self.opts.detail_days * 86400
@@ -260,12 +267,18 @@ class BatteryAI:
 
     @property
     def can_predict(self) -> bool:
-        return self.opts.prediction_engine != "claude" or self._client is not None
+        engine = self.opts.prediction_engine
+        if engine == "claude":
+            return self._client is not None
+        if engine == "openai":
+            return bool(self.opts.openai_api_key)
+        return True
 
     @property
     def engine_label(self) -> str:
         return {
             "claude": self.opts.claude_model,
+            "openai": self.opts.openai_model,
             "local_fast": "local-fast (statistics + rules)",
             "local_llm": f"local {local_llm.MODEL_NAME}",
         }[self.opts.prediction_engine]
@@ -278,6 +291,11 @@ class BatteryAI:
                 raise AnalysisError("Set the Claude API key in the Settings tab.")
             data = build_input(self.db, self.opts, snapshot, self.tz, trigger)
             return await analyze(self._client, self.opts, data), data
+        if engine == "openai":
+            if not self.opts.openai_api_key:
+                raise AnalysisError("Set the OpenAI API key in the Settings tab.")
+            data = build_input(self.db, self.opts, snapshot, self.tz, trigger)
+            return await openai_engine.analyze(self.opts, data), data
 
         baseline = await asyncio.to_thread(local_fast.analyze, self.db, self.opts, snapshot, self.tz)
         if engine == "local_fast":
@@ -315,11 +333,11 @@ class BatteryAI:
             except AnalysisError as err:
                 _LOGGER.error("Analysis #%d failed: %s", analysis_id, err)
                 self.db.finish_analysis(analysis_id, status="error", error=str(err), input_data=data)
-                await self.notify("BatteryAI: prediction failed", str(err), self.opts.notify_errors)
+                await self.notify("❌ BatteryAI: prediction failed", str(err), self.opts.notify_errors, "error")
             except Exception as err:
                 _LOGGER.exception("Analysis #%d crashed", analysis_id)
                 self.db.finish_analysis(analysis_id, status="error", error=f"Unexpected error: {err}", input_data=data)
-                await self.notify("BatteryAI: prediction failed", f"Unexpected error: {err}", self.opts.notify_errors)
+                await self.notify("❌ BatteryAI: prediction failed", f"Unexpected error: {err}", self.opts.notify_errors, "error")
             else:
                 result = outcome["result"]
                 self.db.finish_analysis(
@@ -333,15 +351,23 @@ class BatteryAI:
                     output_tokens=outcome["output_tokens"],
                 )
                 _LOGGER.info("Analysis #%d done: %s", analysis_id, result.get("summary"))
-                title = "BatteryAI: outage plan" if trigger == "outage" else "BatteryAI prediction"
-                await self.notify(title, notify.prediction_message(result), self.opts.notify_predictions)
+                actions: list[dict[str, Any]] | None = None
                 if self.control["mode"] == "auto":
                     try:
                         actions = await control.apply_prediction(self.ha, self.opts, result)
                         self.db.add_actions(analysis_id, actions)
-                        await self.notify_actions(actions, "SOC updated")
-                    except Exception:
+                    except Exception as err:
                         _LOGGER.exception("Applying analysis #%d failed", analysis_id)
+                        actions = [{"status": "error", "error": f"applying the plan failed: {err}"}]
+                # One notification per run: the plan and what was written to the inverter.
+                if self.opts.notify_predictions:
+                    title, message = notify.plan_notification(
+                        result, self.opts, trigger=trigger, actions=actions,
+                        current_programs=snapshot.get("deye_programs"),
+                    )
+                    await self.notify(title, message, kind="plan")
+                elif actions:
+                    await self.notify_actions(actions, "SOC updated")
             return analysis_id
 
 
@@ -426,6 +452,8 @@ async def status(request: web.Request) -> web.Response:
         )
     if opts.prediction_engine == "claude" and not opts.claude_api_key:
         warnings.append("Claude API key is not set.")
+    if opts.prediction_engine == "openai" and not opts.openai_api_key:
+        warnings.append("OpenAI API key is not set.")
     if opts.prediction_engine == "local_llm":
         llm = local_llm.available()
         if not llm["runtime"]:
@@ -843,9 +871,16 @@ async def test_notify(request: web.Request) -> web.Response:
     if not service:
         return web.json_response({"ok": False, "error": "Enter a notify service first."})
     try:
-        await app.ha.call_service(
-            "notify", service, {"title": "BatteryAI", "message": "Test notification from BatteryAI ✓", "data": {"tag": "batteryai-test"}}
+        test_opts = dataclasses.replace(app.opts, notify_services=[service])
+        errors = await notify.send(
+            app.ha, test_opts, "🔋 BatteryAI: test",
+            "Test notification from BatteryAI ✓\nThe first lines are the brief. Pull this notification down "
+            "(or long-press it) to read everything, and use “Open BatteryAI” to open the panel."
+            + ("" if app.panel_url else "\n(No panel link: the add-on could not ask the Supervisor for it.)"),
+            kind="test", url=app.panel_url,
         )
+        if errors:
+            raise HAError("http", errors[0].split(": ", 1)[-1])
     except HAError as err:
         return web.json_response({"ok": False, "error": str(err)})
     return web.json_response({"ok": True})
@@ -878,14 +913,31 @@ async def models(request: web.Request) -> web.Response:
     models_list = found or FALLBACK_MODEL_LIST
     if current and current not in {m["id"] for m in models_list}:
         models_list = [{"id": current, "display_name": current}, *models_list]
+
+    openai_current = app.opts.openai_model
+    openai_found: list[dict[str, str]] = []
+    openai_error = None
+    if app.opts.openai_api_key:
+        try:
+            openai_found = await openai_engine.list_models(app.opts.openai_api_key)
+        except AnalysisError as err:
+            openai_error = str(err)
+    openai_list = openai_found or [{"id": m, "display_name": m} for m in openai_engine.FALLBACK_MODELS]
+    if openai_current and openai_current not in {m["id"] for m in openai_list}:
+        openai_list = [{"id": openai_current, "display_name": openai_current}, *openai_list]
     return web.json_response({
         "models": models_list,
         "current": current,
         "live": bool(found),
         "error": error,
+        "openai_models": openai_list,
+        "openai_current": openai_current,
+        "openai_live": bool(openai_found),
+        "openai_error": openai_error,
         "engine": app.opts.prediction_engine,
         "engines": [
             {"id": "claude", "name": "Claude (cloud)"},
+            {"id": "openai", "name": "ChatGPT (OpenAI cloud)"},
             {"id": "local_fast", "name": "Local fast – statistics + rules (light CPU)"},
             {"id": "local_llm", "name": f"Local slow – {local_llm.MODEL_NAME} LLM (heavy CPU)"},
         ],
@@ -973,6 +1025,18 @@ async def test_claude(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "model": info.id, "display_name": info.display_name})
 
 
+@routes.post("/api/test/openai")
+async def test_openai(request: web.Request) -> web.Response:
+    """Checks the OpenAI API key and model with the Models API (no tokens are used)."""
+    app = _app(request)
+    body = await request.json() if request.can_read_body else {}
+    api_key = (body.get("api_key") or "").strip() or app.opts.openai_api_key
+    model = (body.get("model") or "").strip() or app.opts.openai_model
+    if not api_key:
+        return web.json_response({"ok": False, "error": "No API key entered."})
+    return web.json_response(await openai_engine.test(api_key, model))
+
+
 # Startup --------------------------------------------------------------------
 
 
@@ -1017,6 +1081,7 @@ async def main() -> None:
         tz, tz_source = await resolve_time_zone(ha)
         batteryai = BatteryAI(opts, db, ha, tz)
         batteryai.tz_source = tz_source
+        batteryai.panel_url = await ha.panel_path()
 
         app = web.Application(middlewares=[revalidate_static])
         app["batteryai"] = batteryai

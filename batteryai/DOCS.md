@@ -1,7 +1,7 @@
 # BatteryAI
 
 BatteryAI records your battery, solar, load, appliance, weather and outage data, and
-asks Claude at fixed times each day (12:00 and 23:00 by default) to predict consumption
+asks an AI (Claude, ChatGPT or a local engine) at fixed times each day (12:00 and 23:00 by default) to predict consumption
 and plan the SOC and grid charge of the six Deye time-of-use programs. With AI
 auto-control on, the plan is written to the inverter.
 
@@ -55,11 +55,16 @@ All settings are stored in `/data/settings.json` and apply immediately when save
 
 - **Home Assistant connection** – test shows the version and time zone, or why the
   add-on cannot read data.
-- **Prediction engine** – *Claude* (cloud), *Local fast* (statistics + rules, light
-  CPU) or *Local slow* (Qwen2.5 3B LLM on the CPU). Also switchable from the header
+- **Prediction engine** – *Claude* (cloud), *ChatGPT* (OpenAI cloud), *Local fast*
+  (statistics + rules, light CPU) or *Local slow* (Qwen2.5 3B LLM on the CPU). Also switchable from the header
   dropdown. See *Prediction engines* below.
 - **Claude** – API key (never sent back to the browser), model (dropdown with the models
   your key can use; also in the header), effort, language.
+- **ChatGPT (OpenAI)** – OpenAI API key (from platform.openai.com; never sent back to the
+  browser), model (dropdown with the chat models your key can use; also in the header)
+  and reasoning effort for reasoning models (GPT-5, o-series). ChatGPT gets exactly the
+  same data, instructions and answer format as Claude. A ChatGPT Plus subscription does
+  not include API access – the API is billed separately per token.
 - **Prediction schedule** – the times of the daily runs (default 12:00 and 23:00), or
   fill them evenly with *N per day from HH:MM*. Recording interval, history days,
   weekend days.
@@ -100,9 +105,15 @@ All settings are stored in `/data/settings.json` and apply immediately when save
 - **Phone notifications** – one or more notify services (phones from the Home Assistant
   Companion app appear as `mobile_app_…`), with a test button. Notifications are normal
   priority, not critical alerts: every prediction, every SOC / grid-charge change, and
-  failed predictions can each be switched on or off.
+  failed predictions can each be switched on or off. Each prediction sends **one**
+  notification: the first lines are a brief (tomorrow's use, solar and lowest battery,
+  and whether the plan was written to the inverter); pull it down (or long-press it on an
+  iPhone) to see the summary and every program with its time range, SOC, grid charge and
+  previous value. Tap it, or its **Open BatteryAI** button, to open the panel. A new plan
+  replaces the previous plan notification; changes and errors stay as separate
+  notifications.
 - **History** – rebuild the data from the Home Assistant recorder (10 days by default).
-- **Extra instructions** for Claude.
+- **Extra instructions** for the AI.
 
 Every entity has a **Test** button showing its current value or why it fails.
 
@@ -111,6 +122,7 @@ Every entity has a **Test** button showing its current value or why it fails.
 | Engine | Runs | Speed / load | Quality |
 | --- | --- | --- | --- |
 | Claude | Anthropic cloud, API key | ~1 min, nothing local | Best: reads all history, weather, outages, tariffs |
+| ChatGPT | OpenAI cloud, API key | ~1 min, nothing local | Same data and instructions as Claude |
 | Local fast | inside the add-on | instant, negligible CPU | Solid baseline: similar-day forecast + fixed rules |
 | Local slow | inside the add-on (llama.cpp) | minutes, ~3 GB RAM, all cores | Plans and explains like an AI, from the local fast forecast |
 

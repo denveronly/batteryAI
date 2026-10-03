@@ -14,8 +14,9 @@ DATA_DIR = os.environ.get("BATTERYAI_DATA", "/data")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 
 WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-ENGINES = ("claude", "local_fast", "local_llm")
+ENGINES = ("claude", "openai", "local_fast", "local_llm")
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
+OPENAI_EFFORTS = ["low", "medium", "high"]
 DEYE_PROGRAM_COUNT = 6
 SENSOR_KEYS = (
     "today_forecast_sensor",
@@ -102,6 +103,9 @@ class Options:
     claude_api_key: str = ""
     claude_model: str = "claude-opus-5-5"
     claude_effort: str = "high"
+    openai_api_key: str = ""
+    openai_model: str = "gpt-5"
+    openai_effort: str = "medium"  # reasoning_effort for reasoning models (o-series, GPT-5)
     response_language: str = "English"
     # Prediction runs (HH:MM, Home Assistant time zone); with auto-control on, each run
     # pushes new SOC values to the inverter.
@@ -220,6 +224,7 @@ class Options:
         """Settings for the UI; the API key itself never leaves the add-on."""
         data = self.to_dict()
         data["claude_api_key_set"] = bool(data.pop("claude_api_key"))
+        data["openai_api_key_set"] = bool(data.pop("openai_api_key"))
         return data
 
 
@@ -259,10 +264,14 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         return value
 
     api_key = text("claude_api_key") if raw.get("claude_api_key") else base.claude_api_key
+    openai_key = text("openai_api_key") if raw.get("openai_api_key") else base.openai_api_key
     opts = Options(
         claude_api_key=api_key,
         claude_model=text("claude_model") or "claude-opus-5-5",
         claude_effort=text("claude_effort"),
+        openai_api_key=openai_key,
+        openai_model=text("openai_model") or "gpt-5",
+        openai_effort=text("openai_effort"),
         response_language=text("response_language") or "English",
         record_interval_minutes=integer("record_interval_minutes", 1, 60),
         history_days=integer("history_days", 1, 365),
@@ -284,6 +293,8 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         errors["program_time_marks"] = "must be end or start"
     if opts.claude_effort not in EFFORTS:
         errors["claude_effort"] = "must be one of " + ", ".join(EFFORTS)
+    if opts.openai_effort not in OPENAI_EFFORTS:
+        errors["openai_effort"] = "must be one of " + ", ".join(OPENAI_EFFORTS)
     times = raw.get("analysis_times_list", base.analysis_times_list)
     if isinstance(times, str):
         times = times.replace(";", ",").split(",")
