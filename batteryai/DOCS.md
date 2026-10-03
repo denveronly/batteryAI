@@ -80,10 +80,11 @@ All settings are stored in `/data/settings.json` and apply immediately when save
   recording now (or use Settings → History → Import to fill it from Home Assistant).
 - **Deye programs** – for each of the 6 programs: time entity, SOC entity (number,
   input_number or select) and an optional grid charge switch. *Program time
-  marks* says how the inverter reads the times: **end** (default) – a program's time is
-  the end of its range, which starts at the previous program's time (P1 05:00 after
-  P6 23:15 covers 23:15 – 05:00); **start** – the range lasts until the next program's
-  time. Two programs with the same time leave one of them unused. BatteryAI never
+  marks* says how the inverter reads the times: **start** (default, as Deye does it) – a
+  program runs from its own time until the next program's time, and P6 runs until P1
+  (P1 00:00, P2 03:00 = 00:00 – 03:00; P6 21:00 = 21:00 – 00:00); **end** – a program's
+  time is the end of its range, which starts at the previous program's time. Two
+  programs with the same time leave one of them unused. BatteryAI never
   changes program times, only SOC and grid charge.
 - **Tariffs** – the currency and your own list of tariffs (up to 8): a name, the price
   per kWh and the time windows, such as `23:00-07:00` or several separated by commas

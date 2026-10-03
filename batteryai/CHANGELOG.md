@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.8
+
+- Fix: Deye program time ranges. A program runs from its own time until the next
+  program's time, and program 6 runs until program 1 (P1 00:00, P2 03:00 = 00:00 – 03:00).
+  This is now the default, and existing settings are switched to it once. The dashboard,
+  the battery chart bands, the active program, the stored program SOC history and every
+  prediction engine use the corrected ranges.
+
 ## 0.4.7
 
 - Single price: keep just one tariff (shown as "All day") when the grid price is the
