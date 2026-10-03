@@ -362,8 +362,8 @@
         <div class="card-head"><h2>Deye programs</h2><span class="muted">Time, SOC capacity and grid-charge entity for each of the 6 programs</span></div>
         <label>Program time marks
           <select name="program_time_marks">
-            <option value="end">the END of its range — range starts at the previous program's time (P1 05:00 after P6 23:15 = 23:15–05:00)</option>
-            <option value="start">the START of its range — range lasts until the next program's time</option>
+            <option value="start">the START of its range — runs until the next program's time (P1 00:00, P2 03:00 = 00:00–03:00; P6 runs until P1)</option>
+            <option value="end">the END of its range — starts at the previous program's time</option>
           </select>
         </label>
         <div id="programRows"></div>

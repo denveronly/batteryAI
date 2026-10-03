@@ -56,10 +56,11 @@ function toMinutes(value) {
   return h >= 0 && h < 24 && m >= 0 && m < 60 ? h * 60 + m : null;
 }
 
-// slot -> [start, end] minutes. With "end" (default) a program's time is the END of its
-// range, which starts at the previous program's time: P1 05:00 after P6 23:15 = 23:15–05:00.
+// slot -> [start, end] minutes. With "start" (default) a program runs from its own time
+// until the next program's time, and the last one until P1: P1 00:00, P2 03:00 = 00:00–03:00.
+// With "end" a program's time is the END of its range, which starts at the previous one.
 function programSpans(programs) {
-  const timeIsEnd = (status?.program_time_marks || "end") === "end";
+  const timeIsEnd = (status?.program_time_marks || "start") === "end";
   const timed = programs
     .map((p) => [toMinutes(p.time), p.slot])
     .filter(([m]) => m !== null)

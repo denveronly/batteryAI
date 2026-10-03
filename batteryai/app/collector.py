@@ -76,9 +76,9 @@ def _fmt_minutes(minutes: int) -> str:
 def program_ranges(programs: list[dict[str, Any]], time_is_end: bool) -> dict[int, tuple[int, int]]:
     """slot -> (start, end) minutes of the period each program covers, wrapping past midnight.
 
-    time_is_end: the program's time marks the END of its period, which starts at the previous
-    program's time (P1 05:00 covers 23:15-05:00 when the last program is at 23:15).
-    Otherwise the time marks the START and the period runs until the next program's time.
+    By default (Deye) a program's time marks the START of its period, which runs until the next
+    program's time; the last one runs until the first (P1 00:00, P2 03:00 = 00:00-03:00).
+    time_is_end: the time marks the END of the period, which starts at the previous program's time.
     """
     timed = sorted(
         ((parse_hhmm(p.get("time")), p["slot"]) for p in programs if parse_hhmm(p.get("time")) is not None),

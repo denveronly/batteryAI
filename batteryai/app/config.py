@@ -64,6 +64,9 @@ class Tariff:
 
 
 MAX_TARIFFS = 8
+# 2: program ranges default to "start" (0.4.8). Up to 0.4.7 "end" was the default and was
+# saved into every settings.json, so it is switched to "start" once on load.
+SETTINGS_VERSION = 2
 
 
 def _window_minutes(window: str) -> tuple[int, int]:
@@ -134,9 +137,11 @@ class Options:
     local_llm_threads: int = 0  # 0 = all CPU cores
     weekend_days: list[str] = field(default_factory=lambda: ["saturday", "sunday"])
     deye_programs: list[DeyeProgram] = field(default_factory=list)
-    # "end": a program's time is the END of its period, which starts at the previous
-    # program's time. "start": the time starts the period, which lasts until the next one.
-    program_time_marks: str = "end"
+    # "start" (Deye default): a program runs from its own time until the next program's
+    # time (P6 runs until P1). "end": a program's time is the END of its period, which
+    # starts at the previous program's time.
+    program_time_marks: str = "start"
+    settings_version: int = SETTINGS_VERSION
     extra_instructions: str = ""
     notify_services: list[str] = field(default_factory=list)
     notify_predictions: bool = True
@@ -274,7 +279,7 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
     for key in SENSOR_KEYS:
         setattr(opts, key, entity(key, text(key)))
 
-    opts.program_time_marks = text("program_time_marks") or "end"
+    opts.program_time_marks = text("program_time_marks") or "start"
     if opts.program_time_marks not in ("end", "start"):
         errors["program_time_marks"] = "must be end or start"
     if opts.claude_effort not in EFFORTS:
@@ -457,6 +462,8 @@ def load_settings() -> Options:
         for key, legacy in LEGACY_KEYS.items():
             if key not in raw and legacy in raw:
                 raw[key] = raw[legacy]
+        if int(raw.get("settings_version") or 1) < 2 and raw.get("program_time_marks") == "end":
+            raw["program_time_marks"] = "start"
         try:
             return parse_settings(raw)
         except SettingsError:
