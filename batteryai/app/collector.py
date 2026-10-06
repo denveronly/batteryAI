@@ -71,6 +71,15 @@ def outage_minutes(state: dict[str, Any] | None) -> float | None:
     return None if value < 0 or value >= FAR_MINUTES else value
 
 
+ENERGY_UNITS = {"kwh": 1.0, "wh": 0.001, "mwh": 1000.0}
+
+
+def energy_kwh(value: float | None, unit: str | None) -> float | None:
+    """kWh from an energy reading in kWh / Wh / MWh; None for other units (e.g. power)."""
+    factor = ENERGY_UNITS.get((unit or "").strip().lower())
+    return None if value is None or factor is None else value * factor
+
+
 def clean_state(value: Any) -> str | None:
     if value is None or str(value).strip().lower() in UNAVAILABLE:
         return None
@@ -222,10 +231,11 @@ async def collect(ha: HomeAssistant, opts: Options, tz: tzinfo) -> dict[str, Any
     sensors = opts.sensor_map()
     program_entities = [(p.time_entity, p.soc_entity, p.charge_entity) for p in opts.deye_programs]
 
-    (minutes_state, duration_state, emergency_state), sensor_states, appliance_states, program_states, weather = await asyncio.gather(
+    (minutes_state, duration_state, emergency_state), sensor_states, appliance_states, energy_states, program_states, weather = await asyncio.gather(
         asyncio.gather(*(ha.state(e) for e in (opts.outage_minutes_sensor, opts.outage_duration_sensor, opts.emergency_outage_sensor))),
         asyncio.gather(*(ha.state(entity) for entity in sensors.values())),
         asyncio.gather(*(ha.state(a.entity) for a in opts.appliances)),
+        asyncio.gather(*(ha.state(a.energy_entity) for a in opts.appliances)),
         asyncio.gather(*(asyncio.gather(ha.state(t), ha.state(s), ha.state(c)) for t, s, c in program_entities)),
         weather_details(ha, opts.weather_entity, tz) if opts.weather_entity else asyncio.sleep(0, {}),
     )
@@ -263,14 +273,27 @@ async def collect(ha: HomeAssistant, opts: Options, tz: tzinfo) -> dict[str, Any
     for key in ("today_forecast", "tomorrow_forecast"):
         snapshot[key] = opts.adjust_forecast(snapshot.get(key))
     snapshot["appliances"] = {}
-    for appliance, state in zip(opts.appliances, appliance_states):
-        if not appliance.entity:
-            continue
-        unit = (state.get("attributes") or {}).get("unit_of_measurement") if state else None
-        value = to_watts(to_float(state.get("state")) if state else None, unit)
-        snapshot["appliances"][appliance.id] = value
-        if value is None:
-            missing.append(appliance.entity)
+    # kWh counters for the monthly bill: the energy sensor, or a "power" sensor that is in fact
+    # an energy counter (kWh / Wh).
+    snapshot["appliance_energy"] = {}
+    for appliance, state, energy_state in zip(opts.appliances, appliance_states, energy_states):
+        if appliance.entity:
+            unit = (state.get("attributes") or {}).get("unit_of_measurement") if state else None
+            number = to_float(state.get("state")) if state else None
+            if energy_kwh(number, unit) is not None:
+                snapshot["appliance_energy"][appliance.id] = energy_kwh(number, unit)
+            else:
+                value = to_watts(number, unit)
+                snapshot["appliances"][appliance.id] = value
+                if value is None:
+                    missing.append(appliance.entity)
+        if appliance.energy_entity:
+            unit = (energy_state.get("attributes") or {}).get("unit_of_measurement") if energy_state else None
+            kwh = energy_kwh(to_float(energy_state.get("state")) if energy_state else None, unit or "kWh")
+            if kwh is not None:
+                snapshot["appliance_energy"][appliance.id] = kwh
+            else:
+                missing.append(appliance.energy_entity)
     snapshot["outdoor_temp"] = weather.get("outdoor_temp")
     snapshot["units"]["outdoor_temp"] = weather.get("unit")
     snapshot["weather"] = weather

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.24
+
+- Fix: appliances with an energy sensor (kWh / Wh) were read as power (W), so the
+  Monthly bill showed almost 0 kWh for them. Such a sensor is now used as a kWh counter.
+- Appliances get an optional **Energy sensor (kWh)** (Settings → Appliances): a total,
+  daily or monthly counter (resets are handled). With it, the Monthly bill uses its
+  increase, split by tariff; without it, the power sensor is integrated. No separate peak /
+  off-peak sensors are needed – BatteryAI splits by the tariff hours itself.
+
 ## 0.4.23
 
 - Logs → Storage shows the **whole space the add-on uses**: *Add-on total*, its data and

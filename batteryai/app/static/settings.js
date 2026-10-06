@@ -102,6 +102,11 @@ function applianceRow(appliance = {}) {
   name.value = appliance.name || "";
   const entityInput = el("input", { type: "text", list: "entityList", placeholder: "sensor.example_power", autocomplete: "off", spellcheck: "false", "data-role": "entity" });
   entityInput.value = appliance.entity || "";
+  const energyInput = el("input", { type: "text", list: "entityList", placeholder: "optional: sensor.example_energy", autocomplete: "off", spellcheck: "false", "data-role": "energy" });
+  energyInput.value = appliance.energy_entity || "";
+  const energyResult = el("div", { class: "result" });
+  const energyTestRow = { querySelector: (sel) => (sel === "input" ? energyInput : energyResult), dataset: { kind: "numeric" } };
+  energyInput.addEventListener("change", () => energyInput.value.trim() ? testEntity(energyTestRow) : energyResult.replaceChildren());
   const temp = el("input", { type: "checkbox", "data-role": "temp" });
   temp.checked = !!appliance.temperature_dependent;
   const result = el("div", { class: "result" });
@@ -118,11 +123,14 @@ function applianceRow(appliance = {}) {
     el("div", { class: "appliance-fields" },
       el("label", {}, "Name", name),
       el("label", {}, "Power sensor", entityInput),
+      el("label", { title: "kWh counter for the monthly bill (total, daily or monthly – resets are handled). Without it the bill integrates the power sensor." }, "Energy sensor (kWh)", energyInput),
       el("label", { class: "inline-row temp-toggle", title: "Heats or cools the house, so its use follows the outdoor temperature" }, temp, "Depends on outdoor temperature"),
       el("span", { class: "appliance-buttons" }, test, remove)),
     result,
+    energyResult,
   );
   if (appliance.entity) testEntity(testRow);
+  if (appliance.energy_entity) testEntity(energyTestRow);
   return row;
 }
 
@@ -132,6 +140,7 @@ function renumberAppliances() {
   rows.forEach((row, i) => {
     row.querySelector('[data-role="name"]').name = `appliances.${i}.name`;
     row.querySelector('[data-role="entity"]').name = `appliances.${i}.entity`;
+    row.querySelector('[data-role="energy"]').name = `appliances.${i}.energy_entity`;
   });
   $("addAppliance").disabled = rows.length >= MAX_APPLIANCES;
   if (!rows.length) $("applianceRows").replaceChildren();
@@ -147,6 +156,7 @@ function readAppliances() {
     id: row.dataset.id,
     name: row.querySelector('[data-role="name"]').value.trim(),
     entity: row.querySelector('[data-role="entity"]').value.trim(),
+    energy_entity: row.querySelector('[data-role="energy"]').value.trim(),
     temperature_dependent: row.querySelector('[data-role="temp"]').checked,
   }));
 }

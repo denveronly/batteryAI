@@ -7,7 +7,7 @@ from bisect import bisect_right
 from datetime import datetime, timedelta, tzinfo
 from typing import Any
 
-from collector import POWER_FIELDS, active_program, clean_state, to_float, to_watts
+from collector import POWER_FIELDS, active_program, clean_state, energy_kwh, to_float, to_watts
 from config import WEEKDAYS, Options
 from db import Database
 from ha import HAError, HomeAssistant
@@ -115,7 +115,9 @@ async def import_history(
             if name in ("today_forecast", "tomorrow_forecast"):
                 snap[name] = opts.adjust_forecast(number)
         snap["appliances"] = {
-            app_id: to_watts(to_float(value(key, ts)), units.get(key)) for key, app_id in appliance_keys.items()
+            app_id: to_watts(to_float(value(key, ts)), units.get(key))
+            for key, app_id in appliance_keys.items()
+            if energy_kwh(0.0, units.get(key)) is None  # kWh counters are not power
         }
         programs = [
             {

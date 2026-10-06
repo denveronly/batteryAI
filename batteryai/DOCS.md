@@ -61,7 +61,9 @@ Below the bill, **Appliances** shows each appliance's kWh and cost per month (pe
 when there are several), its share of the month's grid cost and the year's total. The
 energy is integrated from the appliance's power sensor every recording interval and
 stored per day and tariff from the moment the appliance is added; earlier months never
-get it. It is priced with the month's price of each tariff.
+get it. With an *Energy sensor (kWh)* on the appliance (Settings → Appliances; a total,
+daily or monthly counter) the bill uses that counter's increase instead of the power
+sensor; a "power" sensor that reports kWh or Wh is treated as such a counter. It is priced with the month's price of each tariff.
 
 ### Logs
 

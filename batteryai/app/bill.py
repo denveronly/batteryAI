@@ -115,31 +115,48 @@ class BillRecorder:
             self.db.add_bill(entries, METER_KEY, state)
 
     def record_appliances(self, opts: Options, tz: tzinfo, snapshot: dict[str, Any] | None) -> None:
-        """Integrates each configured appliance's power since the previous sample into
-        bill_appliances (per day and tariff). Only live samples count, so an appliance
-        appears from the moment it is added, never in earlier months."""
+        """Adds each configured appliance's energy since the previous sample to
+        bill_appliances (per day and tariff): the increase of its kWh counter when it has one
+        (resets handled), else its power integrated over the gap. Only live samples count, so
+        an appliance appears from the moment it is added, never in earlier months."""
         if not snapshot:
             return
         ts = float(snapshot["ts"])
-        current = {
-            a.id: snapshot.get("appliances", {}).get(a.id)
-            for a in opts.appliances if a.entity and snapshot.get("appliances", {}).get(a.id) is not None
+        configured = {a.id for a in opts.appliances if a.entity or a.energy_entity}
+        energy_now = {k: v for k, v in (snapshot.get("appliance_energy") or {}).items() if k in configured and v is not None}
+        power_now = {
+            k: v for k, v in (snapshot.get("appliances") or {}).items()
+            if k in configured and v is not None and k not in energy_now
         }
         previous = self.db.meta_get(APPLIANCES_KEY) or {}
         entries: dict[tuple[str, str, str], float] = {}
+
+        def add(app_id: str, start: float, kwh: float) -> None:
+            parts: Entries = {}
+            split(opts, tz, start, ts, kwh, parts)
+            for (day, tariff), (part, _cost) in parts.items():
+                entries[(day, app_id, tariff)] = entries.get((day, app_id, tariff), 0.0) + part
+
+        # Energy counters: the increase since the counter's previous reading.
+        counters = dict(previous.get("e") or {})  # id -> [kWh, ts]
+        for app_id, kwh in energy_now.items():
+            last = counters.get(app_id)
+            if last and ts > last[1]:
+                add(app_id, last[1], energy_delta(last[0], kwh))
+                if kwh < last[0] and last[0] - kwh <= NOISE_KWH:
+                    kwh = last[0]
+            counters[app_id] = [kwh, ts]
+        counters = {k: v for k, v in counters.items() if k in configured}
+        # Power sensors: the average of two samples over the gap (gaps over 15 minutes skipped).
         gap = ts - float(previous.get("ts") or 0)
         if 0 < gap <= APPLIANCE_GAP:
             for app_id, watts in (previous.get("w") or {}).items():
-                if app_id not in current or watts is None:
-                    continue  # removed (or unavailable now)
-                kwh = max(0.0, (watts + current[app_id]) / 2) * gap / 3_600_000
-                split_entries: Entries = {}
-                split(opts, tz, ts - gap, ts, kwh, split_entries)
-                for (day, tariff), (part, _cost) in split_entries.items():
-                    entries[(day, app_id, tariff)] = entries.get((day, app_id, tariff), 0.0) + part
+                if app_id in power_now and watts is not None:
+                    add(app_id, ts - gap, max(0.0, (watts + power_now[app_id]) / 2) * gap / 3_600_000)
         names = {**(previous.get("names") or {}), **{a.id: a.name for a in opts.appliances}}
         self.db.add_bill_appliances(
-            entries, {t.name: t.price for t in opts.tariffs}, APPLIANCES_KEY, {"ts": ts, "w": current, "names": names}
+            entries, {t.name: t.price for t in opts.tariffs}, APPLIANCES_KEY,
+            {"ts": ts, "w": power_now, "e": counters, "names": names},
         )
 
     async def backfill(self, ha: HomeAssistant, opts: Options, tz: tzinfo, since_ts: float | None) -> None:

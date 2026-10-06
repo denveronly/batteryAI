@@ -55,6 +55,7 @@ class Appliance:
     name: str
     entity: str = ""
     temperature_dependent: bool = False  # heats or cools: energy follows outdoor temperature
+    energy_entity: str = ""  # optional kWh counter for the monthly bill (total, daily or monthly)
 
 
 @dataclass
@@ -448,7 +449,8 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
             continue
         name = str(item.get("name") or "").strip()[:40]
         entity_id = entity(f"appliances.{index}.entity", str(item.get("entity") or "").strip())
-        if not name and not entity_id:
+        energy_id = entity(f"appliances.{index}.energy_entity", str(item.get("energy_entity") or "").strip())
+        if not name and not entity_id and not energy_id:
             continue  # an empty row added with + and never filled in
         if not name:
             errors[f"appliances.{index}.name"] = "give the appliance a name"
@@ -458,6 +460,7 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         taken.add(app_id)
         opts.appliances.append(Appliance(
             id=app_id, name=name, entity=entity_id, temperature_dependent=bool(item.get("temperature_dependent")),
+            energy_entity=energy_id,
         ))
 
     services = raw.get("notify_services", base.notify_services) or []
