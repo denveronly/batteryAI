@@ -72,6 +72,7 @@ class BatteryAI:
         self._outage_lock = asyncio.Lock()
         self.outage_plan: dict[str, Any] | None = None  # the latest tariff-aware decision
         self.outage_duration: float | None = None
+        self.emergency = False  # emergency outages in effect (emergency outage sensor)
         self._profile: tuple[float, dict[tuple[int, int], float]] = (0.0, {})
 
     def spawn(self, coro: Any) -> asyncio.Task:
@@ -214,6 +215,8 @@ class BatteryAI:
         soc = self.opts.outage_precharge_soc_percent
         reason = f"An outage is expected in {minutes:.0f} minutes; all programs are set to {soc}% with grid charge on."
         decision = await self.tariff_aware_plan(now, outage_at)
+        if self.emergency:
+            reason = f"Emergency outages are on: tariffs are ignored and all programs are set to {soc}% with grid charge on (outage in {minutes:.0f} minutes)."
         if decision is not None:
             if not decision["charge"]:
                 return  # checked again every minute (the SOC may drop)
@@ -240,8 +243,13 @@ class BatteryAI:
         """The tariff-aware decision, or None when it does not apply (switched off, a single
         price, or no outage duration): then the battery is charged to the pre-outage SOC."""
         self.outage_plan = None
+        self.emergency = False
         if not self.control.get("precharge_smart", True) or self.opts.single_price:
             return None
+        if self.opts.emergency_outage_sensor:
+            self.emergency = outage_plan.is_on(await self.ha.state(self.opts.emergency_outage_sensor))
+            if self.emergency:
+                return None  # emergency outages: ignore tariffs, charge to the pre-outage SOC
         duration = await self.read_outage_duration()
         if not duration:
             return None
@@ -684,6 +692,8 @@ async def status(request: web.Request) -> web.Response:
                 "ts": app.outage_minutes_ts,
                 "duration_entity": opts.outage_duration_sensor,
                 "duration": app.outage_duration,
+                "emergency_entity": opts.emergency_outage_sensor,
+                "emergency": app.emergency,
             },
             "history_import": app.history_import,
             "warnings": warnings,

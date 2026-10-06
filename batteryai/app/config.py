@@ -32,6 +32,7 @@ SENSOR_KEYS = (
     "bill_energy_sensor",
     "outage_minutes_sensor",
     "outage_duration_sensor",
+    "emergency_outage_sensor",
 )
 # Settings saved by 0.1/0.2 used "today_load_sensor" for what is a load power sensor.
 LEGACY_KEYS = {"load_power_sensor": "today_load_sensor"}
@@ -150,6 +151,9 @@ class Options:
     # Length of the coming outage (e.g. sensor.svitlo_..._longest_continuous_outage), for the
     # tariff-aware pre-outage charge.
     outage_duration_sensor: str = ""
+    # On while emergency outages are in effect: tariffs are ignored, the battery is charged
+    # to the pre-outage SOC.
+    emergency_outage_sensor: str = ""
     outage_precharge_minutes: int = 90
     outage_precharge_soc_percent: int = 100
     battery_capacity_kwh: float = 10.0

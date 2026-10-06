@@ -518,7 +518,9 @@ function renderControl() {
       : o.minutes === null || o.minutes === undefined
         ? `${o.entity} has no value right now.`
         : o.minutes <= 0 ? "Outage now." : `Next outage ${outageInText(o).replace(/^next /, "")}${o.duration ? ` for ${fmtDuration(o.duration)}` : ""}.`
-          + (c.precharge_smart && c.outage_plan ? ` ${c.outage_plan.charge ? "⚡ Will charge: " : "✓ "}${c.outage_plan.reason}` : "");
+          + (o.emergency && c.precharge_smart
+            ? ` 🚨 Emergency outages: tariffs ignored, charging to ${c.precharge_soc}% before the outage.`
+            : c.precharge_smart && c.outage_plan ? ` ${c.outage_plan.charge ? "⚡ Will charge: " : "✓ "}${c.outage_plan.reason}` : "");
   const since = c.since ? ` since ${fmtTime(c.since)}` : "";
   $("controlInfo").textContent = !c.can_write
     ? "Configure the Deye program SOC entities in Settings to control the inverter."

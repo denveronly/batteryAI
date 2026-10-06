@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.19
+
+- **Emergency outages** sensor (Settings → Sensors, optional): while it is on, the
+  tariff-aware logic is skipped and the battery is charged to the pre-outage SOC before an
+  outage, whatever the tariff. The Battery control card shows 🚨 when it applies.
+
 ## 0.4.18
 
 - **Tariff-aware charge before outages** (switch under *Charge before outages*; only with

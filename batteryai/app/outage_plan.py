@@ -46,6 +46,18 @@ def duration_minutes(state: dict[str, Any] | None) -> float | None:
     return value * 60 if value <= 24 else value
 
 
+ON_STATES = {"on", "true", "yes", "1", "active", "emergency", "увімкнено", "так"}
+
+
+def is_on(state: dict[str, Any] | None) -> bool:
+    """An emergency-outage indicator: on/true/yes/active, or a number above 0."""
+    if not state:
+        return False
+    raw = str(state.get("state") or "").strip().lower()
+    number = to_float(raw)
+    return raw in ON_STATES or (number is not None and number > 0)
+
+
 def load_profile(profile: list[dict[str, Any]]) -> dict[tuple[int, int], float]:
     """(is_weekend, hour) -> average load W from db.hourly_profile."""
     return {(p["is_weekend"], p["hour"]): p["load_power"] for p in profile if p.get("load_power") is not None}

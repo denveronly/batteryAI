@@ -201,7 +201,9 @@ hour (plus the safety margin):
   hours;
 - outage in the cheapest tariff: it charges for the whole outage, and if the outage runs
   past the cheap hours, also for the time until they return.
-The Battery control card shows the decision and the reason before the outage.
+The Battery control card shows the decision and the reason before the outage. While the optional
+*Emergency outages* sensor is on (on / true / active, or a number above 0), tariffs are
+ignored and the battery is charged to the pre-outage SOC.
 
 ## History and database size
 
