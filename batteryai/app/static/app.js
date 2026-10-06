@@ -359,10 +359,12 @@ function pvTiles(latest) {
   const tiles = [tile("PV now", fmt(latest.pv_power, 0), "W")];
   if (latest.load_power !== null && latest.load_power !== undefined) {
     const surplus = latest.pv_power - latest.load_power;
+    // No negative surplus: when PV doesn't cover the load the rest comes from the battery or grid.
+    const covered = latest.load_power > 0 ? Math.min(100, (latest.pv_power / latest.load_power) * 100) : 100;
     tiles.push(
       surplus > 50
         ? tile("PV surplus", `+${fmt(surplus, 0)}`, "W · battery charging")
-        : tile("PV surplus", fmt(surplus, 0), "W · not charging"),
+        : tile("PV surplus", "0", latest.pv_power < 20 ? "W · no PV now" : `W · PV covers ${fmt(covered, 0)} % of the load`),
     );
   }
   return tiles;
@@ -406,7 +408,7 @@ function renderStatus() {
     tiles.push(tile("Tariff now", t.now || "—", `${t.now_price} ${t.currency}/kWh`));
   }
   tiles.push(
-    tile("Probable outages", latest.outages_state ?? "—"),
+    tile("Probable outages", latest.outages_state ?? "—", outageInText(status.outage_minutes)),
     tile("Day", weekday, latest.is_weekend ? "weekend" : latest.weekday ? "weekday" : ""),
     tile("Last reading", latest.ts ? fmtTime(latest.ts) : "—"),
   );
@@ -417,6 +419,20 @@ function renderStatus() {
   $("analyze").disabled = status.analysis_running;
   $("analyze").textContent = status.analysis_running ? "Predicting…" : "Predict now";
   renderControl();
+}
+
+function fmtDuration(minutes) {
+  const m = Math.round(minutes);
+  return m >= 60 ? `${Math.floor(m / 60)} h ${pad2(m % 60)} min` : `${m} min`;
+}
+
+// "next in 1 h 25 min (14:30)" from the minutes-to-outage sensor.
+function outageInText(o) {
+  if (!o?.entity) return "";
+  if (o.minutes === null || o.minutes === undefined) return "next: unknown";
+  if (o.minutes <= 0) return "outage now";
+  const at = new Date((o.ts + o.minutes * 60) * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return `next in ${fmtDuration(o.minutes)} (${at})`;
 }
 
 const MODE_TEXT = {
@@ -433,6 +449,21 @@ function renderControl() {
   $("autoToggle").disabled = !c.can_write;
   $("chargeAll").textContent = c.mode === "charge_all" ? `Charging all to ${c.charge_all_soc}% — set again` : `Charge all to ${c.charge_all_soc}%`;
   $("chargeAll").disabled = !c.can_write;
+  const o = status.outage_minutes || {};
+  $("prechargeToggle").checked = c.precharge_enabled;
+  $("prechargeToggle").disabled = !c.can_write || !o.entity;
+  $("prechargeLabel").replaceChildren(
+    "Charge before outages ",
+    el("span", { class: "hint" }, `— set every program to ${c.precharge_soc}% with grid charge on ${fmtDuration(c.precharge_minutes)} before an outage`),
+  );
+  const at = (ts) => new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  $("prechargeInfo").textContent = !o.entity
+    ? "Set the “Minutes to outage” sensor in Settings to charge before outages."
+    : c.precharge
+      ? `⚡ Charging to ${c.precharge.soc}% for the outage at ${at(c.precharge.outage_at)}; afterwards back to ${MODE_TEXT[c.precharge.previous_mode] || c.precharge.previous_mode}.`
+      : o.minutes === null || o.minutes === undefined
+        ? `${o.entity} has no value right now.`
+        : o.minutes <= 0 ? "Outage now." : `Next outage ${outageInText(o).replace(/^next /, "")}.`;
   const since = c.since ? ` since ${fmtTime(c.since)}` : "";
   $("controlInfo").textContent = !c.can_write
     ? "Configure the Deye program SOC entities in Settings to control the inverter."
@@ -531,6 +562,7 @@ async function controlAction(path, body) {
 }
 
 $("autoToggle").addEventListener("change", (e) => controlAction("api/control", { mode: e.target.checked ? "auto" : "off" }));
+$("prechargeToggle").addEventListener("change", (e) => controlAction("api/control/precharge", { enabled: e.target.checked }));
 $("chargeAll").addEventListener("click", () => {
   const soc = status?.control?.charge_all_soc ?? 98;
   if (confirm(`Set all Deye programs to ${soc}% and turn off AI auto-control?`)) controlAction("api/control/charge_all");
@@ -780,9 +812,10 @@ async function refreshBill() {
   $("billNotes").replaceChildren(...notes.map((n) => el("div", { class: "banner" }, n)));
   $("billInfo").textContent = data.sensor ? `Meter: ${data.sensor}` : "";
 
-  // Per-tariff columns only when energy was recorded under more than one tariff (peak / off-peak);
-  // with a single price there is just the overall total.
+  // Per-tariff columns plus the overall total when energy was recorded under more than one
+  // tariff (peak / off-peak); with a single tariff its name labels the total columns.
   const names = data.tariffs.length > 1 ? data.tariffs : [];
+  const single = data.tariffs.length === 1 ? data.tariffs[0] : null;
   const now = new Date();
   const current = data.months.find((m) => m.key === `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`);
   $("billTiles").replaceChildren(
@@ -799,23 +832,32 @@ async function refreshBill() {
     el("td", { class: "num" }, kwh(item.kwh)),
     el("td", { class: "num" }, money(item.cost)),
   ];
-  const header = ["Month", ...names.flatMap((n) => [`${n} kWh`, `${n} cost`]), "Overall kWh", "Overall grid cost"];
+  const header = ["Month", ...names.flatMap((n) => [`${n} kWh`, `${n} cost`]), single ? `${single} kWh` : "Overall kWh", single ? `${single} cost` : "Overall grid cost", ""];
   const rows = [];
   for (const m of data.months) {
     const open = openBillMonths.has(m.key);
-    const row = el("tr", { class: open ? "month open" : "month", title: "Show the days" }, el("td", { class: "nowrap" }, monthLabel(m.key)), ...cells(m));
+    const reprice = el("button", { type: "button", class: "secondary small", title: "Recalculate this month's costs with the current tariffs" }, "Recalculate");
+    reprice.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (!confirm(`Recalculate ${monthLabel(m.key)} with the current tariff prices? The costs recorded at the old prices are replaced.`)) return;
+      const res = await api("api/bill/reprice", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ month: m.key }) })
+        .catch((err) => ({ error: err.message }));
+      if (res.error) alert(res.error);
+      refreshBill();
+    });
+    const row = el("tr", { class: open ? "month open" : "month", title: "Show the days" }, el("td", { class: "nowrap" }, monthLabel(m.key)), ...cells(m), el("td", { class: "num" }, reprice));
     row.addEventListener("click", () => {
       if (openBillMonths.has(m.key)) openBillMonths.delete(m.key);
       else openBillMonths.add(m.key);
       refreshBill();
     });
     rows.push(row);
-    if (open) rows.push(...m.days.map((d) => el("tr", { class: "day" }, el("td", { class: "nowrap" }, shortDate(d.key)), ...cells(d))));
+    if (open) rows.push(...m.days.map((d) => el("tr", { class: "day" }, el("td", { class: "nowrap" }, shortDate(d.key)), ...cells(d), el("td"))));
   }
   $("billTable").replaceChildren(
     el("tr", {}, ...header.map((h, i) => el("th", { class: i ? "num" : "" }, h))),
     ...(rows.length ? rows : [el("tr", {}, el("td", { class: "empty", colspan: header.length }, "Nothing recorded for this year yet."))]),
-    el("tr", { class: "total" }, el("td", {}, `Year ${data.year} total`), ...cells(data.total)),
+    el("tr", { class: "total" }, el("td", {}, `Year ${data.year} total`), ...cells(data.total), el("td")),
   );
 }
 $("billYear").addEventListener("change", refreshBill);
@@ -915,6 +957,30 @@ $("compressDb").addEventListener("click", async () => {
   $("vacuumResult").className = `result ${r.error ? "error" : "ok"}`;
   $("vacuumResult").textContent = r.error ? `✕ ${r.error}` : r.removed ? `✓ ${r.removed.toLocaleString()} readings → ${r.added.toLocaleString()} hourly rows. Use “Compact database” to give the space back to the disk.` : "✓ Nothing older than the detail period.";
   refreshStorage();
+});
+$("downloadBackup").addEventListener("click", () => {
+  $("backupResult").className = "result";
+  $("backupResult").textContent = "Preparing the backup… the download starts when it is ready.";
+});
+$("restoreFile").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  if (!confirm(`Replace ALL data and settings with the backup “${file.name}”? This cannot be undone from the panel.`)) return;
+  const result = $("backupResult");
+  result.className = "result";
+  result.textContent = `Uploading ${file.name} (${fmtBytes(file.size)})…`;
+  const res = await api("api/backup/restore", { method: "POST", headers: { "Content-Type": "application/zip" }, body: file })
+    .catch((err) => ({ error: err.message }));
+  if (res.error) {
+    result.className = "result error";
+    result.textContent = `✕ ${res.error}`;
+    return;
+  }
+  const m = res.manifest;
+  result.className = "result ok";
+  result.textContent = `✓ Restored the backup from ${m.created} (BatteryAI ${m.version}, ${Number(m.readings).toLocaleString()} readings). Reloading…`;
+  setTimeout(() => location.reload(), 2000);
 });
 $("vacuumDb").addEventListener("click", async () => {
   $("vacuumDb").disabled = true;

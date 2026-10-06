@@ -356,3 +356,11 @@ h1 .version { font-size: 12px; font-weight: 500; color: var(--muted); vertical-a
 .bill tr.day td { color: var(--muted); font-size: 13px; }
 .bill tr.day td:first-child { padding-left: 24px; }
 .bill tr.total td { font-weight: 650; border-top: 2px solid var(--border); border-bottom: none; }
+
+/* Links and file labels that look like buttons (Backup card) */
+.button {
+  display: inline-block; font: inherit; font-weight: 600; text-decoration: none; cursor: pointer;
+  border-radius: 8px; border: 1px solid var(--accent); padding: 8px 12px;
+  background: var(--accent); color: var(--accent-text);
+}
+.button.secondary { background: var(--card); color: var(--accent); border-color: var(--border); }

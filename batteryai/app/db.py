@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS analyses (
 CREATE INDEX IF NOT EXISTS idx_analyses_ts ON analyses (ts);
 
 -- Monthly bill: grid energy per day and tariff with the cost at the price in effect when it
--- was recorded, so later tariff changes leave past months as they were. tariff '' = single price.
+-- was recorded, so later tariff changes leave past months as they were.
 CREATE TABLE IF NOT EXISTS bill_days (
     local_date TEXT NOT NULL,
     tariff TEXT NOT NULL,
@@ -290,6 +290,19 @@ class Database:
             added += len(new_rows)
         return {"removed": removed, "added": added}
 
+    def backup_to(self, path: str) -> None:
+        """A consistent copy of the whole database (SQLite online backup)."""
+        with self._lock:
+            target = sqlite3.connect(path)
+            try:
+                self._conn.backup(target)
+            finally:
+                target.close()
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
+
     def vacuum(self) -> None:
         with self._lock:
             self._conn.execute("VACUUM")
@@ -489,6 +502,15 @@ class Database:
             self._conn.execute(
                 "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (meter_key, json.dumps(meter)),
+            )
+            self._conn.commit()
+
+    def replace_bill_month(self, month: str, entries: dict[tuple[str, str], tuple[float, float]]) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM bill_days WHERE substr(local_date, 1, 7) = ?", (month,))
+            self._conn.executemany(
+                "INSERT INTO bill_days (local_date, tariff, kwh, cost) VALUES (?, ?, ?, ?)",
+                [(day, tariff, kwh, cost) for (day, tariff), (kwh, cost) in entries.items()],
             )
             self._conn.commit()
 

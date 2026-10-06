@@ -46,15 +46,23 @@ Requires the *Grid import today* and *PV power* sensors and the tariff settings.
 **Monthly bill** (sub-tab of Economy): grid energy and cost per month of a year, read
 from the *Grid energy meter* sensor (for example a Shelly EM total energy, kWh; Wh is
 converted) or, if that is empty, from *Grid import today*. With a peak / off-peak tariff
-each tariff has its own kWh and cost columns; with a single price only the overall kWh
-and grid cost are shown. The last row is the year's total; click a month to see its days.
+each tariff has its own kWh and cost columns (the most expensive first) plus the overall
+kWh and grid cost; with a single tariff its name labels the kWh and cost columns. The last row is the year's total; click a month to see its days.
 The meter is read every recording interval and the energy is stored per day and tariff
 together with its cost at the price in effect then, so changing a tariff price later does
 not change months already recorded. When a meter is set for the first time, this month so
 far is taken from the Home Assistant history. A lifetime counter (Shelly) and a counter
-that resets daily both work.
+that resets daily both work. **Recalculate** on a month reprices it with the current
+tariffs (for example after setting the tariffs only once the month was already recorded).
 
 ### Logs
+
+**Backup**: *Download backup* saves a zip with the database (readings, predictions,
+monthly bill), the settings (sensors, tariffs, programs, notifications, API keys) and the
+control state. *Restore from backup…* uploads such a zip into a new or reinstalled add-on
+and replaces all of its data and settings; the database it replaces is kept once as
+`batteryai.db.before-restore`. The local LLM model is not included. The file contains your
+API keys, so keep it private.
 
 The add-on's recent log lines (filter by level, search, live update) and the storage
 used: database size and rows, how far back the data goes, everything in `/data`, and
@@ -165,6 +173,18 @@ When the outage sensor's state or attributes change, BatteryAI runs an extra
 prediction (at most once every 30 minutes). Claude raises the SOC and turns on force
 charge before an outage when the battery would not otherwise cover the load — unless
 the outage falls in daylight and PV is expected to cover it.
+
+## Charge before an outage
+
+Set *Minutes to outage* (Settings → Sensors; the minutes and SOC are in Prediction tuning), for example
+`sensor.svitlo_kyiv_4_1_minutes_to_outage`) and turn on **Charge before outages** in the
+Battery control card. When the next outage is *Charge before an outage* minutes away (90
+by default), every program is set to the *Pre-outage SOC* (100% by default) with grid
+charge on, and you get a notification. When the sensor points to a later outage again,
+the previous mode comes back: AI auto-control re-applies the latest prediction, and in
+advice-only mode the SOC values from before are restored. Turning AI auto-control on or
+pressing *Charge all* ends it early; it then does not start again for the same outage.
+The Probable outages tile shows how long until the next outage.
 
 ## History and database size
 

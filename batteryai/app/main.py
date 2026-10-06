@@ -6,6 +6,7 @@ import asyncio
 import dataclasses
 import hashlib
 import json
+import re
 import shutil
 from collections import deque
 import logging
@@ -27,7 +28,8 @@ import local_fast
 import local_llm
 import notify
 import openai_engine
-from bill import BillRecorder, bill_report
+import backup
+from bill import BillRecorder, bill_report, reprice_month
 from collector import UNAVAILABLE, active_program, collect, has_data, parse_hhmm, to_float, weather_details
 from config import DATA_DIR, Options, SettingsError, load_settings, parse_settings, save_settings
 from db import READING_FIELDS, Database, accuracy_report, economy_report, monthly_summary
@@ -64,6 +66,9 @@ class BatteryAI:
         self.panel_url: str | None = None  # opened by tapping a notification
         self._last_outage_run = 0.0
         self.bill = BillRecorder(db)
+        self.outage_minutes: float | None = None  # from the outage minutes sensor
+        self.outage_minutes_ts: float | None = None
+        self._outage_lock = asyncio.Lock()
 
     def spawn(self, coro: Any) -> asyncio.Task:
         task = asyncio.create_task(coro)
@@ -126,11 +131,111 @@ class BatteryAI:
 
     async def charge_all(self) -> list[dict[str, Any]]:
         actions = await control.charge_all(self.ha, self.opts, self.control)
-        self.control.update(mode="charge_all", since=time.time(), last_actions=actions)
+        self.control.update(mode="charge_all", since=time.time(), last_actions=actions, precharge=None)
         control.save_state(self.control)
         _LOGGER.info("Charge all to %d%%: %s", self.opts.charge_all_soc_percent, actions)
         await self.notify_actions(actions, f"charging all to {self.opts.charge_all_soc_percent}%")
         return actions
+
+    # Backup and restore -------------------------------------------------------
+
+    async def restore(self) -> None:
+        """Swaps in the unpacked backup (backup.check_backup ran before): database,
+        settings and control state, then restarts recording and the schedule."""
+        self.stop_loops()
+        db_path = os.path.join(DATA_DIR, backup.DB_NAME)
+        self.db.close()
+        try:
+            await asyncio.to_thread(backup.install_restore)
+        finally:
+            self.db = Database(db_path)
+            self.bill = BillRecorder(self.db)
+        self.control = control.load_state()
+        self.opts = load_settings()
+        self._client = self._make_client(self.opts.claude_api_key)
+        await asyncio.to_thread(self.relocalize)
+        self.start_loops()
+        _LOGGER.info("Backup restored: %d readings", self.db.reading_count())
+
+    # Charge before an outage --------------------------------------------------
+
+    async def read_outage_minutes(self) -> float | None:
+        """Minutes until the next outage from the outage minutes sensor (h and s are converted)."""
+        if not self.opts.outage_minutes_sensor:
+            self.outage_minutes = None
+            return None
+        state = await self.ha.state(self.opts.outage_minutes_sensor)
+        value = to_float(state.get("state")) if state else None
+        unit = str(((state or {}).get("attributes") or {}).get("unit_of_measurement") or "").strip().lower()
+        if value is not None:
+            value = value * 60 if unit in ("h", "hours") else value / 60 if unit in ("s", "sec", "seconds") else value
+        self.outage_minutes, self.outage_minutes_ts = value, time.time()
+        return value
+
+    async def check_outage(self) -> None:
+        async with self._outage_lock:
+            await self._check_outage()
+
+    async def _check_outage(self) -> None:
+        """Outage within outage_precharge_minutes: every program goes to the pre-outage SOC
+        with grid charge on. When the sensor points to a later outage again,
+        the previous mode (and in advice-only mode the previous SOC values) comes back."""
+        minutes = await self.read_outage_minutes()
+        now = time.time()
+        threshold = self.opts.outage_precharge_minutes
+        running = self.control.get("precharge")
+        if running:
+            if self.control["mode"] != "charge_all":
+                # Changed by hand (auto-control or Charge all): the pre-outage charge is over.
+                self.control["precharge"] = None
+                control.save_state(self.control)
+                return
+            outage_at = now + minutes * 60 if minutes is not None else None
+            moved_on = minutes is not None and minutes > threshold and outage_at > running["outage_at"] + 1800
+            if moved_on or now > running["outage_at"] + 12 * 3600:
+                await self.end_precharge(running)
+            return
+        if minutes is None or not self.control.get("precharge_enabled", True) or not 0 < minutes <= threshold:
+            return
+        if self.control["mode"] == "charge_all" or not any(p.soc_entity for p in self.opts.deye_programs):
+            return
+        outage_at = now + minutes * 60
+        done = self.control.get("precharge_done_for")
+        if done and abs(outage_at - done) < 1800:
+            return  # already charged for this outage (and stopped by hand)
+        previous_mode = self.control["mode"]
+        socs = await control.read_socs(self.ha, self.opts) if previous_mode == "off" else {}
+        soc = self.opts.outage_precharge_soc_percent
+        actions = await control.charge_all(self.ha, self.opts, self.control, soc)
+        self.control.update(
+            mode="charge_all", since=now, last_actions=actions, precharge_done_for=outage_at,
+            precharge={"outage_at": outage_at, "previous_mode": previous_mode, "socs": socs, "soc": soc, "started": now},
+        )
+        control.save_state(self.control)
+        at = datetime.fromtimestamp(outage_at, self.tz).strftime("%H:%M")
+        _LOGGER.info("Outage in %.0f minutes (%s): charging every program to %d%%: %s", minutes, at, soc, actions)
+        await self.notify_actions(
+            actions, f"outage at {at}, charging to {soc}%",
+            f"An outage is expected in {minutes:.0f} minutes; all programs are set to {soc}% with grid charge on.",
+        )
+
+    async def end_precharge(self, running: dict[str, Any]) -> None:
+        previous = running.get("previous_mode") or "off"
+        self.control["precharge"] = None
+        actions = await self.set_mode(previous)
+        if previous == "off" and running.get("socs"):
+            restored = await control.restore_socs(self.ha, self.opts, running["socs"])
+            _LOGGER.info("Pre-outage charge over; SOC values restored: %s", restored)
+            await self.notify_actions(restored, "pre-outage charge over", "The SOC values from before the outage are back.")
+        _LOGGER.info("Pre-outage charge over; back to %s (%d changes)", previous, len(actions))
+
+    async def outage_loop(self) -> None:
+        while True:
+            try:
+                await self.check_outage()
+            except Exception:
+                _LOGGER.exception("Checking the outage minutes sensor failed")
+            await asyncio.sleep(60)
 
     @staticmethod
     def _make_client(api_key: str) -> anthropic.AsyncAnthropic | None:
@@ -140,6 +245,7 @@ class BatteryAI:
         self._loops = [
             asyncio.create_task(self.recorder_loop()),
             asyncio.create_task(self.scheduler_loop()),
+            asyncio.create_task(self.outage_loop()),
         ]
 
     def stop_loops(self) -> None:
@@ -513,6 +619,15 @@ async def status(request: web.Request) -> web.Response:
                 "since": app.control["since"],
                 "charge_all_soc": opts.charge_all_soc_percent,
                 "can_write": any(p.soc_entity for p in opts.deye_programs),
+                "precharge_enabled": app.control.get("precharge_enabled", True),
+                "precharge": app.control.get("precharge"),
+                "precharge_minutes": opts.outage_precharge_minutes,
+                "precharge_soc": opts.outage_precharge_soc_percent,
+            },
+            "outage_minutes": {
+                "entity": opts.outage_minutes_sensor,
+                "minutes": app.outage_minutes,
+                "ts": app.outage_minutes_ts,
             },
             "history_import": app.history_import,
             "warnings": warnings,
@@ -706,6 +821,83 @@ async def charge_all(request: web.Request) -> web.Response:
         return web.json_response({"error": "No Deye program SOC entities configured."}, status=400)
     actions = await app.charge_all()
     return web.json_response({"mode": "charge_all", "actions": actions})
+
+
+@routes.post("/api/bill/reprice")
+async def bill_reprice(request: web.Request) -> web.Response:
+    """Body {"month": "2026-10"}: recalculate that month with the current tariffs."""
+    app = _app(request)
+    month = str((await request.json()).get("month", ""))
+    if not re.fullmatch(r"\d{4}-\d{2}", month):
+        return web.json_response({"error": "month must look like 2026-10"}, status=400)
+    result = await asyncio.to_thread(reprice_month, app.db, month, app.opts)
+    _LOGGER.info("Monthly bill %s recalculated with the current tariffs: %s", month, result)
+    return web.json_response(result)
+
+
+@routes.get("/api/backup")
+async def download_backup(request: web.Request) -> web.StreamResponse:
+    """A zip of the database, settings and control state."""
+    app = _app(request)
+    path = await asyncio.to_thread(backup.create_backup, app.db, os.environ.get("BATTERYAI_VERSION", "dev"))
+    try:
+        response = web.StreamResponse(headers={
+            "Content-Type": "application/zip",
+            "Content-Disposition": f'attachment; filename="{path.name}"',
+            "Content-Length": str(path.stat().st_size),
+        })
+        await response.prepare(request)
+        with open(path, "rb") as fh:
+            while chunk := await asyncio.to_thread(fh.read, 1 << 20):
+                await response.write(chunk)
+        await response.write_eof()
+        _LOGGER.info("Backup downloaded: %s (%d bytes)", path.name, path.stat().st_size)
+        return response
+    finally:
+        path.unlink(missing_ok=True)
+
+
+@routes.post("/api/backup/restore")
+async def restore_backup(request: web.Request) -> web.Response:
+    """The request body is a backup zip; it replaces the database and settings."""
+    app = _app(request)
+    if app.analysis_running or app.history_import["running"] or app.bill.backfilling:
+        return web.json_response({"error": "A prediction or history import is running; try again when it has finished."}, status=409)
+    backup.WORK_DIR.mkdir(parents=True, exist_ok=True)
+    upload = backup.WORK_DIR / "upload.zip"
+    size = 0
+    try:
+        with open(upload, "wb") as fh:
+            async for chunk in request.content.iter_chunked(1 << 20):
+                size += len(chunk)
+                await asyncio.to_thread(fh.write, chunk)
+        if not size:
+            return web.json_response({"error": "No file received."}, status=400)
+        try:
+            manifest = await asyncio.to_thread(backup.check_backup, upload)
+        except backup.BackupError as err:
+            return web.json_response({"error": str(err)}, status=400)
+    finally:
+        upload.unlink(missing_ok=True)
+    async with app._analysis_lock:
+        await app.restore()
+    return web.json_response({"ok": True, "manifest": manifest})
+
+
+@routes.post("/api/control/precharge")
+async def set_precharge(request: web.Request) -> web.Response:
+    """Body {"enabled": bool}: charge before an outage on/off; off also ends a running one."""
+    app = _app(request)
+    enabled = bool((await request.json()).get("enabled"))
+    app.control["precharge_enabled"] = enabled
+    control.save_state(app.control)
+    _LOGGER.info("Charge before outages %s", "on" if enabled else "off")
+    async with app._outage_lock:
+        if not enabled and app.control.get("precharge"):
+            await app.end_precharge(app.control["precharge"])
+    if enabled:
+        await app.check_outage()
+    return web.json_response({"enabled": enabled})
 
 
 @routes.post(r"/api/analyses/{analysis_id:\d+}/apply")
@@ -1089,6 +1281,7 @@ async def main() -> None:
     logging.getLogger("httpx2").setLevel(logging.WARNING)  # one line per HTTP request is noise
     opts = load_settings()
     os.makedirs(DATA_DIR, exist_ok=True)
+    backup.cleanup(0)
     db = Database(os.path.join(DATA_DIR, "batteryai.db"))
     db.mark_interrupted()
 

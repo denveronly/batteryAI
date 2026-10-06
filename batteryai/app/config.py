@@ -30,6 +30,7 @@ SENSOR_KEYS = (
     "pv_power_sensor",
     "grid_import_sensor",
     "bill_energy_sensor",
+    "outage_minutes_sensor",
 )
 # Settings saved by 0.1/0.2 used "today_load_sensor" for what is a load power sensor.
 LEGACY_KEYS = {"load_power_sensor": "today_load_sensor"}
@@ -138,6 +139,11 @@ class Options:
     max_soc_percent: int = 100
     apply_threshold_percent: int = 5
     charge_all_soc_percent: int = 98
+    # Minutes until the next outage (e.g. sensor.svitlo_..._minutes_to_outage): this long
+    # before it every program is set to the pre-outage SOC with grid charge on.
+    outage_minutes_sensor: str = ""
+    outage_precharge_minutes: int = 90
+    outage_precharge_soc_percent: int = 100
     battery_capacity_kwh: float = 10.0
     # "claude" | "local_fast" (statistics + rules) | "local_llm" (Qwen2.5 3B in the add-on)
     prediction_engine: str = "claude"
@@ -290,6 +296,8 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         max_soc_percent=integer("max_soc_percent", 0, 100),
         apply_threshold_percent=integer("apply_threshold_percent", 0, 50),
         charge_all_soc_percent=integer("charge_all_soc_percent", 10, 100),
+        outage_precharge_minutes=integer("outage_precharge_minutes", 5, 720),
+        outage_precharge_soc_percent=integer("outage_precharge_soc_percent", 10, 100),
     )
     if opts.min_soc_percent > opts.max_soc_percent:
         errors["min_soc_percent"] = "must not be higher than the maximum SOC"

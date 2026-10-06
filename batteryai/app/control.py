@@ -30,6 +30,8 @@ def load_state() -> dict[str, Any]:
     state.setdefault("mode", "off")
     state.setdefault("since", None)
     state.setdefault("saved_switches", {})
+    state.setdefault("precharge_enabled", True)  # charge before an outage (outage minutes sensor)
+    state.setdefault("precharge", None)  # the running pre-outage charge, see BatteryAI.check_outage
     return state
 
 
@@ -117,14 +119,16 @@ async def _apply_switch(ha: HomeAssistant, slot: int, entity_id: str, on: bool) 
     return action
 
 
-async def charge_all(ha: HomeAssistant, opts: Options, state: dict[str, Any]) -> list[dict[str, Any]]:
-    """Sets every program to the charge-all SOC and turns on its grid-charge switch, if configured."""
+async def charge_all(
+    ha: HomeAssistant, opts: Options, state: dict[str, Any], soc: float | None = None
+) -> list[dict[str, Any]]:
+    """Sets every program to the charge-all SOC (or soc) and turns on its grid-charge switch, if configured."""
     actions = []
     for program in opts.deye_programs:
         if program.soc_entity:
             action: dict[str, Any] = {"slot": program.slot, "entity_id": program.soc_entity, "time": time.time()}
             try:
-                action.update(status="set", **await set_soc(ha, program.soc_entity, opts.charge_all_soc_percent))
+                action.update(status="set", **await set_soc(ha, program.soc_entity, opts.charge_all_soc_percent if soc is None else soc))
             except HAError as err:
                 action.update(status="error", error=str(err))
             actions.append(action)
@@ -138,6 +142,33 @@ async def charge_all(ha: HomeAssistant, opts: Options, state: dict[str, Any]) ->
                     action.update(status="unchanged", value="on", suggested="on")
                 else:
                     action.update(status="set", **{"from": previous}, **await set_switch(ha, program.charge_entity, True))
+            except HAError as err:
+                action.update(status="error", error=str(err))
+            actions.append(action)
+    return actions
+
+
+async def read_socs(ha: HomeAssistant, opts: Options) -> dict[str, float]:
+    """Current SOC of every program entity, to put back after a pre-outage charge."""
+    socs = {}
+    for program in opts.deye_programs:
+        if program.soc_entity:
+            try:
+                value = to_float((await ha.fetch_state(program.soc_entity)).get("state"))
+            except HAError:
+                continue
+            if value is not None:
+                socs[program.soc_entity] = value
+    return socs
+
+
+async def restore_socs(ha: HomeAssistant, opts: Options, socs: dict[str, float]) -> list[dict[str, Any]]:
+    actions = []
+    for program in opts.deye_programs:
+        if program.soc_entity in socs:
+            action: dict[str, Any] = {"slot": program.slot, "entity_id": program.soc_entity, "time": time.time()}
+            try:
+                action.update(status="set", **await set_soc(ha, program.soc_entity, socs[program.soc_entity]))
             except HAError as err:
                 action.update(status="error", error=str(err))
             actions.append(action)

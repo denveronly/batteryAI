@@ -76,6 +76,11 @@
           <input type="checkbox" id="autoToggle">
           <span>AI auto-control <span class="hint">— write each prediction's SOC and grid charge to the Deye programs</span></span>
         </label>
+        <label class="switch">
+          <input type="checkbox" id="prechargeToggle">
+          <span id="prechargeLabel">Charge before outages <span class="hint">— set every program to 100% with grid charge on 90 minutes before an outage</span></span>
+        </label>
+        <p class="muted" id="prechargeInfo"></p>
         <div class="control-buttons">
           <button type="button" id="chargeAll" class="warn-button">Charge all to 98%</button>
         </div>
@@ -189,12 +194,25 @@
       <div id="billNotes"></div>
       <section class="tiles" id="billTiles"></section>
       <div class="table-scroll"><table class="programs bill" id="billTable"></table></div>
-      <p class="hint">Grid energy from the meter, split by tariff and priced when it was recorded: changing a tariff price only affects energy recorded after the change. Click a month to see its days.</p>
+      <p class="hint">Grid energy from the meter, split by tariff and priced when it was recorded: changing a tariff price only affects energy recorded after the change. Click a month to see its days; <b>Recalculate</b> reprices a month with the current tariffs.</p>
     </section>
     </div>
   </main>
 
   <main id="view-logs" hidden>
+    <section class="card">
+      <div class="card-head">
+        <h2>Backup</h2>
+        <span class="muted">Database (readings, predictions, monthly bill), settings with sensors, tariffs, programs and API keys, and the control state</span>
+      </div>
+      <div class="control-buttons">
+        <a class="button" id="downloadBackup" href="api/backup" download>Download backup</a>
+        <label class="button secondary" for="restoreFile">Restore from backup…</label>
+        <input type="file" id="restoreFile" accept=".zip,application/zip" hidden>
+      </div>
+      <p class="hint">Keep the file somewhere safe: it contains your API keys. Restoring replaces all data and settings of this add-on with the backup (the current database is kept once as batteryai.db.before-restore). The local LLM model is not included; download it again in Settings.</p>
+      <div class="result" id="backupResult"></div>
+    </section>
     <section class="card">
       <div class="card-head">
         <h2>Storage</h2>
@@ -381,6 +399,13 @@
           </label>
           <label>“Charge all” SOC (%)
             <input type="number" name="charge_all_soc_percent" min="10" max="100" step="1">
+          </label>
+          <label>Charge before an outage (minutes)
+            <input type="number" name="outage_precharge_minutes" min="5" max="720" step="5">
+            <span class="hint">Needs the “Minutes to outage” sensor. Turn it on or off in Battery control on the dashboard.</span>
+          </label>
+          <label>Pre-outage SOC (%)
+            <input type="number" name="outage_precharge_soc_percent" min="10" max="100" step="1">
           </label>
         </div>
       </section>

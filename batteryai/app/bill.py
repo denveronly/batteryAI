@@ -52,9 +52,9 @@ def energy_delta(previous: float, current: float) -> float:
 
 
 def tariff_key(opts: Options, minute_of_day: int) -> tuple[str, float]:
-    """(tariff name, price); a single price is stored without a tariff name."""
+    """(tariff name, price) at a minute of the day."""
     price, name = opts.tariff_at(minute_of_day)
-    return ("" if opts.single_price else name), price
+    return name, price
 
 
 def split(opts: Options, tz: tzinfo, start_ts: float, end_ts: float, kwh: float, entries: Entries) -> None:
@@ -62,8 +62,8 @@ def split(opts: Options, tz: tzinfo, start_ts: float, end_ts: float, kwh: float,
     if kwh <= 0:
         return
     start_ts = max(start_ts, end_ts - MAX_SPREAD_DAYS * 86400)
-    if end_ts - start_ts < 60:
-        start_ts = end_ts - 60  # book it in the minute it was measured
+    if end_ts - start_ts < 1:
+        start_ts = end_ts - 1  # book it in the second it was measured
     per_second = kwh / (end_ts - start_ts)
     minute = int(start_ts) // 60 * 60
     while minute < end_ts:
@@ -150,11 +150,34 @@ class BillRecorder:
             self.backfilling = False
 
 
+def reprice_month(db: Database, month: str, opts: Options) -> dict[str, Any]:
+    """On request only: recalculates one month's costs with the current tariffs. With a single
+    price every day becomes one total at that price; otherwise each tariff's kWh get the
+    current price of the tariff with that name (energy recorded under another name stays)."""
+    rows = db.bill_rows(f"{month}-01", f"{month}-31")
+    prices = {t.name: t.price for t in opts.tariffs}
+    entries: dict[tuple[str, str], tuple[float, float]] = {}
+    if opts.single_price:
+        name, price = (opts.tariffs[0].name, opts.tariffs[0].price) if opts.tariffs else ("", 0.0)
+        for row in rows:
+            kwh = entries.get((row["local_date"], name), (0.0, 0.0))[0] + row["kwh"]
+            entries[(row["local_date"], name)] = (kwh, kwh * price)
+    else:
+        for row in rows:
+            price = prices.get(row["tariff"])
+            entries[(row["local_date"], row["tariff"])] = (row["kwh"], row["kwh"] * price if price is not None else row["cost"])
+    db.replace_bill_month(month, entries)
+    return {"month": month, "days": len({day for day, _ in entries}), "cost": round(sum(c for _, c in entries.values()), 2)}
+
+
 def bill_report(db: Database, year: int, today: date, opts: Options) -> dict[str, Any]:
     """Months of one year with energy and cost per tariff, plus the year's total."""
     rows = db.bill_rows(f"{year:04d}-01-01", f"{year:04d}-12-31")
-    known = [t.name for t in opts.tariffs]
-    names = sorted({r["tariff"] for r in rows if r["tariff"]}, key=lambda n: (n not in known, known.index(n) if n in known else 0, n))
+    for row in rows:
+        row["tariff"] = row["tariff"] or "Single price"  # recorded without a name by 0.4.10
+    # Most expensive tariff first (Peak before Off-peak); names no longer in the settings last.
+    prices = {t.name: t.price for t in opts.tariffs}
+    names = sorted({r["tariff"] for r in rows}, key=lambda n: (n not in prices, -prices.get(n, 0), n))
 
     def empty(key: str) -> dict[str, Any]:
         return {"key": key, "by_tariff": {}, "kwh": 0.0, "cost": 0.0}

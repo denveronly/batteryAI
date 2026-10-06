@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.11
+
+- **Charge before outages**: with a *Minutes to outage* sensor (e.g.
+  `sensor.svitlo_kyiv_4_1_minutes_to_outage`), every program is set to 100% with grid
+  charge on 90 minutes before an outage, then the previous mode and SOC values come back.
+  Switch in the Battery control card; minutes and SOC in Settings → Prediction tuning. The Probable
+  outages tile shows the time until the next outage.
+- Logs → **Backup**: download a zip with the database, settings and control state, and
+  restore it into a reinstalled add-on.
+- Monthly bill: the most expensive tariff comes first (Peak before Off-peak); a single
+  tariff shows its own name; **Recalculate** reprices a month with the current tariffs;
+  energy at the start of a month no longer leaks into the previous month.
+- Dashboard: PV surplus no longer goes negative at night ("no PV now", or how much of the
+  load PV covers).
+
 ## 0.4.10
 
 - Economy → **Monthly bill**: grid kWh and cost per month (current month first), per
