@@ -139,6 +139,10 @@ class Options:
     max_soc_percent: int = 100
     apply_threshold_percent: int = 5
     charge_all_soc_percent: int = 98
+    # Solar forecasts (today and tomorrow) are multiplied by this: 110 = PV comes out 10%
+    # above the forecast in this home, 90 = 10% below.
+    solar_forecast_percent: int = 100
+    battery_name: str = ""  # shown in the panel header
     # Minutes until the next outage (e.g. sensor.svitlo_..._minutes_to_outage): this long
     # before it every program is set to the pre-outage SOC with grid charge on.
     outage_minutes_sensor: str = ""
@@ -160,6 +164,10 @@ class Options:
     notify_predictions: bool = True
     notify_soc_changes: bool = True
     notify_errors: bool = True
+
+    def adjust_forecast(self, value: float | None) -> float | None:
+        """A solar forecast (kWh) with the solar forecast correction applied."""
+        return None if value is None else round(value * self.solar_forecast_percent / 100, 2)
 
     def sensor_map(self) -> dict[str, str]:
         """Snapshot field name -> configured entity id."""
@@ -296,6 +304,8 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         max_soc_percent=integer("max_soc_percent", 0, 100),
         apply_threshold_percent=integer("apply_threshold_percent", 0, 50),
         charge_all_soc_percent=integer("charge_all_soc_percent", 10, 100),
+        solar_forecast_percent=integer("solar_forecast_percent", 1, 200),
+        battery_name=text("battery_name")[:40],
         outage_precharge_minutes=integer("outage_precharge_minutes", 5, 720),
         outage_precharge_soc_percent=integer("outage_precharge_soc_percent", 10, 100),
     )

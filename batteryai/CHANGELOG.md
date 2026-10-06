@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.15
+
+- **Solar forecast correction** (Settings → Prediction tuning, 1–200%): today's and
+  tomorrow's solar forecast are multiplied by it, for the dashboard, every prediction
+  engine and the stored history. 110 = PV usually comes out 10% above the forecast. The
+  Solar tiles show the sensor's forecast and the correction.
+- Header: the running version as a chip next to the logo (read from the add-on's
+  config.yaml when the build does not pass it), and the **battery bank name** on the right
+  – click it, type, Enter. It is also the browser tab title.
+
 ## 0.4.14
 
 - Fix: phone notifications failing with "HTTP 400: Bad Request".

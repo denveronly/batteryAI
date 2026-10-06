@@ -95,6 +95,9 @@ All settings are stored in `/data/settings.json` and apply immediately when save
   - *Apply threshold* – a program's SOC is only rewritten when the new value differs by
     at least this many %.
   - *Charge all SOC* – the value used by *Charge all* (98% by default).
+  - *Solar forecast correction* – 1–200%; today's and tomorrow's solar forecast are
+    multiplied by it before anything uses them (110 = PV comes out 10% above the forecast
+    in your home). Readings already stored keep the value they were recorded with.
 - **Sensors** – battery SOC, solar forecast today/tomorrow, PV power (W), PV production
   today (kWh), load power (W, kW is converted), consumption today (kWh), grid import
   today (kWh), grid energy meter for the monthly bill (kWh, e.g. Shelly EM), weather,

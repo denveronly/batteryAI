@@ -39,6 +39,12 @@
       <p class="muted" id="schedule">Loading…</p>
     </div>
     <div class="header-right">
+    <span class="bank-name" id="bankName" title="Battery bank name – click to edit">
+      <span class="bank-icon" aria-hidden="true">🔋</span>
+      <span id="bankNameText" class="bank-text"></span>
+      <input type="text" id="bankNameInput" maxlength="40" placeholder="e.g. Home battery" aria-label="Battery bank name" hidden>
+      <span class="bank-edit" aria-hidden="true">✎</span>
+    </span>
     <nav class="tabs" role="tablist">
       <a href="#dashboard" role="tab" data-tab="dashboard">Dashboard</a>
       <a href="#economy" role="tab" data-tab="economy">Economy</a>
@@ -399,6 +405,10 @@
           </label>
           <label>“Charge all” SOC (%)
             <input type="number" name="charge_all_soc_percent" min="10" max="100" step="1">
+          </label>
+          <label>Solar forecast correction (%)
+            <input type="number" name="solar_forecast_percent" min="1" max="200" step="1">
+            <span class="hint">Today's and tomorrow's solar forecast are multiplied by this: 110 = PV usually comes out 10% above the forecast, 90 = 10% below. 100 = as forecast.</span>
           </label>
           <label>Charge before an outage (minutes)
             <input type="number" name="outage_precharge_minutes" min="5" max="720" step="5">

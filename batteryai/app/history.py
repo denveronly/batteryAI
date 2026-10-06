@@ -112,6 +112,8 @@ async def import_history(
                 continue
             number = to_float(value(name, ts))
             snap[name] = to_watts(number, units.get(name)) if name in POWER_FIELDS else number
+            if name in ("today_forecast", "tomorrow_forecast"):
+                snap[name] = opts.adjust_forecast(number)
         snap["appliances"] = {
             app_id: to_watts(to_float(value(key, ts)), units.get(key)) for key, app_id in appliance_keys.items()
         }

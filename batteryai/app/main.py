@@ -509,6 +509,21 @@ class MemoryLogHandler(logging.Handler):
 LOG_BUFFER = MemoryLogHandler()
 
 
+def addon_version() -> str:
+    """The add-on version: from the build (BUILD_VERSION), else from the add-on's config.yaml."""
+    version = os.environ.get("BATTERYAI_VERSION", "").strip()
+    if version and version != "dev":
+        return version
+    for path in (Path(__file__).parent / "addon_config.yaml", Path(__file__).parent.parent / "config.yaml"):
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if line.startswith("version:"):
+                    return line.split(":", 1)[1].strip().strip("\"'")
+        except OSError:
+            continue
+    return "dev"
+
+
 def _app(request: web.Request) -> BatteryAI:
     return request.app["batteryai"]
 
@@ -585,7 +600,7 @@ async def status(request: web.Request) -> web.Response:
         warnings.append("Not configured yet: " + ", ".join(k.replace("_", " ") for k in unset) + ".")
     return web.json_response(
         {
-            "version": os.environ.get("BATTERYAI_VERSION", "dev"),
+            "version": addon_version(),
             "time_zone": str(app.tz),
             "time_zone_source": app.tz_source,
             "model": app.engine_label,
@@ -596,6 +611,9 @@ async def status(request: web.Request) -> web.Response:
             "record_interval_minutes": opts.record_interval_minutes,
             "reading_count": app.db.reading_count(),
             "latest": latest,
+            "battery_name": opts.battery_name,
+            "solar_forecast_percent": opts.solar_forecast_percent,
+            "forecast_raw": app.last_snapshot.get("forecast_raw") if app.last_snapshot else None,
             "units": app.last_snapshot["units"] if app.last_snapshot else {},
             "active_program_slot": app.last_snapshot["active_program_slot"] if app.last_snapshot else None,
             "program_time_marks": opts.program_time_marks,
@@ -858,7 +876,7 @@ async def bill_price(request: web.Request) -> web.Response:
 async def download_backup(request: web.Request) -> web.StreamResponse:
     """A zip of the database, settings and control state."""
     app = _app(request)
-    path = await asyncio.to_thread(backup.create_backup, app.db, os.environ.get("BATTERYAI_VERSION", "dev"))
+    path = await asyncio.to_thread(backup.create_backup, app.db, addon_version())
     try:
         response = web.StreamResponse(headers={
             "Content-Type": "application/zip",
@@ -901,6 +919,16 @@ async def restore_backup(request: web.Request) -> web.Response:
     async with app._analysis_lock:
         await app.restore()
     return web.json_response({"ok": True, "manifest": manifest})
+
+
+@routes.post("/api/battery_name")
+async def set_battery_name(request: web.Request) -> web.Response:
+    """Body {"name": "..."}: the battery bank's name in the header (edited in place)."""
+    app = _app(request)
+    name = " ".join(str((await request.json()).get("name") or "").split())[:40]
+    app.opts.battery_name = name
+    save_settings(app.opts)
+    return web.json_response({"name": name})
 
 
 @routes.post("/api/control/precharge")

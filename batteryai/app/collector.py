@@ -230,6 +230,10 @@ async def collect(ha: HomeAssistant, opts: Options, tz: tzinfo) -> dict[str, Any
         snapshot[name] = value
         if state:
             snapshot["units"][name] = unit
+    # Solar forecast correction (Settings): keep the sensor's own values for display.
+    snapshot["forecast_raw"] = {k: snapshot.get(k) for k in ("today_forecast", "tomorrow_forecast")}
+    for key in ("today_forecast", "tomorrow_forecast"):
+        snapshot[key] = opts.adjust_forecast(snapshot.get(key))
     snapshot["appliances"] = {}
     for appliance, state in zip(opts.appliances, appliance_states):
         if not appliance.entity:

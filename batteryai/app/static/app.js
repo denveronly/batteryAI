@@ -354,6 +354,15 @@ function tile(label, value, suffix) {
   return el("div", { class: "tile" }, el("div", { class: "label" }, label), el("div", { class: "value" }, value, suffix ? el("small", {}, " ", suffix) : null));
 }
 
+// "kWh · forecast 80.8 × 110%" when the solar forecast correction is not 100%.
+function solarSuffix(key) {
+  const kwh = unit(key, "kWh");
+  const pct = status?.solar_forecast_percent ?? 100;
+  const raw = status?.forecast_raw?.[key];
+  if (pct === 100) return kwh;
+  return raw === null || raw === undefined ? `${kwh} · ${pct}% of forecast` : `${kwh} · forecast ${fmt(raw)} × ${pct}%`;
+}
+
 function pvTiles(latest) {
   if (latest.pv_power === null || latest.pv_power === undefined) return [];
   const tiles = [tile("PV now", fmt(latest.pv_power, 0), "W")];
@@ -379,6 +388,7 @@ function weatherText(w) {
 function renderStatus() {
   const latest = status.latest || {};
   $("version").textContent = status.version ? `v${status.version}` : "";
+  renderBankName();
   const next = status.next_analysis ? new Date(status.next_analysis) : null;
   $("schedule").textContent =
     `Predictions daily at ${status.analysis_times.join(", ")} (${status.time_zone}) · model ${status.model}` +
@@ -395,8 +405,8 @@ function renderStatus() {
     tile("Load", fmt(latest.load_power, 0), "W"),
     ...pvTiles(latest),
     tile("Consumption today", fmt(latest.today_consumption), unit("today_consumption", "kWh")),
-    tile("Solar today", fmt(latest.today_forecast), unit("today_forecast", "kWh")),
-    tile("Solar tomorrow", fmt(latest.tomorrow_forecast), unit("tomorrow_forecast", "kWh")),
+    tile("Solar today", fmt(latest.today_forecast), solarSuffix("today_forecast")),
+    tile("Solar tomorrow", fmt(latest.tomorrow_forecast), solarSuffix("tomorrow_forecast")),
   ];
   if (latest.pv_today !== null && latest.pv_today !== undefined) tiles.push(tile("PV today", fmt(latest.pv_today), "kWh"));
   for (const a of appliancesList()) tiles.push(tile(a.name, fmt(latest.appliances?.[a.id], 0), "W"));
@@ -434,6 +444,42 @@ function outageInText(o) {
   const at = new Date((o.ts + o.minutes * 60) * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return `next in ${fmtDuration(o.minutes)} (${at})`;
 }
+
+// Battery bank name in the header: click, type, Enter (Esc cancels).
+function renderBankName() {
+  if (!$("bankNameInput").hidden) return; // being edited
+  const name = status?.battery_name || "";
+  $("bankNameText").textContent = name || "Name your battery";
+  $("bankNameText").classList.toggle("placeholder", !name);
+  document.title = name ? `BatteryAI · ${name}` : "BatteryAI";
+}
+function editBankName() {
+  if (!$("bankNameInput").hidden) return;
+  $("bankNameInput").value = status?.battery_name || "";
+  $("bankNameText").hidden = true;
+  $("bankNameInput").hidden = false;
+  $("bankNameInput").focus();
+  $("bankNameInput").select();
+}
+async function saveBankName(save) {
+  const input = $("bankNameInput");
+  if (input.hidden) return;
+  input.hidden = true;
+  $("bankNameText").hidden = false;
+  if (save && status && input.value.trim() !== (status.battery_name || "")) {
+    const res = await api("api/battery_name", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: input.value }) })
+      .catch((err) => ({ error: err.message }));
+    if (res.error) alert(res.error);
+    else status.battery_name = res.name;
+  }
+  renderBankName();
+}
+$("bankName").addEventListener("click", editBankName);
+$("bankNameInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") saveBankName(true);
+  if (e.key === "Escape") saveBankName(false);
+});
+$("bankNameInput").addEventListener("blur", () => saveBankName(true));
 
 const MODE_TEXT = {
   off: "Advice only",

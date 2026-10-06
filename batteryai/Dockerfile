@@ -23,5 +23,7 @@ RUN apk add --no-cache libstdc++ libgomp \
     && apk del .llama-build
 
 COPY app/ /app/
+# The version is also read from here if the build did not pass BUILD_VERSION.
+COPY config.yaml /app/addon_config.yaml
 
 CMD ["python3", "-u", "/app/main.py"]
