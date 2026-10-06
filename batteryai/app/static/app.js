@@ -809,6 +809,15 @@ async function refreshBill() {
   if (!data.sensor) notes.push("Set a “Grid energy meter” (e.g. the Shelly EM total energy) or “Grid import today” sensor in Settings to record the monthly bill.");
   else if (data.backfilling) notes.push("Reading this month's history of the meter from Home Assistant…");
   else if (!data.meter) notes.push(`Waiting for the first value of ${data.sensor}.`);
+  // Months recorded under tariffs that are no longer in Settings (e.g. the defaults before
+  // the tariffs were set): point at "Use current prices".
+  const currentTariffs = new Set(data.current_tariffs || []);
+  const outdated = (m) => Object.keys(m.by_tariff).filter((n) => !currentTariffs.has(n));
+  const stale = data.months.filter((m) => outdated(m).length);
+  if (stale.length) {
+    const names = [...new Set(stale.flatMap(outdated))].join(", ");
+    notes.push(`${stale.map((m) => monthLabel(m.key)).join(", ")}: recorded with tariffs that are no longer in Settings (${names}). Press “Use current prices” on a month to switch it to ${[...currentTariffs].join(", ")}.`);
+  }
   $("billNotes").replaceChildren(...notes.map((n) => el("div", { class: "banner" }, n)));
   $("billInfo").textContent = data.sensor ? `Meter: ${data.sensor}` : "";
 
@@ -854,7 +863,7 @@ async function refreshBill() {
   const rows = [];
   for (const m of data.months) {
     const open = openBillMonths.has(m.key);
-    const reprice = el("button", { type: "button", class: "secondary small", title: "Set this month's prices to the current tariffs in Settings" }, "Use current prices");
+    const reprice = el("button", { type: "button", class: outdated(m).length ? "small" : "secondary small", title: "Set this month's prices to the current tariffs in Settings" }, "Use current prices");
     reprice.addEventListener("click", async (e) => {
       e.stopPropagation();
       if (!confirm(`Set the prices of ${monthLabel(m.key)} to the current tariffs in Settings and recalculate its costs?`)) return;

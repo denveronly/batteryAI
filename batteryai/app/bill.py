@@ -223,5 +223,6 @@ def bill_report(db: Database, year: int, today: date, opts: Options) -> dict[str
         "total": rounded(total),
         "currency": opts.tariff_currency,
         "sensor": opts.bill_sensor,
+        "current_tariffs": [t.name for t in opts.tariffs],
         "meter": db.meta_get(METER_KEY),
     }

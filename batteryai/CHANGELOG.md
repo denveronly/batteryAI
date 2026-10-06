@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.13
+
+- Monthly bill: months recorded with tariffs that are no longer in Settings (for example
+  the default Peak / Off-peak before your own tariffs were set) are pointed out, and their
+  **Use current prices** button is highlighted.
+- Backup: the hint explains that the zip is compressed and much smaller than the database.
+
 ## 0.4.12
 
 - Monthly bill: each month keeps its own price per kWh per tariff, shown in the table
