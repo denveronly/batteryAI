@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.21
+
+- **Charge on emergency outages** (new switch in Battery control): while the *Emergency
+  outages* sensor is on, every program is held at the pre-outage SOC with grid charge on
+  right away; the outage schedule and AI predictions are ignored until it turns off, then
+  the previous mode and SOC values come back. Stopping it by hand holds until the sensor
+  turns off.
+- The scheduled switch is now called *Charge before scheduled outages*.
+- Dashboard: without a *Probable outages* sensor, the tile shows **Emergency outages**
+  (On / Off) with the next scheduled outage.
+
 ## 0.4.20
 
 - Monthly bill → **Appliances**: kWh and cost of each appliance per month (per tariff with

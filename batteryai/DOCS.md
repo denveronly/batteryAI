@@ -187,6 +187,14 @@ the outage falls in daylight and PV is expected to cover it.
 
 ## Charge before an outage
 
+**Charge on emergency outages**: set the *Emergency outages* sensor (Settings → Sensors)
+and keep this switch on in the Battery control card. While the sensor is on, every program
+is held at the *Pre-outage SOC* with grid charge on, right away – the outage schedule and
+the AI predictions are ignored until it turns off. Then the previous mode comes back (AI
+auto-control re-applies the latest prediction; in advice-only mode the previous SOC values
+are restored). If you stop it by hand, it stays off until the sensor turns off again.
+
+**Charge before scheduled outages**:
 Set *Minutes to outage* (Settings → Sensors; the minutes and SOC are in Prediction tuning), for example
 `sensor.svitlo_kyiv_4_1_minutes_to_outage`) and turn on **Charge before outages** in the
 Battery control card. When the next outage is *Charge before an outage* minutes away (90

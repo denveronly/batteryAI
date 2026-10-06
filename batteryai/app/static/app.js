@@ -418,7 +418,7 @@ function renderStatus() {
     tiles.push(tile("Tariff now", t.now || "—", `${t.now_price} ${t.currency}/kWh`));
   }
   tiles.push(
-    tile("Probable outages", latest.outages_state ?? "—", outageInText(status.outage_minutes)),
+    ...outageTiles(latest, status.outage_minutes || {}),
     tile("Day", weekday, latest.is_weekend ? "weekend" : latest.weekday ? "weekday" : ""),
     tile("Last reading", latest.ts ? fmtTime(latest.ts) : "—"),
   );
@@ -429,6 +429,17 @@ function renderStatus() {
   $("analyze").disabled = status.analysis_running;
   $("analyze").textContent = status.analysis_running ? "Predicting…" : "Predict now";
   renderControl();
+}
+
+// "Probable outages" when that sensor is set; "Emergency outages" (on/off) when only the
+// emergency sensor is; the next scheduled outage under either.
+function outageTiles(latest, o) {
+  const tiles = [];
+  const emergency = o.emergency_entity ? tile("Emergency outages", o.emergency ? "🚨 On" : "Off", outageInText(o)) : null;
+  if (status.sensors?.outages) tiles.push(tile("Probable outages", latest.outages_state ?? "—", emergency ? "" : outageInText(o)));
+  if (emergency) tiles.push(emergency);
+  if (!tiles.length) tiles.push(tile("Outages", "—", outageInText(o)));
+  return tiles;
 }
 
 function fmtDuration(minutes) {
@@ -504,14 +515,26 @@ function renderControl() {
   $("prechargeToggle").checked = c.precharge_enabled;
   $("prechargeToggle").disabled = !c.can_write || !o.entity;
   $("prechargeLabel").replaceChildren(
-    "Charge before outages ",
+    "Charge before scheduled outages ",
     el("span", { class: "hint" }, `— set every program to ${c.precharge_smart && c.precharge_smart_applies ? "up to " : ""}${c.precharge_soc}% with grid charge on ${fmtDuration(c.precharge_minutes)} before an outage`),
+  );
+  $("emergencyToggle").checked = c.emergency_enabled;
+  $("emergencyToggle").disabled = !c.can_write || !o.emergency_entity;
+  $("emergencyLabel").replaceChildren(
+    "Charge on emergency outages ",
+    el("span", { class: "hint" }, o.emergency_entity
+      ? `— while ${o.emergency_entity} is on, every program is held at ${c.precharge_soc}% with grid charge on; the outage schedule and AI predictions are ignored until it turns off`
+      : "— set the “Emergency outages” sensor in Settings"),
   );
   $("prechargeSmart").checked = c.precharge_smart;
   $("prechargeSmart").disabled = !c.precharge_enabled || !c.can_write || !o.entity;
   $("prechargeSmart").closest("label").hidden = !c.precharge_smart_applies;
   const at = (ts) => new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  $("prechargeInfo").textContent = !o.entity
+  $("prechargeInfo").textContent = c.precharge?.emergency
+    ? `🚨 Emergency outages: charging to ${c.precharge.soc}%; the outage schedule and AI predictions are ignored until they end, then back to ${MODE_TEXT[c.precharge.previous_mode] || c.precharge.previous_mode}.`
+    : o.emergency && c.emergency_enabled && c.mode === "charge_all"
+      ? "🚨 Emergency outages are on (Charge all is already active)."
+      : !o.entity
     ? "Set the “Minutes to outage” sensor in Settings to charge before outages."
     : c.precharge
       ? `⚡ Charging to ${c.precharge.soc}% for the outage at ${at(c.precharge.outage_at)}; afterwards back to ${MODE_TEXT[c.precharge.previous_mode] || c.precharge.previous_mode}.`
@@ -619,6 +642,7 @@ async function controlAction(path, body) {
 }
 
 $("autoToggle").addEventListener("change", (e) => controlAction("api/control", { mode: e.target.checked ? "auto" : "off" }));
+$("emergencyToggle").addEventListener("change", (e) => controlAction("api/control/precharge", { emergency: e.target.checked }));
 $("prechargeSmart").addEventListener("change", (e) => controlAction("api/control/precharge", { smart: e.target.checked }));
 $("prechargeToggle").addEventListener("change", (e) => controlAction("api/control/precharge", { enabled: e.target.checked }));
 $("chargeAll").addEventListener("click", () => {

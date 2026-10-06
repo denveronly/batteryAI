@@ -189,6 +189,8 @@ class BatteryAI:
         now = time.time()
         threshold = self.opts.outage_precharge_minutes
         running = self.control.get("precharge")
+        if await self._check_emergency(now, running):
+            return
         if running:
             if self.control["mode"] != "charge_all":
                 # Changed by hand (auto-control or Charge all): the pre-outage charge is over.
@@ -234,6 +236,53 @@ class BatteryAI:
         _LOGGER.info("Outage in %.0f minutes (%s): charging every program to %d%%: %s", minutes, at, soc, actions)
         await self.notify_actions(actions, f"outage at {at}, charging to {soc}%", reason)
 
+    async def _check_emergency(self, now: float, running: dict[str, Any] | None) -> bool:
+        """Emergency outages (emergency outage sensor on): with "Charge on emergency outages"
+        every program goes to the pre-outage SOC with grid charge on right away, and the
+        outage schedule and AI predictions are ignored until the sensor turns off; then the
+        previous mode (and SOC values) come back. Returns True when it handled this check."""
+        sensor = self.opts.emergency_outage_sensor
+        self.emergency = bool(sensor) and outage_plan.is_on(await self.ha.state(sensor))
+        if running and running.get("emergency"):
+            if self.control["mode"] != "charge_all":
+                self.control["precharge"] = None  # stopped by hand; not again until it turns off
+                control.save_state(self.control)
+            elif not self.emergency:
+                _LOGGER.info("Emergency outages are over")
+                self.control.pop("emergency_done", None)
+                await self.end_precharge(running)
+            return True
+        if not self.emergency:
+            if self.control.pop("emergency_done", None):
+                control.save_state(self.control)
+            return False
+        if (
+            not self.control.get("emergency_enabled", True)
+            or self.control.get("emergency_done")
+            or not any(p.soc_entity for p in self.opts.deye_programs)
+            or (self.control["mode"] == "charge_all" and not running)  # Charge all by hand
+        ):
+            return False
+        soc = self.opts.outage_precharge_soc_percent
+        if running:  # a scheduled pre-outage charge becomes the emergency charge
+            previous_mode, socs = running.get("previous_mode") or "off", running.get("socs") or {}
+        else:
+            previous_mode = self.control["mode"]
+            socs = await control.read_socs(self.ha, self.opts) if previous_mode == "off" else {}
+        actions = await control.charge_all(self.ha, self.opts, self.control, soc)
+        self.control.update(
+            mode="charge_all", since=now, last_actions=actions, emergency_done=True,
+            precharge={"emergency": True, "outage_at": now, "previous_mode": previous_mode, "socs": socs, "soc": soc, "started": now},
+        )
+        control.save_state(self.control)
+        _LOGGER.info("Emergency outages: charging every program to %d%%: %s", soc, actions)
+        await self.notify_actions(
+            actions, f"emergency outages, charging to {soc}%",
+            f"Emergency outages are on: all programs are set to {soc}% with grid charge on. The outage schedule "
+            "and AI predictions are ignored until emergency outages end.",
+        )
+        return True
+
     async def read_outage_duration(self) -> float | None:
         state = await self.ha.state(self.opts.outage_duration_sensor) if self.opts.outage_duration_sensor else None
         self.outage_duration = outage_plan.duration_minutes(state)
@@ -243,13 +292,10 @@ class BatteryAI:
         """The tariff-aware decision, or None when it does not apply (switched off, a single
         price, or no outage duration): then the battery is charged to the pre-outage SOC."""
         self.outage_plan = None
-        self.emergency = False
         if not self.control.get("precharge_smart", True) or self.opts.single_price:
             return None
-        if self.opts.emergency_outage_sensor:
-            self.emergency = outage_plan.is_on(await self.ha.state(self.opts.emergency_outage_sensor))
-            if self.emergency:
-                return None  # emergency outages: ignore tariffs, charge to the pre-outage SOC
+        if self.emergency:
+            return None  # emergency outages: ignore tariffs, charge to the pre-outage SOC
         duration = await self.read_outage_duration()
         if not duration:
             return None
@@ -685,6 +731,7 @@ async def status(request: web.Request) -> web.Response:
                 "precharge_minutes": opts.outage_precharge_minutes,
                 "precharge_soc": opts.outage_precharge_soc_percent,
                 "precharge_smart": app.control.get("precharge_smart", True),
+                "emergency_enabled": app.control.get("emergency_enabled", True),
                 "precharge_smart_applies": not opts.single_price and bool(opts.outage_duration_sensor),
                 "outage_plan": app.outage_plan,
             },
@@ -986,6 +1033,17 @@ async def set_precharge(request: web.Request) -> web.Response:
     """Body {"enabled": bool}: charge before an outage on/off; off also ends a running one."""
     app = _app(request)
     body = await request.json()
+    if "emergency" in body:
+        app.control["emergency_enabled"] = bool(body["emergency"])
+        control.save_state(app.control)
+        _LOGGER.info("Charge on emergency outages %s", "on" if body["emergency"] else "off")
+        async with app._outage_lock:
+            running = app.control.get("precharge")
+            if not body["emergency"] and running and running.get("emergency"):
+                await app.end_precharge(running)
+        if body["emergency"]:
+            await app.check_outage()
+        return web.json_response({"emergency": app.control["emergency_enabled"]})
     if "smart" in body:
         app.control["precharge_smart"] = bool(body["smart"])
         control.save_state(app.control)

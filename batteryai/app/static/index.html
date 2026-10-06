@@ -85,8 +85,12 @@
           <span>AI auto-control <span class="hint">— write each prediction's SOC and grid charge to the Deye programs</span></span>
         </label>
         <label class="switch">
+          <input type="checkbox" id="emergencyToggle">
+          <span id="emergencyLabel">Charge on emergency outages</span>
+        </label>
+        <label class="switch">
           <input type="checkbox" id="prechargeToggle">
-          <span id="prechargeLabel">Charge before outages <span class="hint">— set every program to 100% with grid charge on 90 minutes before an outage</span></span>
+          <span id="prechargeLabel">Charge before scheduled outages <span class="hint">— set every program to 100% with grid charge on 90 minutes before an outage</span></span>
         </label>
         <label class="switch sub-switch">
           <input type="checkbox" id="prechargeSmart">
