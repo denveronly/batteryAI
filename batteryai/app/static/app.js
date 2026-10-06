@@ -1036,8 +1036,9 @@ async function refreshStorage() {
     tile("Predictions", db.rows.analyses.toLocaleString(), ""),
     tile("Data from", db.first_reading ? new Date(db.first_reading * 1000).toLocaleDateString([], { day: "numeric", month: "short" }) : "—",
       db.detail_since ? `detail since ${new Date(db.detail_since * 1000).toLocaleDateString([], { day: "numeric", month: "short" })}` : ""),
+    tile("Add-on total", s.addon ? fmtBytes(s.addon.total) : "…", s.addon ? "data + program" : "measuring"),
     tile("Add-on data", fmtBytes(s.data_bytes), `${s.data_files} files`),
-    tile("Add-on code", fmtBytes(s.app_bytes), ""),
+    tile("Add-on program", s.addon ? fmtBytes(s.addon.image) : "…", "code, Python, system"),
     tile("Disk free", fmtBytes(s.disk.free), `of ${fmtBytes(s.disk.total)}`),
   );
   $("dbTable").replaceChildren(
@@ -1048,6 +1049,22 @@ async function refreshStorage() {
     el("tr", {}, el("td", {}, "Predictions"), el("td", { class: "num" }, db.rows.analyses.toLocaleString())),
     el("tr", {}, el("td", {}, "First / last reading"), el("td", { class: "num" }, db.first_reading ? `${fmtDateTime(db.first_reading)} – ${fmtDateTime(db.last_reading)}` : "—")),
     ...Object.entries(db.files).map(([suffix, bytes]) => el("tr", {}, el("td", {}, `batteryai.db${suffix}`), el("td", { class: "num" }, fmtBytes(bytes)))),
+  );
+  if (!s.addon) {
+    $("usageTable").replaceChildren(el("tr", {}, el("td", { class: "empty" }, "Measuring the add-on's disk space… (refresh in a moment)")));
+    setTimeout(() => { if (location.hash === "#logs") refreshStorage(); }, 5000);
+  }
+  const u = s.addon?.parts;
+  const usageRow = (label, bytes, cls = "") => el("tr", cls ? { class: cls } : {}, el("td", {}, label), el("td", { class: "num" }, fmtBytes(bytes)));
+  if (u) $("usageTable").replaceChildren(
+    el("tr", {}, el("th", {}, "Space used by the add-on"), el("th", { class: "num" }, "Size")),
+    usageRow("Database (readings, predictions, bill)", u.database),
+    usageRow("Local LLM model", u.model),
+    usageRow("Other data (settings, backups in progress, …)", u.other_data),
+    usageRow("BatteryAI code", u.app),
+    usageRow("Python packages (incl. the local LLM engine)", u.python),
+    usageRow("System (base image)", u.system),
+    usageRow("Total", s.addon.total, "total"),
   );
   $("filesTable").replaceChildren(
     el("tr", {}, el("th", {}, "File in /data"), el("th", { class: "num" }, "Size")),

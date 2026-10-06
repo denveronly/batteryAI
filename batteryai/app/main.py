@@ -12,6 +12,7 @@ from collections import deque
 import logging
 import os
 import signal
+import threading
 import time
 from datetime import datetime, timedelta, timezone, tzinfo
 from pathlib import Path
@@ -821,6 +822,82 @@ def _dir_size(path: Path) -> tuple[int, int]:
     return total, files
 
 
+# Home Assistant mounts and pseudo file systems: not part of the add-on's own space.
+NOT_ADDON = {"/proc", "/sys", "/dev", "/run", "/config", "/homeassistant", "/share", "/ssl", "/media",
+             "/backup", "/addons", "/addon_configs", "/all_addon_configs"}
+_usage_cache: tuple[float, dict[str, Any]] = (0.0, {})
+
+
+_usage_running = threading.Lock()
+
+
+def addon_usage_cached() -> dict[str, Any] | None:
+    """The last measurement (None before the first one); a stale one is refreshed in the
+    background, so the Logs tab never waits for the disk scan."""
+    if time.time() - _usage_cache[0] >= 900 and not _usage_running.locked():
+        def run() -> None:
+            with _usage_running:
+                addon_usage()
+        threading.Thread(target=run, daemon=True).start()
+    return _usage_cache[1] or None
+
+
+def addon_usage() -> dict[str, Any]:
+    """Everything the add-on takes on disk: its image (code, Python packages, system) and its
+    data folder (database, local LLM model, the rest). Cached for 15 minutes."""
+    global _usage_cache
+    if time.time() - _usage_cache[0] < 900 and _usage_cache[1]:
+        return _usage_cache[1]
+    data_dir = os.path.realpath(DATA_DIR)
+    app_dir = os.path.realpath(str(Path(__file__).parent))
+    parts = {"database": 0, "model": 0, "other_data": 0, "app": 0, "python": 0, "system": 0}
+    seen: set[tuple[int, int]] = set()
+
+    def walk(path: str, root_dev: int | None) -> None:
+        try:
+            entries = list(os.scandir(path))
+        except OSError:
+            return
+        for entry in entries:
+            try:
+                info = entry.stat(follow_symlinks=False)
+            except OSError:
+                continue
+            full = entry.path
+            if entry.is_dir(follow_symlinks=False):
+                if full in NOT_ADDON or (full == data_dir and root_dev is not None):
+                    continue
+                if root_dev is not None and info.st_dev != root_dev:
+                    continue  # another mount
+                walk(full, root_dev)
+                continue
+            if not entry.is_file(follow_symlinks=False) or (info.st_dev, info.st_ino) in seen:
+                continue
+            seen.add((info.st_dev, info.st_ino))
+            size = info.st_size
+            if full.startswith(data_dir + os.sep):
+                rel = full[len(data_dir) + 1:]
+                key = "database" if rel.startswith("batteryai.db") else "model" if rel.startswith("models" + os.sep) else "other_data"
+            elif full.startswith(app_dir + os.sep):
+                key = "app"
+            elif "site-packages" in full or "dist-packages" in full:
+                key = "python"
+            else:
+                key = "system"
+            parts[key] += size
+
+    walk(data_dir, None)
+    try:
+        walk("/", os.stat("/").st_dev)
+    except OSError:
+        pass
+    data = parts["database"] + parts["model"] + parts["other_data"]
+    image = parts["app"] + parts["python"] + parts["system"]
+    result = {"parts": parts, "data": data, "image": image, "total": data + image, "measured": time.time()}
+    _usage_cache = (time.time(), result)
+    return result
+
+
 @routes.get("/api/storage")
 async def storage(request: web.Request) -> web.Response:
     app = _app(request)
@@ -842,6 +919,7 @@ async def storage(request: web.Request) -> web.Response:
             "files": files,
             "app_bytes": app_total,
             "disk": {"total": disk.total, "used": disk.used, "free": disk.free},
+            "addon": addon_usage_cached(),
         }
 
     return web.json_response(await asyncio.to_thread(collect))
@@ -1447,6 +1525,7 @@ async def main() -> None:
     opts = load_settings()
     os.makedirs(DATA_DIR, exist_ok=True)
     backup.cleanup(0)
+    addon_usage_cached()  # measure the add-on's disk space in the background
     db = Database(os.path.join(DATA_DIR, "batteryai.db"))
     db.mark_interrupted()
 

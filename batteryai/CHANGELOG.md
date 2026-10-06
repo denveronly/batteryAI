@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.23
+
+- Logs → Storage shows the **whole space the add-on uses**: *Add-on total*, its data and
+  its program, and a breakdown (database, local LLM model, other data, BatteryAI code,
+  Python packages, base system). Measured in the background every 15 minutes.
+
 ## 0.4.22
 
 - The *Probable outages* setting is gone. Probable outages are now derived: **on** while
