@@ -107,7 +107,8 @@ All settings are stored in `/data/settings.json` and apply immediately when save
 - **Sensors** – battery SOC, solar forecast today/tomorrow, PV power (W), PV production
   today (kWh), load power (W, kW is converted), consumption today (kWh), grid import
   today (kWh), grid energy meter for the monthly bill (kWh, e.g. Shelly EM), weather,
-  probable outages.
+  minutes to outage, outage duration and emergency outages (probable outages are derived
+  from these).
 - **Appliances** – your own list of devices with a power sensor (W or kW is converted):
   a name, the sensor, and *Depends on outdoor temperature* for anything that heats or
   cools (heat pump, AC). Add rows with **+ Add appliance**, remove them with **−**.
@@ -203,7 +204,7 @@ charge on, and you get a notification. When the sensor points to a later outage 
 the previous mode comes back: AI auto-control re-applies the latest prediction, and in
 advice-only mode the SOC values from before are restored. Turning AI auto-control on or
 pressing *Charge all* ends it early; it then does not start again for the same outage.
-The Probable outages tile shows how long until the next outage.
+The *Probable outages* tile is on while *Minutes to outage* shows a scheduled outage (off when unknown or 9999) and shows how long until it starts; *Emergency outages* has its own tile.
 
 **Tariff-aware** (switch under *Charge before outages*, with several tariffs and an
 *Outage duration* sensor such as `sensor.svitlo_kiivska_oblast_2_2_longest_continuous_outage`;

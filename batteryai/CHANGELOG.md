@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.22
+
+- The *Probable outages* setting is gone. Probable outages are now derived: **on** while
+  *Minutes to outage* shows a scheduled outage, **off** when it is unknown or 9999 (none
+  scheduled); emergency outages count too. A sensor entered there before that is an
+  emergency indicator (`…emergency…`) moves to *Emergency outages* automatically.
+- The AI predictions get the probable outages as on/off with the minutes to the outage,
+  its start, its duration and whether emergency outages are on.
+- 9999 minutes to outage counts as "no outage scheduled" everywhere.
+
 ## 0.4.21
 
 - **Charge on emergency outages** (new switch in Battery control): while the *Emergency

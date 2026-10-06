@@ -350,7 +350,7 @@ def analyze(db: Database, opts: Options, snapshot: dict[str, Any], tz: tzinfo) -
         "predicted_consumption_tomorrow_kwh": fc["consumption_tomorrow_kwh"],
         "predicted_pv_tomorrow_kwh": fc["pv_tomorrow_kwh"],
         "predicted_min_soc_percent": min_soc,
-        "outage_risk": "high" if p["outage"] else ("unknown" if not opts.outages_sensor else "low"),
+        "outage_risk": "high" if p["outage"] else ("unknown" if not (opts.outage_minutes_sensor or opts.emergency_outage_sensor) else "low"),
         "weather_impact": fc["weather_note"],
         "estimated_grid_cost_tomorrow": p["cost"],
         "appliance_forecast": appliance_forecast,

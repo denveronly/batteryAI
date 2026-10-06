@@ -44,6 +44,33 @@ def to_watts(value: float | None, unit: str | None) -> float | None:
     return value * 1000 if (unit or "").strip().lower() == "kw" else value
 
 
+ON_STATES = {"on", "true", "yes", "1", "active", "emergency", "увімкнено", "так"}
+# "Minutes to outage" at or above this means no outage is scheduled (svitlo shows 9999).
+FAR_MINUTES = 9999
+
+
+def is_on(state: dict[str, Any] | None) -> bool:
+    """An on/off indicator (e.g. emergency outages): on/true/yes/active, or a number above 0."""
+    if not state:
+        return False
+    raw = str(state.get("state") or "").strip().lower()
+    number = to_float(raw)
+    return raw in ON_STATES or (number is not None and number > 0)
+
+
+def outage_minutes(state: dict[str, Any] | None) -> float | None:
+    """Minutes until the next scheduled outage (h and s are converted); None when unknown
+    or when no outage is scheduled (9999 or more)."""
+    if not state:
+        return None
+    value = to_float(state.get("state"))
+    if value is None:
+        return None
+    unit = str((state.get("attributes") or {}).get("unit_of_measurement") or "").strip().lower()
+    value = value * 60 if unit in ("h", "hours") else value / 60 if unit in ("s", "sec", "seconds") else value
+    return None if value < 0 or value >= FAR_MINUTES else value
+
+
 def clean_state(value: Any) -> str | None:
     if value is None or str(value).strip().lower() in UNAVAILABLE:
         return None
@@ -195,7 +222,8 @@ async def collect(ha: HomeAssistant, opts: Options, tz: tzinfo) -> dict[str, Any
     sensors = opts.sensor_map()
     program_entities = [(p.time_entity, p.soc_entity, p.charge_entity) for p in opts.deye_programs]
 
-    sensor_states, appliance_states, program_states, weather = await asyncio.gather(
+    (minutes_state, duration_state, emergency_state), sensor_states, appliance_states, program_states, weather = await asyncio.gather(
+        asyncio.gather(*(ha.state(e) for e in (opts.outage_minutes_sensor, opts.outage_duration_sensor, opts.emergency_outage_sensor))),
         asyncio.gather(*(ha.state(entity) for entity in sensors.values())),
         asyncio.gather(*(ha.state(a.entity) for a in opts.appliances)),
         asyncio.gather(*(asyncio.gather(ha.state(t), ha.state(s), ha.state(c)) for t, s, c in program_entities)),
@@ -247,9 +275,25 @@ async def collect(ha: HomeAssistant, opts: Options, tz: tzinfo) -> dict[str, Any
     snapshot["units"]["outdoor_temp"] = weather.get("unit")
     snapshot["weather"] = weather
 
-    outages = by_field.get("outages")
-    snapshot["outages_state"] = clean_state(outages.get("state")) if outages else None
-    snapshot["outages_attrs"] = _trim_attributes(outages.get("attributes")) if outages else {}
+    # Probable outages are derived from the outage sensors: "on" while a scheduled outage is
+    # known (Minutes to outage below 9999), "off" otherwise; emergency outages count too.
+    minutes = outage_minutes(minutes_state)
+    emergency = is_on(emergency_state) if opts.emergency_outage_sensor else False
+    if opts.outage_minutes_sensor or opts.emergency_outage_sensor:
+        from outage_plan import duration_minutes  # outage_plan imports this module
+
+        duration = duration_minutes(duration_state)
+        outage_at = now + timedelta(minutes=minutes) if minutes is not None else None
+        snapshot["outages_state"] = "on" if (minutes is not None or emergency) else "off"
+        snapshot["outages_attrs"] = {
+            "scheduled_outage": minutes is not None,
+            "minutes_to_outage": round(minutes) if minutes is not None else None,
+            "outage_starts": outage_at.isoformat(timespec="minutes") if outage_at else None,
+            "outage_duration_minutes": round(duration) if duration is not None else None,
+            "emergency_outages": emergency,
+        }
+    else:
+        snapshot["outages_state"], snapshot["outages_attrs"] = None, {}
 
     programs = []
     for program, (time_state, soc_state, charge_state) in zip(opts.deye_programs, program_states):

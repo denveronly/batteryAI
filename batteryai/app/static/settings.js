@@ -26,8 +26,7 @@ const SENSOR_GROUPS = [
     title: "Weather & outages",
     rows: [
       { key: "weather_entity", label: "Weather", hint: "weather.* entity (forecast) or a temperature sensor", kind: "weather" },
-      { key: "outages_sensor", label: "Probable outages", hint: "optional, any state", kind: "text" },
-      { key: "outage_minutes_sensor", label: "Minutes to outage", hint: "optional, e.g. sensor.svitlo_kyiv_4_1_minutes_to_outage – charges the battery before an outage", kind: "numeric" },
+      { key: "outage_minutes_sensor", label: "Minutes to outage", hint: "optional, e.g. sensor.svitlo_kyiv_4_1_minutes_to_outage – probable outages are on while it shows a scheduled outage (off when unknown or 9999); charges the battery before it", kind: "numeric" },
       { key: "outage_duration_sensor", label: "Outage duration", hint: "optional, e.g. sensor.svitlo_..._longest_continuous_outage – how long the battery must last (tariff-aware charging)", kind: "text" },
       { key: "emergency_outage_sensor", label: "Emergency outages", hint: "optional, on while emergency outages are in effect – then tariffs are ignored and the battery is charged to the pre-outage SOC", kind: "text" },
     ],

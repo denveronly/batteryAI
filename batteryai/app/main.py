@@ -31,7 +31,7 @@ import outage_plan
 import openai_engine
 import backup
 from bill import BillRecorder, bill_report, reprice_month
-from collector import UNAVAILABLE, active_program, collect, has_data, parse_hhmm, to_float, weather_details
+from collector import UNAVAILABLE, active_program, collect, has_data, outage_minutes, parse_hhmm, to_float, weather_details
 from config import DATA_DIR, Options, SettingsError, load_settings, parse_settings, save_settings
 from db import READING_FIELDS, Database, accuracy_report, economy_report, monthly_summary
 from ha import HAError, HomeAssistant, container_env
@@ -165,15 +165,11 @@ class BatteryAI:
     # Charge before an outage --------------------------------------------------
 
     async def read_outage_minutes(self) -> float | None:
-        """Minutes until the next outage from the outage minutes sensor (h and s are converted)."""
+        """Minutes until the next scheduled outage; None when unknown or none is scheduled (9999)."""
         if not self.opts.outage_minutes_sensor:
             self.outage_minutes = None
             return None
-        state = await self.ha.state(self.opts.outage_minutes_sensor)
-        value = to_float(state.get("state")) if state else None
-        unit = str(((state or {}).get("attributes") or {}).get("unit_of_measurement") or "").strip().lower()
-        if value is not None:
-            value = value * 60 if unit in ("h", "hours") else value / 60 if unit in ("s", "sec", "seconds") else value
+        value = outage_minutes(await self.ha.state(self.opts.outage_minutes_sensor))
         self.outage_minutes, self.outage_minutes_ts = value, time.time()
         return value
 
@@ -401,9 +397,14 @@ class BatteryAI:
 
     def _check_outage_change(self, snapshot: dict[str, Any]) -> None:
         """A new or changed outage announcement gets its own prediction (rate limited)."""
-        if not self.opts.outages_sensor or snapshot["outages_state"] is None:
+        if snapshot["outages_state"] is None:
             return
-        key = json.dumps([snapshot["outages_state"], snapshot["outages_attrs"]], sort_keys=True, default=str)
+        attrs = snapshot["outages_attrs"] or {}
+        # The minutes count down every reading: compare the outage's start (10-minute steps),
+        # not the minutes, so only a new or moved outage counts as a change.
+        key = json.dumps(
+            [snapshot["outages_state"], attrs.get("emergency_outages"), (attrs.get("outage_starts") or "")[:15]]
+        )
         previous, self._last_outage_key = self._last_outage_key, key
         if previous is None or previous == key or not self.can_predict or self.analysis_running:
             return

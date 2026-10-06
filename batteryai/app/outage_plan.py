@@ -17,7 +17,7 @@ import re
 from datetime import datetime, tzinfo
 from typing import Any
 
-from collector import to_float
+from collector import is_on, to_float  # noqa: F401  (is_on: used by main)
 from config import Options
 
 STEP = 15 * 60  # seconds per integration step
@@ -44,18 +44,6 @@ def duration_minutes(state: dict[str, Any] | None) -> float | None:
     if unit in ("min", "mins", "minutes", "хв"):
         return value
     return value * 60 if value <= 24 else value
-
-
-ON_STATES = {"on", "true", "yes", "1", "active", "emergency", "увімкнено", "так"}
-
-
-def is_on(state: dict[str, Any] | None) -> bool:
-    """An emergency-outage indicator: on/true/yes/active, or a number above 0."""
-    if not state:
-        return False
-    raw = str(state.get("state") or "").strip().lower()
-    number = to_float(raw)
-    return raw in ON_STATES or (number is not None and number > 0)
 
 
 def load_profile(profile: list[dict[str, Any]]) -> dict[tuple[int, int], float]:

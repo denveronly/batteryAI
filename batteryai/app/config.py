@@ -22,7 +22,6 @@ SENSOR_KEYS = (
     "today_forecast_sensor",
     "tomorrow_forecast_sensor",
     "battery_soc_sensor",
-    "outages_sensor",
     "load_power_sensor",
     "today_consumption_sensor",
     "weather_entity",
@@ -121,7 +120,6 @@ class Options:
     today_forecast_sensor: str = ""
     tomorrow_forecast_sensor: str = ""
     battery_soc_sensor: str = ""
-    outages_sensor: str = ""
     load_power_sensor: str = ""
     today_consumption_sensor: str = ""
     weather_entity: str = ""
@@ -190,7 +188,6 @@ class Options:
             "today_forecast": self.today_forecast_sensor,
             "tomorrow_forecast": self.tomorrow_forecast_sensor,
             "battery_soc": self.battery_soc_sensor,
-            "outages": self.outages_sensor,
             "load_power": self.load_power_sensor,
             "today_consumption": self.today_consumption_sensor,
             "pv_today": self.pv_energy_sensor,
@@ -515,6 +512,11 @@ def load_settings() -> Options:
         for key, legacy in LEGACY_KEYS.items():
             if key not in raw and legacy in raw:
                 raw[key] = raw[legacy]
+        # 0.4.22: "Probable outages" is derived from the outage sensors; a sensor entered
+        # there that is an emergency indicator moves to "Emergency outages".
+        legacy_outages = str(raw.pop("outages_sensor", "") or "")
+        if legacy_outages and not raw.get("emergency_outage_sensor") and "emergency" in legacy_outages:
+            raw["emergency_outage_sensor"] = legacy_outages
         if int(raw.get("settings_version") or 1) < 2 and raw.get("program_time_marks") == "end":
             raw["program_time_marks"] = "start"
         try:

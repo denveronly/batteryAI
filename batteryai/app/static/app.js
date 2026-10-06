@@ -435,10 +435,10 @@ function renderStatus() {
 // emergency sensor is; the next scheduled outage under either.
 function outageTiles(latest, o) {
   const tiles = [];
-  const emergency = o.emergency_entity ? tile("Emergency outages", o.emergency ? "🚨 On" : "Off", outageInText(o)) : null;
-  if (status.sensors?.outages) tiles.push(tile("Probable outages", latest.outages_state ?? "—", emergency ? "" : outageInText(o)));
-  if (emergency) tiles.push(emergency);
-  if (!tiles.length) tiles.push(tile("Outages", "—", outageInText(o)));
+  // Probable outages: on while Minutes to outage shows a scheduled outage (below 9999).
+  if (o.entity) tiles.push(tile("Probable outages", o.minutes !== null && o.minutes !== undefined ? "On" : "Off", outageInText(o)));
+  if (o.emergency_entity) tiles.push(tile("Emergency outages", o.emergency ? "🚨 On" : "Off"));
+  if (!tiles.length) tiles.push(tile("Probable outages", "—", "set the outage sensors in Settings"));
   return tiles;
 }
 
@@ -450,7 +450,7 @@ function fmtDuration(minutes) {
 // "next in 1 h 25 min (14:30)" from the minutes-to-outage sensor.
 function outageInText(o) {
   if (!o?.entity) return "";
-  if (o.minutes === null || o.minutes === undefined) return "next: unknown";
+  if (o.minutes === null || o.minutes === undefined) return "none scheduled";
   if (o.minutes <= 0) return "outage now";
   const at = new Date((o.ts + o.minutes * 60) * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return `next in ${fmtDuration(o.minutes)} (${at})`;
@@ -539,7 +539,7 @@ function renderControl() {
     : c.precharge
       ? `⚡ Charging to ${c.precharge.soc}% for the outage at ${at(c.precharge.outage_at)}; afterwards back to ${MODE_TEXT[c.precharge.previous_mode] || c.precharge.previous_mode}.`
       : o.minutes === null || o.minutes === undefined
-        ? `${o.entity} has no value right now.`
+        ? "No outage scheduled."
         : o.minutes <= 0 ? "Outage now." : `Next outage ${outageInText(o).replace(/^next /, "")}${o.duration ? ` for ${fmtDuration(o.duration)}` : ""}.`
           + (o.emergency && c.precharge_smart
             ? ` 🚨 Emergency outages: tariffs ignored, charging to ${c.precharge_soc}% before the outage.`
