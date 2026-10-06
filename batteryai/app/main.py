@@ -27,6 +27,7 @@ import local_fast
 import local_llm
 import notify
 import openai_engine
+from bill import BillRecorder, bill_report
 from collector import UNAVAILABLE, active_program, collect, has_data, parse_hhmm, to_float, weather_details
 from config import DATA_DIR, Options, SettingsError, load_settings, parse_settings, save_settings
 from db import READING_FIELDS, Database, accuracy_report, economy_report, monthly_summary
@@ -62,6 +63,7 @@ class BatteryAI:
         self.model_download = local_llm.ModelDownloader()
         self.panel_url: str | None = None  # opened by tapping a notification
         self._last_outage_run = 0.0
+        self.bill = BillRecorder(db)
 
     def spawn(self, coro: Any) -> asyncio.Task:
         task = asyncio.create_task(coro)
@@ -245,6 +247,10 @@ class BatteryAI:
                 await self.record()
             except Exception:  # keep recording even if one cycle fails
                 _LOGGER.exception("Recording failed")
+            try:
+                await self.bill.record(self.ha, self.opts, self.tz)
+            except Exception:
+                _LOGGER.exception("Recording the monthly bill failed")
             if time.time() - self._last_compress > 6 * 3600:
                 try:
                     await self.compress_old()
@@ -671,6 +677,16 @@ async def monthly(request: web.Request) -> web.Response:
     app = _app(request)
     rows = await asyncio.to_thread(monthly_summary, app.db, datetime.now(app.tz).date(), app.opts.tariff_at)
     return web.json_response({"months": rows, "currency": app.opts.tariff_currency})
+
+
+@routes.get("/api/bill")
+async def bill_view(request: web.Request) -> web.Response:
+    app = _app(request)
+    today = datetime.now(app.tz).date()
+    year = _int_param(request, "year", today.year, 2000, 2100)
+    report = await asyncio.to_thread(bill_report, app.db, year, today, app.opts)
+    report["backfilling"] = app.bill.backfilling
+    return web.json_response(report)
 
 
 @routes.post("/api/control")

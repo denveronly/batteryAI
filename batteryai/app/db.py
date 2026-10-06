@@ -46,6 +46,21 @@ CREATE TABLE IF NOT EXISTS analyses (
     output_tokens INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_analyses_ts ON analyses (ts);
+
+-- Monthly bill: grid energy per day and tariff with the cost at the price in effect when it
+-- was recorded, so later tariff changes leave past months as they were. tariff '' = single price.
+CREATE TABLE IF NOT EXISTS bill_days (
+    local_date TEXT NOT NULL,
+    tariff TEXT NOT NULL,
+    kwh REAL NOT NULL DEFAULT 0,
+    cost REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (local_date, tariff)
+);
+
+CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
 """
 
 # Columns added after 0.2.0 (today_load is kept only for old rows; see _migrate).
@@ -192,7 +207,7 @@ class Database:
         path = self._conn.execute("PRAGMA database_list").fetchone()["file"]
         files = {suffix: os.path.getsize(path + suffix) for suffix in ("", "-wal", "-shm") if os.path.exists(path + suffix)}
         tables = {}
-        for name in ("readings", "analyses"):
+        for name in ("readings", "analyses", "bill_days"):
             tables[name] = self._query(f"SELECT COUNT(*) AS n FROM {name}")[0]["n"]
         span = self._query("SELECT MIN(ts) AS first, MAX(ts) AS last FROM readings")[0]
         sources = {row["source"] or "live": row["n"] for row in self._query("SELECT source, COUNT(*) AS n FROM readings GROUP BY source")}
@@ -450,6 +465,42 @@ class Database:
                     entry[key] = avg
             out.append(entry)
         return out
+
+    # Monthly bill -------------------------------------------------------
+
+    def meta_get(self, key: str) -> Any:
+        rows = self._query("SELECT value FROM meta WHERE key = ?", (key,))
+        return json.loads(rows[0]["value"]) if rows and rows[0]["value"] else None
+
+    def meta_set(self, key: str, value: Any) -> None:
+        self._execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, json.dumps(value)),
+        )
+
+    def add_bill(self, entries: dict[tuple[str, str], tuple[float, float]], meter_key: str, meter: Any) -> None:
+        """Adds kWh and cost per (date, tariff) and stores the meter state, in one transaction."""
+        with self._lock:
+            self._conn.executemany(
+                "INSERT INTO bill_days (local_date, tariff, kwh, cost) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(local_date, tariff) DO UPDATE SET kwh = kwh + excluded.kwh, cost = cost + excluded.cost",
+                [(day, tariff, kwh, cost) for (day, tariff), (kwh, cost) in entries.items()],
+            )
+            self._conn.execute(
+                "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (meter_key, json.dumps(meter)),
+            )
+            self._conn.commit()
+
+    def bill_rows(self, first_date: str, last_date: str) -> list[dict[str, Any]]:
+        return self._query(
+            "SELECT local_date, tariff, kwh, cost FROM bill_days WHERE local_date >= ? AND local_date <= ? "
+            "ORDER BY local_date, tariff",
+            (first_date, last_date),
+        )
+
+    def bill_years(self) -> list[int]:
+        return [int(r["y"]) for r in self._query("SELECT DISTINCT substr(local_date, 1, 4) AS y FROM bill_days ORDER BY y")]
 
     # Analyses -----------------------------------------------------------
 

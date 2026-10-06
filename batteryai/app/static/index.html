@@ -139,6 +139,11 @@
   </main>
 
   <main id="view-economy" hidden>
+    <nav class="tabs subtabs" role="tablist" aria-label="Economy views">
+      <a href="#economy" role="tab" data-sub="overview">Overview</a>
+      <a href="#economy-bill" role="tab" data-sub="bill">Monthly bill</a>
+    </nav>
+    <div id="economyOverview">
     <section class="card">
       <div class="card-head">
         <h2>Economy</h2>
@@ -173,6 +178,20 @@
       <div class="card-head"><h2>Days</h2></div>
       <div class="table-scroll"><table class="programs" id="economyTable"></table></div>
     </section>
+    </div>
+    <div id="economyBill" hidden>
+    <section class="card">
+      <div class="card-head">
+        <h2>Monthly bill</h2>
+        <span class="muted" id="billInfo"></span>
+        <select id="billYear" aria-label="Year" class="push-right"></select>
+      </div>
+      <div id="billNotes"></div>
+      <section class="tiles" id="billTiles"></section>
+      <div class="table-scroll"><table class="programs bill" id="billTable"></table></div>
+      <p class="hint">Grid energy from the meter, split by tariff and priced when it was recorded: changing a tariff price only affects energy recorded after the change. Click a month to see its days.</p>
+    </section>
+    </div>
   </main>
 
   <main id="view-logs" hidden>

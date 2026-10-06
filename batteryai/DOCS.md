@@ -43,6 +43,17 @@ consumption would have cost without PV and battery, and what was saved — split
 *AI control* column shows how much of the day auto-control was on.
 Requires the *Grid import today* and *PV power* sensors and the tariff settings.
 
+**Monthly bill** (sub-tab of Economy): grid energy and cost per month of a year, read
+from the *Grid energy meter* sensor (for example a Shelly EM total energy, kWh; Wh is
+converted) or, if that is empty, from *Grid import today*. With a peak / off-peak tariff
+each tariff has its own kWh and cost columns; with a single price only the overall kWh
+and grid cost are shown. The last row is the year's total; click a month to see its days.
+The meter is read every recording interval and the energy is stored per day and tariff
+together with its cost at the price in effect then, so changing a tariff price later does
+not change months already recorded. When a meter is set for the first time, this month so
+far is taken from the Home Assistant history. A lifetime counter (Shelly) and a counter
+that resets daily both work.
+
 ### Logs
 
 The add-on's recent log lines (filter by level, search, live update) and the storage
@@ -76,7 +87,8 @@ All settings are stored in `/data/settings.json` and apply immediately when save
   - *Charge all SOC* – the value used by *Charge all* (98% by default).
 - **Sensors** – battery SOC, solar forecast today/tomorrow, PV power (W), PV production
   today (kWh), load power (W, kW is converted), consumption today (kWh), grid import
-  today (kWh), weather, probable outages.
+  today (kWh), grid energy meter for the monthly bill (kWh, e.g. Shelly EM), weather,
+  probable outages.
 - **Appliances** – your own list of devices with a power sensor (W or kW is converted):
   a name, the sensor, and *Depends on outdoor temperature* for anything that heats or
   cools (heat pump, AC). Add rows with **+ Add appliance**, remove them with **−**.

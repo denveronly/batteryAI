@@ -754,6 +754,72 @@ async function refreshMonths() {
   );
 }
 
+// Monthly bill (Economy sub-tab) ------------------------------------------------
+
+const openBillMonths = new Set();
+
+async function refreshBill() {
+  const year = $("billYear").value;
+  let data;
+  try {
+    data = await api(`api/bill${year ? `?year=${year}` : ""}`);
+  } catch (err) {
+    $("billNotes").replaceChildren(el("div", { class: "banner" }, `Could not load data: ${err.message}`));
+    return;
+  }
+  const cur = data.currency;
+  const money = (v) => (v === null || v === undefined ? "—" : `${fmt(v, 2)} ${cur}`);
+  const kwh = (v) => (v === null || v === undefined ? "—" : `${fmt(v, 1)} kWh`);
+  const monthLabel = (m) => new Date(`${m}-15T12:00:00`).toLocaleDateString([], { month: "long", year: "numeric" });
+
+  $("billYear").replaceChildren(...data.years.map((y) => el("option", y === data.year ? { value: y, selected: "" } : { value: y }, y)));
+  const notes = [];
+  if (!data.sensor) notes.push("Set a “Grid energy meter” (e.g. the Shelly EM total energy) or “Grid import today” sensor in Settings to record the monthly bill.");
+  else if (data.backfilling) notes.push("Reading this month's history of the meter from Home Assistant…");
+  else if (!data.meter) notes.push(`Waiting for the first value of ${data.sensor}.`);
+  $("billNotes").replaceChildren(...notes.map((n) => el("div", { class: "banner" }, n)));
+  $("billInfo").textContent = data.sensor ? `Meter: ${data.sensor}` : "";
+
+  // Per-tariff columns only when energy was recorded under more than one tariff (peak / off-peak);
+  // with a single price there is just the overall total.
+  const names = data.tariffs.length > 1 ? data.tariffs : [];
+  const now = new Date();
+  const current = data.months.find((m) => m.key === `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`);
+  $("billTiles").replaceChildren(
+    tile("This month", money(current?.cost ?? (data.year === now.getFullYear() ? 0 : null)), current ? `${fmt(current.kwh, 1)} kWh` : ""),
+    tile(`Year ${data.year}`, money(data.total.cost), `${fmt(data.total.kwh, 1)} kWh`),
+    ...names.map((n) => tile(`${n} ${data.year}`, money(data.total.by_tariff[n]?.cost ?? 0), `${fmt(data.total.by_tariff[n]?.kwh ?? 0, 1)} kWh`)),
+  );
+
+  const cells = (item) => [
+    ...names.flatMap((n) => {
+      const part = item.by_tariff[n];
+      return [el("td", { class: "num" }, part ? kwh(part.kwh) : "—"), el("td", { class: "num" }, part ? money(part.cost) : "—")];
+    }),
+    el("td", { class: "num" }, kwh(item.kwh)),
+    el("td", { class: "num" }, money(item.cost)),
+  ];
+  const header = ["Month", ...names.flatMap((n) => [`${n} kWh`, `${n} cost`]), "Overall kWh", "Overall grid cost"];
+  const rows = [];
+  for (const m of data.months) {
+    const open = openBillMonths.has(m.key);
+    const row = el("tr", { class: open ? "month open" : "month", title: "Show the days" }, el("td", { class: "nowrap" }, monthLabel(m.key)), ...cells(m));
+    row.addEventListener("click", () => {
+      if (openBillMonths.has(m.key)) openBillMonths.delete(m.key);
+      else openBillMonths.add(m.key);
+      refreshBill();
+    });
+    rows.push(row);
+    if (open) rows.push(...m.days.map((d) => el("tr", { class: "day" }, el("td", { class: "nowrap" }, shortDate(d.key)), ...cells(d))));
+  }
+  $("billTable").replaceChildren(
+    el("tr", {}, ...header.map((h, i) => el("th", { class: i ? "num" : "" }, h))),
+    ...(rows.length ? rows : [el("tr", {}, el("td", { class: "empty", colspan: header.length }, "Nothing recorded for this year yet."))]),
+    el("tr", { class: "total" }, el("td", {}, `Year ${data.year} total`), ...cells(data.total)),
+  );
+}
+$("billYear").addEventListener("change", refreshBill);
+
 // Logs tab ----------------------------------------------------------------------
 
 let logTimer = null;
@@ -1056,20 +1122,30 @@ applyTheme(currentTheme());
 
 // Tabs ---------------------------------------------------------------------------
 
+const OTHER_TABS = ["#settings", "#economy", "#economy-bill", "#logs"];
+
 function showTab() {
-  const tab = ["#settings", "#economy", "#logs"].includes(location.hash) ? location.hash.slice(1) : "dashboard";
+  const tab = OTHER_TABS.includes(location.hash) ? location.hash.slice(1).split("-")[0] : "dashboard";
+  const sub = location.hash === "#economy-bill" ? "bill" : "overview";
   $("view-dashboard").hidden = tab !== "dashboard";
   $("view-economy").hidden = tab !== "economy";
   $("view-settings").hidden = tab !== "settings";
   $("view-logs").hidden = tab !== "logs";
   $("dashActions").hidden = tab !== "dashboard";
-  document.querySelectorAll(".tabs a").forEach((a) => {
+  document.querySelectorAll(".tabs a[data-tab]").forEach((a) => {
     a.classList.toggle("active", a.dataset.tab === tab);
     a.setAttribute("aria-selected", a.dataset.tab === tab);
   });
   // Charts created while the dashboard was hidden have no size yet.
   if (tab === "dashboard" || tab === "economy") requestAnimationFrame(() => Object.values(charts).forEach((c) => c?.resize()));
-  if (tab === "economy") {
+  $("economyOverview").hidden = sub !== "overview";
+  $("economyBill").hidden = sub !== "bill";
+  document.querySelectorAll(".subtabs a").forEach((a) => {
+    a.classList.toggle("active", a.dataset.sub === sub);
+    a.setAttribute("aria-selected", a.dataset.sub === sub);
+  });
+  if (tab === "economy" && sub === "bill") refreshBill();
+  else if (tab === "economy") {
     refreshEconomy();
     refreshMonths();
   }
@@ -1081,7 +1157,7 @@ function showTab() {
 }
 window.addEventListener("hashchange", () => {
   showTab();
-  if (!["#settings", "#economy", "#logs"].includes(location.hash)) refresh();
+  if (!OTHER_TABS.includes(location.hash)) refresh();
 });
 
 showTab();

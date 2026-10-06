@@ -347,3 +347,12 @@ h1 .version { font-size: 12px; font-weight: 500; color: var(--muted); vertical-a
 .tariff-row { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(100px, 0.7fr) minmax(180px, 2fr) auto auto; gap: 8px 12px; align-items: end; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .tariff-row input:disabled { opacity: 0.55; }
 @media (max-width: 760px) { .tariff-row { grid-template-columns: 1fr 1fr; } .tariff-row .tariff-windows { grid-column: 1 / -1; } .tariff-row .appliance-buttons { justify-self: end; } }
+
+/* Economy sub-tabs and the monthly bill */
+.subtabs { display: inline-flex; width: fit-content; align-self: flex-start; margin-bottom: 12px; }
+.bill tr.month { cursor: pointer; }
+.bill tr.month td:first-child::before { content: "▸ "; color: var(--muted); }
+.bill tr.month.open td:first-child::before { content: "▾ "; }
+.bill tr.day td { color: var(--muted); font-size: 13px; }
+.bill tr.day td:first-child { padding-left: 24px; }
+.bill tr.total td { font-weight: 650; border-top: 2px solid var(--border); border-bottom: none; }

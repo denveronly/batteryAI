@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.10
+
+- Economy → **Monthly bill**: grid kWh and cost per month (current month first), per
+  tariff (e.g. peak / off-peak kWh and cost) or just overall with a single price, a year
+  total row, a year selector, and the days of a month on click.
+  - New setting *Grid energy meter* (Settings → Sensors), e.g. a Shelly EM total energy
+    sensor; without it the *Grid import today* sensor is used.
+  - Energy and cost are stored in the database at the price in effect when recorded, so
+    later tariff changes leave past months unchanged.
+  - This month so far is read from the Home Assistant history when a meter is first set.
+
 ## 0.4.9
 
 - New prediction engine: **ChatGPT** through the OpenAI API (Settings → Prediction

@@ -19,6 +19,7 @@ const SENSOR_GROUPS = [
       { key: "load_power_sensor", label: "Load power", hint: "W (kW is converted)", kind: "numeric" },
       { key: "today_consumption_sensor", label: "Today consumption", hint: "kWh counter, resets at midnight", kind: "numeric" },
       { key: "grid_import_sensor", label: "Grid import today", hint: "kWh counter (needed for the Economy tab)", kind: "numeric" },
+      { key: "bill_energy_sensor", label: "Grid energy meter", hint: "kWh, e.g. Shelly EM total energy – for the Monthly bill (empty = Grid import today)", kind: "numeric" },
     ],
   },
   {

@@ -29,6 +29,7 @@ SENSOR_KEYS = (
     "pv_energy_sensor",
     "pv_power_sensor",
     "grid_import_sensor",
+    "bill_energy_sensor",
 )
 # Settings saved by 0.1/0.2 used "today_load_sensor" for what is a load power sensor.
 LEGACY_KEYS = {"load_power_sensor": "today_load_sensor"}
@@ -125,6 +126,8 @@ class Options:
     pv_energy_sensor: str = ""
     pv_power_sensor: str = ""
     grid_import_sensor: str = ""
+    # Energy meter for the monthly bill (e.g. a Shelly EM total energy, kWh); empty = grid_import_sensor.
+    bill_energy_sensor: str = ""
     tariff_currency: str = "UAH"
     tariffs: list[Tariff] = field(default_factory=lambda: [
         Tariff(name="Off-peak", price=2.16, windows=["23:00-07:00"]),
@@ -165,6 +168,11 @@ class Options:
             "pv_power": self.pv_power_sensor,
             "grid_import_today": self.grid_import_sensor,
         }
+
+    @property
+    def bill_sensor(self) -> str:
+        """The meter the monthly bill is recorded from."""
+        return self.bill_energy_sensor or self.grid_import_sensor
 
     def analysis_times(self) -> list[tuple[int, int]]:
         minutes = sorted({int(t[:2]) * 60 + int(t[3:5]) for t in self.analysis_times_list})
