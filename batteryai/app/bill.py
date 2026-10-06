@@ -151,30 +151,30 @@ class BillRecorder:
 
 
 def reprice_month(db: Database, month: str, opts: Options) -> dict[str, Any]:
-    """On request only: recalculates one month's costs with the current tariffs. With a single
-    price every day becomes one total at that price; otherwise each tariff's kWh get the
-    current price of the tariff with that name (energy recorded under another name stays)."""
+    """On request only: sets one month's prices to the current tariffs and recalculates its
+    costs. With a single price every day becomes one total under that tariff; otherwise
+    energy recorded under a tariff name that no longer exists keeps its price."""
     rows = db.bill_rows(f"{month}-01", f"{month}-31")
+    old_prices = {tariff: price for (m, tariff), price in db.bill_prices(int(month[:4])).items() if m == month}
     prices = {t.name: t.price for t in opts.tariffs}
     entries: dict[tuple[str, str], tuple[float, float]] = {}
-    if opts.single_price:
-        name, price = (opts.tariffs[0].name, opts.tariffs[0].price) if opts.tariffs else ("", 0.0)
-        for row in rows:
-            kwh = entries.get((row["local_date"], name), (0.0, 0.0))[0] + row["kwh"]
-            entries[(row["local_date"], name)] = (kwh, kwh * price)
-    else:
-        for row in rows:
-            price = prices.get(row["tariff"])
-            entries[(row["local_date"], row["tariff"])] = (row["kwh"], row["kwh"] * price if price is not None else row["cost"])
-    db.replace_bill_month(month, entries)
+    used: dict[str, float] = {}
+    for row in rows:
+        if opts.single_price and opts.tariffs:
+            name = opts.tariffs[0].name
+        else:
+            name = row["tariff"]
+        price = prices.get(name, old_prices.get(name, row["cost"] / row["kwh"] if row["kwh"] else 0.0))
+        used[name] = price
+        kwh = entries.get((row["local_date"], name), (0.0, 0.0))[0] + row["kwh"]
+        entries[(row["local_date"], name)] = (kwh, kwh * price)
+    db.replace_bill_month(month, entries, used)
     return {"month": month, "days": len({day for day, _ in entries}), "cost": round(sum(c for _, c in entries.values()), 2)}
 
 
 def bill_report(db: Database, year: int, today: date, opts: Options) -> dict[str, Any]:
     """Months of one year with energy and cost per tariff, plus the year's total."""
     rows = db.bill_rows(f"{year:04d}-01-01", f"{year:04d}-12-31")
-    for row in rows:
-        row["tariff"] = row["tariff"] or "Single price"  # recorded without a name by 0.4.10
     # Most expensive tariff first (Peak before Off-peak); names no longer in the settings last.
     prices = {t.name: t.price for t in opts.tariffs}
     names = sorted({r["tariff"] for r in rows}, key=lambda n: (n not in prices, -prices.get(n, 0), n))
@@ -189,6 +189,7 @@ def bill_report(db: Database, year: int, today: date, opts: Options) -> dict[str
         target["kwh"] += row["kwh"]
         target["cost"] += row["cost"]
 
+    month_prices = db.bill_prices(year)
     months: dict[str, dict[str, Any]] = {}
     total = empty(str(year))
     for row in rows:
@@ -209,6 +210,7 @@ def bill_report(db: Database, year: int, today: date, opts: Options) -> dict[str
     out = []
     for key in sorted(months, reverse=True):
         month = rounded(months[key])
+        month["prices"] = {name: round(price, 4) for (m, name), price in month_prices.items() if m == key}
         month["days"] = [rounded(d) for _, d in sorted(month["days"].items(), reverse=True)]
         month["day_count"] = len(month["days"])
         out.append(month)

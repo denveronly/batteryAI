@@ -48,12 +48,14 @@ from the *Grid energy meter* sensor (for example a Shelly EM total energy, kWh; 
 converted) or, if that is empty, from *Grid import today*. With a peak / off-peak tariff
 each tariff has its own kWh and cost columns (the most expensive first) plus the overall
 kWh and grid cost; with a single tariff its name labels the kWh and cost columns. The last row is the year's total; click a month to see its days.
-The meter is read every recording interval and the energy is stored per day and tariff
-together with its cost at the price in effect then, so changing a tariff price later does
-not change months already recorded. When a meter is set for the first time, this month so
-far is taken from the Home Assistant history. A lifetime counter (Shelly) and a counter
-that resets daily both work. **Recalculate** on a month reprices it with the current
-tariffs (for example after setting the tariffs only once the month was already recorded).
+The meter is read every recording interval and the energy is stored per day and tariff.
+Each month keeps its own **price per kWh** for every tariff: it is taken from the tariffs in
+Settings when the month's first energy is recorded, so changing the tariffs later does not
+change months already started. Edit a month's price right in the table and that month's
+costs follow; **Use current prices** sets a month to the tariffs in Settings (with a single
+price the month becomes one total under that tariff). When a meter is set for the first
+time, this month so far is taken from the Home Assistant history. A lifetime counter
+(Shelly) and a counter that resets daily both work.
 
 ### Logs
 

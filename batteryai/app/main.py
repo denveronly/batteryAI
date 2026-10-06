@@ -835,6 +835,25 @@ async def bill_reprice(request: web.Request) -> web.Response:
     return web.json_response(result)
 
 
+@routes.post("/api/bill/price")
+async def bill_price(request: web.Request) -> web.Response:
+    """Body {"month": "2026-10", "tariff": "Peak", "price": 4.32}: that month's price per kWh."""
+    app = _app(request)
+    body = await request.json()
+    month, tariff = str(body.get("month", "")), str(body.get("tariff", ""))
+    if not re.fullmatch(r"\d{4}-\d{2}", month) or not tariff:
+        return web.json_response({"error": "month (2026-10) and tariff are needed"}, status=400)
+    try:
+        price = float(str(body.get("price")).replace(",", "."))
+        if price < 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return web.json_response({"error": "enter a price per kWh (0 or more)"}, status=400)
+    await asyncio.to_thread(app.db.set_bill_price, month, tariff, price)
+    _LOGGER.info("Monthly bill %s: %s price set to %s", month, tariff, price)
+    return web.json_response({"month": month, "tariff": tariff, "price": price})
+
+
 @routes.get("/api/backup")
 async def download_backup(request: web.Request) -> web.StreamResponse:
     """A zip of the database, settings and control state."""

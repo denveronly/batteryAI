@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.12
+
+- Monthly bill: each month keeps its own price per kWh per tariff, shown in the table
+  and editable there (the month's costs follow). A new month takes the prices from the
+  tariffs in Settings. **Use current prices** sets a month to the Settings prices.
+
 ## 0.4.11
 
 - **Charge before outages**: with a *Minutes to outage* sensor (e.g.

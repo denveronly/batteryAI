@@ -364,3 +364,4 @@ h1 .version { font-size: 12px; font-weight: 500; color: var(--muted); vertical-a
   background: var(--accent); color: var(--accent-text);
 }
 .button.secondary { background: var(--card); color: var(--accent); border-color: var(--border); }
+.bill .price-input { width: 90px; padding: 4px 6px; text-align: right; font: inherit; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--text); }

@@ -824,28 +824,46 @@ async function refreshBill() {
     ...names.map((n) => tile(`${n} ${data.year}`, money(data.total.by_tariff[n]?.cost ?? 0), `${fmt(data.total.by_tariff[n]?.kwh ?? 0, 1)} kWh`)),
   );
 
-  const cells = (item) => [
-    ...names.flatMap((n) => {
+  // Each tariff: kWh, the month's price (editable on month rows) and cost; with several
+  // tariffs also the overall kWh and cost.
+  const priced = single ? [single] : names;
+  const priceInput = (m, n) => {
+    const input = el("input", { type: "number", min: "0", step: "0.0001", class: "price-input", "aria-label": `${n} price ${m.key}`, title: `${n} price per kWh in ${monthLabel(m.key)}` });
+    input.value = m.prices?.[n] ?? "";
+    input.addEventListener("click", (e) => e.stopPropagation());
+    input.addEventListener("change", async () => {
+      const res = await api("api/bill/price", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ month: m.key, tariff: n, price: input.value }) })
+        .catch((err) => ({ error: err.message }));
+      if (res.error) alert(res.error);
+      refreshBill();
+    });
+    return input;
+  };
+  const cells = (item, month = null) => [
+    ...priced.flatMap((n) => {
       const part = item.by_tariff[n];
-      return [el("td", { class: "num" }, part ? kwh(part.kwh) : "—"), el("td", { class: "num" }, part ? money(part.cost) : "—")];
+      return [
+        el("td", { class: "num" }, part ? kwh(part.kwh) : "—"),
+        el("td", { class: "num" }, month && part ? priceInput(month, n) : ""),
+        el("td", { class: "num" }, part ? money(part.cost) : "—"),
+      ];
     }),
-    el("td", { class: "num" }, kwh(item.kwh)),
-    el("td", { class: "num" }, money(item.cost)),
+    ...(single ? [] : [el("td", { class: "num" }, kwh(item.kwh)), el("td", { class: "num" }, money(item.cost))]),
   ];
-  const header = ["Month", ...names.flatMap((n) => [`${n} kWh`, `${n} cost`]), single ? `${single} kWh` : "Overall kWh", single ? `${single} cost` : "Overall grid cost", ""];
+  const header = ["Month", ...priced.flatMap((n) => [`${n} kWh`, `${n} price, ${cur}/kWh`, `${n} cost`]), ...(single ? [] : ["Overall kWh", "Overall grid cost"]), ""];
   const rows = [];
   for (const m of data.months) {
     const open = openBillMonths.has(m.key);
-    const reprice = el("button", { type: "button", class: "secondary small", title: "Recalculate this month's costs with the current tariffs" }, "Recalculate");
+    const reprice = el("button", { type: "button", class: "secondary small", title: "Set this month's prices to the current tariffs in Settings" }, "Use current prices");
     reprice.addEventListener("click", async (e) => {
       e.stopPropagation();
-      if (!confirm(`Recalculate ${monthLabel(m.key)} with the current tariff prices? The costs recorded at the old prices are replaced.`)) return;
+      if (!confirm(`Set the prices of ${monthLabel(m.key)} to the current tariffs in Settings and recalculate its costs?`)) return;
       const res = await api("api/bill/reprice", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ month: m.key }) })
         .catch((err) => ({ error: err.message }));
       if (res.error) alert(res.error);
       refreshBill();
     });
-    const row = el("tr", { class: open ? "month open" : "month", title: "Show the days" }, el("td", { class: "nowrap" }, monthLabel(m.key)), ...cells(m), el("td", { class: "num" }, reprice));
+    const row = el("tr", { class: open ? "month open" : "month", title: "Show the days" }, el("td", { class: "nowrap" }, monthLabel(m.key)), ...cells(m, m), el("td", { class: "num" }, reprice));
     row.addEventListener("click", () => {
       if (openBillMonths.has(m.key)) openBillMonths.delete(m.key);
       else openBillMonths.add(m.key);

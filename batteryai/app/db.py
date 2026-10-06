@@ -57,6 +57,15 @@ CREATE TABLE IF NOT EXISTS bill_days (
     PRIMARY KEY (local_date, tariff)
 );
 
+-- The price per kWh of each tariff in each month: taken from the settings when the month's
+-- first energy of that tariff is recorded, editable in the Monthly bill.
+CREATE TABLE IF NOT EXISTS bill_prices (
+    month TEXT NOT NULL,
+    tariff TEXT NOT NULL,
+    price REAL NOT NULL,
+    PRIMARY KEY (month, tariff)
+);
+
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -141,6 +150,14 @@ class Database:
                             for r in rows
                         ],
                     )
+        # 0.4.10 stored a single price without a tariff name.
+        self._conn.execute("UPDATE OR IGNORE bill_days SET tariff = 'Single price' WHERE tariff = ''")
+        # Months recorded by 0.4.10/0.4.11 get the price their costs were recorded at.
+        self._conn.execute(
+            "INSERT OR IGNORE INTO bill_prices (month, tariff, price) "
+            "SELECT substr(local_date, 1, 7), tariff, SUM(cost) / SUM(kwh) FROM bill_days "
+            "GROUP BY 1, 2 HAVING SUM(kwh) > 0"
+        )
         existing = columns("analyses")
         for name, kind in NEW_ANALYSIS_COLUMNS.items():
             if name not in existing:
@@ -492,27 +509,66 @@ class Database:
         )
 
     def add_bill(self, entries: dict[tuple[str, str], tuple[float, float]], meter_key: str, meter: Any) -> None:
-        """Adds kWh and cost per (date, tariff) and stores the meter state, in one transaction."""
+        """Adds kWh per (date, tariff) and stores the meter state, in one transaction. The cost
+        uses the month's price of the tariff; a month's first energy of a tariff sets that
+        price from the settings price in entries (cost / kWh)."""
         with self._lock:
-            self._conn.executemany(
-                "INSERT INTO bill_days (local_date, tariff, kwh, cost) VALUES (?, ?, ?, ?) "
-                "ON CONFLICT(local_date, tariff) DO UPDATE SET kwh = kwh + excluded.kwh, cost = cost + excluded.cost",
-                [(day, tariff, kwh, cost) for (day, tariff), (kwh, cost) in entries.items()],
-            )
+            for (day, tariff), (kwh, cost) in entries.items():
+                month = day[:7]
+                if kwh > 0:
+                    self._conn.execute(
+                        "INSERT OR IGNORE INTO bill_prices (month, tariff, price) VALUES (?, ?, ?)",
+                        (month, tariff, cost / kwh),
+                    )
+                row = self._conn.execute(
+                    "SELECT price FROM bill_prices WHERE month = ? AND tariff = ?", (month, tariff)
+                ).fetchone()
+                self._conn.execute(
+                    "INSERT INTO bill_days (local_date, tariff, kwh, cost) VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(local_date, tariff) DO UPDATE SET kwh = kwh + excluded.kwh, cost = cost + excluded.cost",
+                    (day, tariff, kwh, kwh * row["price"] if row else cost),
+                )
             self._conn.execute(
                 "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (meter_key, json.dumps(meter)),
             )
             self._conn.commit()
 
-    def replace_bill_month(self, month: str, entries: dict[tuple[str, str], tuple[float, float]]) -> None:
+    def replace_bill_month(
+        self, month: str, entries: dict[tuple[str, str], tuple[float, float]], prices: dict[str, float]
+    ) -> None:
         with self._lock:
             self._conn.execute("DELETE FROM bill_days WHERE substr(local_date, 1, 7) = ?", (month,))
+            self._conn.execute("DELETE FROM bill_prices WHERE month = ?", (month,))
             self._conn.executemany(
                 "INSERT INTO bill_days (local_date, tariff, kwh, cost) VALUES (?, ?, ?, ?)",
                 [(day, tariff, kwh, cost) for (day, tariff), (kwh, cost) in entries.items()],
             )
+            self._conn.executemany(
+                "INSERT INTO bill_prices (month, tariff, price) VALUES (?, ?, ?)",
+                [(month, tariff, price) for tariff, price in prices.items()],
+            )
             self._conn.commit()
+
+    def set_bill_price(self, month: str, tariff: str, price: float) -> None:
+        """A month's price of one tariff, edited in the Monthly bill; its costs follow."""
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO bill_prices (month, tariff, price) VALUES (?, ?, ?) "
+                "ON CONFLICT(month, tariff) DO UPDATE SET price = excluded.price",
+                (month, tariff, price),
+            )
+            self._conn.execute(
+                "UPDATE bill_days SET cost = kwh * ? WHERE substr(local_date, 1, 7) = ? AND tariff = ?",
+                (price, month, tariff),
+            )
+            self._conn.commit()
+
+    def bill_prices(self, year: int) -> dict[tuple[str, str], float]:
+        return {
+            (r["month"], r["tariff"]): r["price"]
+            for r in self._query("SELECT month, tariff, price FROM bill_prices WHERE month LIKE ?", (f"{year:04d}-%",))
+        }
 
     def bill_rows(self, first_date: str, last_date: str) -> list[dict[str, Any]]:
         return self._query(
