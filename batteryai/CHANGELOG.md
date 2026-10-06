@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.18
+
+- **Tariff-aware charge before outages** (switch under *Charge before outages*; only with
+  several tariffs and an *Outage duration* sensor, e.g.
+  `sensor.svitlo_kiivska_oblast_2_2_longest_continuous_outage`):
+  - Outage in a pricier tariff (peak): charge only if the battery cannot carry the load
+    from now until the outage ends, and then only what the outage needs; the rest waits
+    for the cheap hours.
+  - Outage in the cheapest tariff (off-peak): charge for the whole outage, and when it runs
+    past the cheap hours, also until they return.
+  - The load is the recorded average per hour of day (weekday / weekend) plus the safety
+    margin; the pre-outage SOC is the upper limit. The dashboard shows the decision and why.
+  - With a single tariff, or without the duration sensor, the battery is charged to the
+    pre-outage SOC as before.
+
 ## 0.4.17
 
 - **Notification start text** (Settings → Phone notifications): starts every notification

@@ -374,3 +374,4 @@ h1 .version:empty { display: none; }
 .bank-name .bank-text.placeholder { color: var(--muted); font-weight: 500; }
 .bank-name .bank-edit { color: var(--muted); font-size: 13px; }
 .bank-name input { font: inherit; width: 220px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--text); }
+.switch.sub-switch { margin-left: 28px; }

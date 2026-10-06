@@ -27,6 +27,7 @@ import control
 import local_fast
 import local_llm
 import notify
+import outage_plan
 import openai_engine
 import backup
 from bill import BillRecorder, bill_report, reprice_month
@@ -69,6 +70,9 @@ class BatteryAI:
         self.outage_minutes: float | None = None  # from the outage minutes sensor
         self.outage_minutes_ts: float | None = None
         self._outage_lock = asyncio.Lock()
+        self.outage_plan: dict[str, Any] | None = None  # the latest tariff-aware decision
+        self.outage_duration: float | None = None
+        self._profile: tuple[float, dict[tuple[int, int], float]] = (0.0, {})
 
     def spawn(self, coro: Any) -> asyncio.Task:
         task = asyncio.create_task(coro)
@@ -195,6 +199,10 @@ class BatteryAI:
             if moved_on or now > running["outage_at"] + 12 * 3600:
                 await self.end_precharge(running)
             return
+        if minutes is not None and minutes > 0:
+            await self.tariff_aware_plan(now, now + minutes * 60)  # shown on the dashboard
+        else:
+            self.outage_plan = None
         if minutes is None or not self.control.get("precharge_enabled", True) or not 0 < minutes <= threshold:
             return
         if self.control["mode"] == "charge_all" or not any(p.soc_entity for p in self.opts.deye_programs):
@@ -203,9 +211,16 @@ class BatteryAI:
         done = self.control.get("precharge_done_for")
         if done and abs(outage_at - done) < 1800:
             return  # already charged for this outage (and stopped by hand)
+        soc = self.opts.outage_precharge_soc_percent
+        reason = f"An outage is expected in {minutes:.0f} minutes; all programs are set to {soc}% with grid charge on."
+        decision = await self.tariff_aware_plan(now, outage_at)
+        if decision is not None:
+            if not decision["charge"]:
+                return  # checked again every minute (the SOC may drop)
+            soc = decision["target_soc"]
+            reason = decision["reason"]
         previous_mode = self.control["mode"]
         socs = await control.read_socs(self.ha, self.opts) if previous_mode == "off" else {}
-        soc = self.opts.outage_precharge_soc_percent
         actions = await control.charge_all(self.ha, self.opts, self.control, soc)
         self.control.update(
             mode="charge_all", since=now, last_actions=actions, precharge_done_for=outage_at,
@@ -214,10 +229,28 @@ class BatteryAI:
         control.save_state(self.control)
         at = datetime.fromtimestamp(outage_at, self.tz).strftime("%H:%M")
         _LOGGER.info("Outage in %.0f minutes (%s): charging every program to %d%%: %s", minutes, at, soc, actions)
-        await self.notify_actions(
-            actions, f"outage at {at}, charging to {soc}%",
-            f"An outage is expected in {minutes:.0f} minutes; all programs are set to {soc}% with grid charge on.",
-        )
+        await self.notify_actions(actions, f"outage at {at}, charging to {soc}%", reason)
+
+    async def read_outage_duration(self) -> float | None:
+        state = await self.ha.state(self.opts.outage_duration_sensor) if self.opts.outage_duration_sensor else None
+        self.outage_duration = outage_plan.duration_minutes(state)
+        return self.outage_duration
+
+    async def tariff_aware_plan(self, now: float, outage_at: float) -> dict[str, Any] | None:
+        """The tariff-aware decision, or None when it does not apply (switched off, a single
+        price, or no outage duration): then the battery is charged to the pre-outage SOC."""
+        self.outage_plan = None
+        if not self.control.get("precharge_smart", True) or self.opts.single_price:
+            return None
+        duration = await self.read_outage_duration()
+        if not duration:
+            return None
+        if time.time() - self._profile[0] > 3600:
+            profile = await asyncio.to_thread(self.db.hourly_profile, int(now) - 14 * 86400)
+            self._profile = (time.time(), outage_plan.load_profile(profile))
+        soc = (self.last_snapshot or {}).get("battery_soc")
+        self.outage_plan = outage_plan.plan(self.opts, self.tz, now, outage_at, duration, self._profile[1], soc)
+        return self.outage_plan
 
     async def end_precharge(self, running: dict[str, Any]) -> None:
         previous = running.get("previous_mode") or "off"
@@ -641,11 +674,16 @@ async def status(request: web.Request) -> web.Response:
                 "precharge": app.control.get("precharge"),
                 "precharge_minutes": opts.outage_precharge_minutes,
                 "precharge_soc": opts.outage_precharge_soc_percent,
+                "precharge_smart": app.control.get("precharge_smart", True),
+                "precharge_smart_applies": not opts.single_price and bool(opts.outage_duration_sensor),
+                "outage_plan": app.outage_plan,
             },
             "outage_minutes": {
                 "entity": opts.outage_minutes_sensor,
                 "minutes": app.outage_minutes,
                 "ts": app.outage_minutes_ts,
+                "duration_entity": opts.outage_duration_sensor,
+                "duration": app.outage_duration,
             },
             "history_import": app.history_import,
             "warnings": warnings,
@@ -935,7 +973,14 @@ async def set_battery_name(request: web.Request) -> web.Response:
 async def set_precharge(request: web.Request) -> web.Response:
     """Body {"enabled": bool}: charge before an outage on/off; off also ends a running one."""
     app = _app(request)
-    enabled = bool((await request.json()).get("enabled"))
+    body = await request.json()
+    if "smart" in body:
+        app.control["precharge_smart"] = bool(body["smart"])
+        control.save_state(app.control)
+        _LOGGER.info("Tariff-aware charge before outages %s", "on" if body["smart"] else "off")
+        await app.check_outage()
+        return web.json_response({"smart": app.control["precharge_smart"]})
+    enabled = bool(body.get("enabled"))
     app.control["precharge_enabled"] = enabled
     control.save_state(app.control)
     _LOGGER.info("Charge before outages %s", "on" if enabled else "off")

@@ -1,5 +1,5 @@
 name: BatteryAI
-version: "0.4.17"
+version: "0.4.18"
 slug: batteryai
 description: Records battery, solar and load data and uses Claude to plan Deye battery SOC
 url: https://github.com/denveronly/batteryai

@@ -28,6 +28,7 @@ const SENSOR_GROUPS = [
       { key: "weather_entity", label: "Weather", hint: "weather.* entity (forecast) or a temperature sensor", kind: "weather" },
       { key: "outages_sensor", label: "Probable outages", hint: "optional, any state", kind: "text" },
       { key: "outage_minutes_sensor", label: "Minutes to outage", hint: "optional, e.g. sensor.svitlo_kyiv_4_1_minutes_to_outage – charges the battery before an outage", kind: "numeric" },
+      { key: "outage_duration_sensor", label: "Outage duration", hint: "optional, e.g. sensor.svitlo_..._longest_continuous_outage – how long the battery must last (tariff-aware charging)", kind: "text" },
     ],
   },
 ];

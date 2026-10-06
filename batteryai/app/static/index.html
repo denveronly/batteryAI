@@ -88,6 +88,10 @@
           <input type="checkbox" id="prechargeToggle">
           <span id="prechargeLabel">Charge before outages <span class="hint">— set every program to 100% with grid charge on 90 minutes before an outage</span></span>
         </label>
+        <label class="switch sub-switch">
+          <input type="checkbox" id="prechargeSmart">
+          <span>Tariff-aware <span class="hint">— charge only what the outage needs: in a pricier tariff only if the battery cannot last until the outage ends; in the cheapest tariff for the outage (and until the cheap hours return)</span></span>
+        </label>
         <p class="muted" id="prechargeInfo"></p>
         <div class="control-buttons">
           <button type="button" id="chargeAll" class="warn-button">Charge all to 98%</button>

@@ -191,6 +191,18 @@ advice-only mode the SOC values from before are restored. Turning AI auto-contro
 pressing *Charge all* ends it early; it then does not start again for the same outage.
 The Probable outages tile shows how long until the next outage.
 
+**Tariff-aware** (switch under *Charge before outages*, with several tariffs and an
+*Outage duration* sensor such as `sensor.svitlo_kiivska_oblast_2_2_longest_continuous_outage`;
+a number in hours or minutes by its unit, or H:MM): instead of always charging to the
+pre-outage SOC, BatteryAI works out the energy needed from the recorded average load per
+hour (plus the safety margin):
+- outage in a pricier tariff: it charges only if the battery cannot last from now until
+  the outage ends, and only what the outage itself needs – topping up waits for the cheap
+  hours;
+- outage in the cheapest tariff: it charges for the whole outage, and if the outage runs
+  past the cheap hours, also for the time until they return.
+The Battery control card shows the decision and the reason before the outage.
+
 ## History and database size
 
 All history is kept – nothing is deleted. *History sent to Claude* only limits the daily

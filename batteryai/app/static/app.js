@@ -505,8 +505,11 @@ function renderControl() {
   $("prechargeToggle").disabled = !c.can_write || !o.entity;
   $("prechargeLabel").replaceChildren(
     "Charge before outages ",
-    el("span", { class: "hint" }, `— set every program to ${c.precharge_soc}% with grid charge on ${fmtDuration(c.precharge_minutes)} before an outage`),
+    el("span", { class: "hint" }, `— set every program to ${c.precharge_smart && c.precharge_smart_applies ? "up to " : ""}${c.precharge_soc}% with grid charge on ${fmtDuration(c.precharge_minutes)} before an outage`),
   );
+  $("prechargeSmart").checked = c.precharge_smart;
+  $("prechargeSmart").disabled = !c.precharge_enabled || !c.can_write || !o.entity;
+  $("prechargeSmart").closest("label").hidden = !c.precharge_smart_applies;
   const at = (ts) => new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   $("prechargeInfo").textContent = !o.entity
     ? "Set the “Minutes to outage” sensor in Settings to charge before outages."
@@ -514,7 +517,8 @@ function renderControl() {
       ? `⚡ Charging to ${c.precharge.soc}% for the outage at ${at(c.precharge.outage_at)}; afterwards back to ${MODE_TEXT[c.precharge.previous_mode] || c.precharge.previous_mode}.`
       : o.minutes === null || o.minutes === undefined
         ? `${o.entity} has no value right now.`
-        : o.minutes <= 0 ? "Outage now." : `Next outage ${outageInText(o).replace(/^next /, "")}.`;
+        : o.minutes <= 0 ? "Outage now." : `Next outage ${outageInText(o).replace(/^next /, "")}${o.duration ? ` for ${fmtDuration(o.duration)}` : ""}.`
+          + (c.precharge_smart && c.outage_plan ? ` ${c.outage_plan.charge ? "⚡ Will charge: " : "✓ "}${c.outage_plan.reason}` : "");
   const since = c.since ? ` since ${fmtTime(c.since)}` : "";
   $("controlInfo").textContent = !c.can_write
     ? "Configure the Deye program SOC entities in Settings to control the inverter."
@@ -613,6 +617,7 @@ async function controlAction(path, body) {
 }
 
 $("autoToggle").addEventListener("change", (e) => controlAction("api/control", { mode: e.target.checked ? "auto" : "off" }));
+$("prechargeSmart").addEventListener("change", (e) => controlAction("api/control/precharge", { smart: e.target.checked }));
 $("prechargeToggle").addEventListener("change", (e) => controlAction("api/control/precharge", { enabled: e.target.checked }));
 $("chargeAll").addEventListener("click", () => {
   const soc = status?.control?.charge_all_soc ?? 98;

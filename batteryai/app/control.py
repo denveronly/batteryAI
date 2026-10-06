@@ -31,6 +31,7 @@ def load_state() -> dict[str, Any]:
     state.setdefault("since", None)
     state.setdefault("saved_switches", {})
     state.setdefault("precharge_enabled", True)  # charge before an outage (outage minutes sensor)
+    state.setdefault("precharge_smart", True)  # tariff-aware: charge only what the outage needs
     state.setdefault("precharge", None)  # the running pre-outage charge, see BatteryAI.check_outage
     return state
 

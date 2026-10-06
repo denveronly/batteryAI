@@ -31,6 +31,7 @@ SENSOR_KEYS = (
     "grid_import_sensor",
     "bill_energy_sensor",
     "outage_minutes_sensor",
+    "outage_duration_sensor",
 )
 # Settings saved by 0.1/0.2 used "today_load_sensor" for what is a load power sensor.
 LEGACY_KEYS = {"load_power_sensor": "today_load_sensor"}
@@ -146,6 +147,9 @@ class Options:
     # Minutes until the next outage (e.g. sensor.svitlo_..._minutes_to_outage): this long
     # before it every program is set to the pre-outage SOC with grid charge on.
     outage_minutes_sensor: str = ""
+    # Length of the coming outage (e.g. sensor.svitlo_..._longest_continuous_outage), for the
+    # tariff-aware pre-outage charge.
+    outage_duration_sensor: str = ""
     outage_precharge_minutes: int = 90
     outage_precharge_soc_percent: int = 100
     battery_capacity_kwh: float = 10.0
