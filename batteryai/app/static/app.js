@@ -944,6 +944,41 @@ async function refreshBill() {
     ...(rows.length ? rows : [el("tr", {}, el("td", { class: "empty", colspan: header.length }, "Nothing recorded for this year yet."))]),
     el("tr", { class: "total" }, el("td", {}, `Year ${data.year} total`), ...cells(data.total), el("td")),
   );
+  renderBillAppliances(data, money, kwh, monthLabel);
+}
+
+// Appliances in the Monthly bill: one row per appliance and month, with the year's total.
+function renderBillAppliances(data, money, kwh, monthLabel) {
+  let tariffs;
+  const months = data.appliance_months || [];
+  $("billAppliancesBox").hidden = !months.length;
+  if (!months.length) return;
+  // Only the tariffs the appliances used, in the bill's order; one tariff = just the totals.
+  const used = new Set(months.flatMap((m) => m.appliances.flatMap((a) => Object.keys(a.by_tariff))));
+  tariffs = data.tariffs.filter((t) => used.has(t));
+  if (tariffs.length < 2) tariffs = [];
+  const monthCost = Object.fromEntries(data.months.map((m) => [m.key, m.cost]));
+  const share = (cost, total) => (total ? `${fmt((cost / total) * 100, 0)} %` : "—");
+  const row = (label, a, total, cls = "") =>
+    el("tr", cls ? { class: cls } : {},
+      el("td", { class: "nowrap" }, label),
+      el("td", {}, a.name, a.removed ? el("span", { class: "hint" }, " (removed)") : ""),
+      ...tariffs.flatMap((t) => {
+        const part = a.by_tariff[t];
+        return [el("td", { class: "num" }, part ? kwh(part.kwh) : "—"), el("td", { class: "num" }, part ? money(part.cost) : "—")];
+      }),
+      el("td", { class: "num" }, kwh(a.kwh)),
+      el("td", { class: "num" }, money(a.cost)),
+      el("td", { class: "num" }, share(a.cost, total)),
+    );
+  const header = ["Month", "Appliance", ...tariffs.flatMap((t) => [`${t} kWh`, `${t} cost`]), "kWh", "Cost", "Share of bill"];
+  const rows = months.flatMap((m) => m.appliances.map((a, i) => row(i ? "" : monthLabel(m.key), a, monthCost[m.key], i ? "" : "group-start")));
+  const totals = (data.appliance_total || []).map((a, i) => row(i ? "" : `Year ${data.year}`, a, data.total.cost, i ? "total-more" : "total"));
+  $("billAppliances").replaceChildren(
+    el("tr", {}, ...header.map((h, i) => el("th", { class: i > 1 ? "num" : "" }, h))),
+    ...rows,
+    ...totals,
+  );
 }
 $("billYear").addEventListener("change", refreshBill);
 

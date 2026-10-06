@@ -390,11 +390,13 @@ class BatteryAI:
     async def recorder_loop(self) -> None:
         interval = self.opts.record_interval_minutes * 60
         while True:
+            snapshot = None
             try:
-                await self.record()
+                snapshot = await self.record()
             except Exception:  # keep recording even if one cycle fails
                 _LOGGER.exception("Recording failed")
             try:
+                await asyncio.to_thread(self.bill.record_appliances, self.opts, self.tz, snapshot)
                 await self.bill.record(self.ha, self.opts, self.tz)
             except Exception:
                 _LOGGER.exception("Recording the monthly bill failed")

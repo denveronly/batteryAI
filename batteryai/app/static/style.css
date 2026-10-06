@@ -375,3 +375,5 @@ h1 .version:empty { display: none; }
 .bank-name .bank-edit { color: var(--muted); font-size: 13px; }
 .bank-name input { font: inherit; width: 220px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--text); }
 .switch.sub-switch { margin-left: 28px; }
+.bill tr.group-start td { border-top: 2px solid var(--border); }
+.bill tr.total-more td { font-weight: 650; border-bottom: none; }

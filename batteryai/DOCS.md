@@ -57,6 +57,12 @@ price the month becomes one total under that tariff). When a meter is set for th
 time, this month so far is taken from the Home Assistant history. A lifetime counter
 (Shelly) and a counter that resets daily both work.
 
+Below the bill, **Appliances** shows each appliance's kWh and cost per month (per tariff
+when there are several), its share of the month's grid cost and the year's total. The
+energy is integrated from the appliance's power sensor every recording interval and
+stored per day and tariff from the moment the appliance is added; earlier months never
+get it. It is priced with the month's price of each tariff.
+
 ### Logs
 
 **Backup**: *Download backup* saves a zip with the database (readings, predictions,

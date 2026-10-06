@@ -57,6 +57,16 @@ CREATE TABLE IF NOT EXISTS bill_days (
     PRIMARY KEY (local_date, tariff)
 );
 
+-- Energy of each appliance per day and tariff, recorded live from its power sensor from the
+-- moment it is configured (never backfilled). Its cost uses the month's price (bill_prices).
+CREATE TABLE IF NOT EXISTS bill_appliances (
+    local_date TEXT NOT NULL,
+    appliance TEXT NOT NULL,
+    tariff TEXT NOT NULL,
+    kwh REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (local_date, appliance, tariff)
+);
+
 -- The price per kWh of each tariff in each month: taken from the settings when the month's
 -- first energy of that tariff is recorded, editable in the Monthly bill.
 CREATE TABLE IF NOT EXISTS bill_prices (
@@ -224,7 +234,7 @@ class Database:
         path = self._conn.execute("PRAGMA database_list").fetchone()["file"]
         files = {suffix: os.path.getsize(path + suffix) for suffix in ("", "-wal", "-shm") if os.path.exists(path + suffix)}
         tables = {}
-        for name in ("readings", "analyses", "bill_days"):
+        for name in ("readings", "analyses", "bill_days", "bill_appliances"):
             tables[name] = self._query(f"SELECT COUNT(*) AS n FROM {name}")[0]["n"]
         span = self._query("SELECT MIN(ts) AS first, MAX(ts) AS last FROM readings")[0]
         sources = {row["source"] or "live": row["n"] for row in self._query("SELECT source, COUNT(*) AS n FROM readings GROUP BY source")}
@@ -561,6 +571,50 @@ class Database:
             self._conn.execute(
                 "UPDATE bill_days SET cost = kwh * ? WHERE substr(local_date, 1, 7) = ? AND tariff = ?",
                 (price, month, tariff),
+            )
+            self._conn.commit()
+
+    def add_bill_appliances(
+        self, entries: dict[tuple[str, str, str], float], prices: dict[str, float], meter_key: str, state: Any
+    ) -> None:
+        """Adds appliance kWh per (date, appliance, tariff); a month without a price for the
+        tariff yet takes it from prices (the settings). Stores the sampling state."""
+        with self._lock:
+            for (day, appliance, tariff), kwh in entries.items():
+                if tariff in prices:
+                    self._conn.execute(
+                        "INSERT OR IGNORE INTO bill_prices (month, tariff, price) VALUES (?, ?, ?)",
+                        (day[:7], tariff, prices[tariff]),
+                    )
+                self._conn.execute(
+                    "INSERT INTO bill_appliances (local_date, appliance, tariff, kwh) VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(local_date, appliance, tariff) DO UPDATE SET kwh = kwh + excluded.kwh",
+                    (day, appliance, tariff, kwh),
+                )
+            self._conn.execute(
+                "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (meter_key, json.dumps(state)),
+            )
+            self._conn.commit()
+
+    def bill_appliance_rows(self, first_date: str, last_date: str) -> list[dict[str, Any]]:
+        return self._query(
+            "SELECT local_date, appliance, tariff, kwh FROM bill_appliances WHERE local_date >= ? AND local_date <= ? "
+            "ORDER BY local_date, appliance, tariff",
+            (first_date, last_date),
+        )
+
+    def merge_appliance_tariffs(self, month: str, tariff: str) -> None:
+        """A month switched to a single price: its appliance energy goes under that tariff."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT local_date, appliance, SUM(kwh) AS kwh FROM bill_appliances "
+                "WHERE substr(local_date, 1, 7) = ? GROUP BY local_date, appliance", (month,)
+            ).fetchall()
+            self._conn.execute("DELETE FROM bill_appliances WHERE substr(local_date, 1, 7) = ?", (month,))
+            self._conn.executemany(
+                "INSERT INTO bill_appliances (local_date, appliance, tariff, kwh) VALUES (?, ?, ?, ?)",
+                [(r["local_date"], r["appliance"], tariff, r["kwh"]) for r in rows],
             )
             self._conn.commit()
 

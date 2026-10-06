@@ -21,6 +21,9 @@ from history import _fetch
 
 _LOGGER = logging.getLogger(__name__)
 
+APPLIANCES_KEY = "bill_appliances"  # meta: {"ts", "w": {appliance id: W}} of the last sample
+# Longest gap between two appliance samples that is still integrated (as for the readings).
+APPLIANCE_GAP = 15 * 60
 METER_KEY = "bill_meter"  # meta: {"entity", "value", "ts"} of the last meter reading
 # Longest gap between two meter readings whose energy is still spread over the gap; after
 # longer outages the energy is booked anyway, over the last MAX_SPREAD_DAYS.
@@ -111,6 +114,34 @@ class BillRecorder:
             state = self.step(opts, tz, entity, value, datetime.now(tz).timestamp(), meter, entries)
             self.db.add_bill(entries, METER_KEY, state)
 
+    def record_appliances(self, opts: Options, tz: tzinfo, snapshot: dict[str, Any] | None) -> None:
+        """Integrates each configured appliance's power since the previous sample into
+        bill_appliances (per day and tariff). Only live samples count, so an appliance
+        appears from the moment it is added, never in earlier months."""
+        if not snapshot:
+            return
+        ts = float(snapshot["ts"])
+        current = {
+            a.id: snapshot.get("appliances", {}).get(a.id)
+            for a in opts.appliances if a.entity and snapshot.get("appliances", {}).get(a.id) is not None
+        }
+        previous = self.db.meta_get(APPLIANCES_KEY) or {}
+        entries: dict[tuple[str, str, str], float] = {}
+        gap = ts - float(previous.get("ts") or 0)
+        if 0 < gap <= APPLIANCE_GAP:
+            for app_id, watts in (previous.get("w") or {}).items():
+                if app_id not in current or watts is None:
+                    continue  # removed (or unavailable now)
+                kwh = max(0.0, (watts + current[app_id]) / 2) * gap / 3_600_000
+                split_entries: Entries = {}
+                split(opts, tz, ts - gap, ts, kwh, split_entries)
+                for (day, tariff), (part, _cost) in split_entries.items():
+                    entries[(day, app_id, tariff)] = entries.get((day, app_id, tariff), 0.0) + part
+        names = {**(previous.get("names") or {}), **{a.id: a.name for a in opts.appliances}}
+        self.db.add_bill_appliances(
+            entries, {t.name: t.price for t in opts.tariffs}, APPLIANCES_KEY, {"ts": ts, "w": current, "names": names}
+        )
+
     async def backfill(self, ha: HomeAssistant, opts: Options, tz: tzinfo, since_ts: float | None) -> None:
         """First reading of a meter: take this month so far from the Home Assistant recorder
         (as far as it keeps history), then continue live. After switching to another meter,
@@ -168,7 +199,14 @@ def reprice_month(db: Database, month: str, opts: Options) -> dict[str, Any]:
         used[name] = price
         kwh = entries.get((row["local_date"], name), (0.0, 0.0))[0] + row["kwh"]
         entries[(row["local_date"], name)] = (kwh, kwh * price)
+    if opts.single_price and opts.tariffs:
+        used.setdefault(opts.tariffs[0].name, opts.tariffs[0].price)
+    else:
+        for tariff in opts.tariffs:
+            used.setdefault(tariff.name, tariff.price)  # also prices appliance energy
     db.replace_bill_month(month, entries, used)
+    if opts.single_price and opts.tariffs:
+        db.merge_appliance_tariffs(month, opts.tariffs[0].name)
     return {"month": month, "days": len({day for day, _ in entries}), "cost": round(sum(c for _, c in entries.values()), 2)}
 
 
@@ -214,8 +252,36 @@ def bill_report(db: Database, year: int, today: date, opts: Options) -> dict[str
         month["days"] = [rounded(d) for _, d in sorted(month["days"].items(), reverse=True)]
         month["day_count"] = len(month["days"])
         out.append(month)
+    # Appliances: kWh per tariff, priced with the month's price of that tariff.
+    settings_prices = {t.name: t.price for t in opts.tariffs}
+    configured = {a.id for a in opts.appliances}
+    names_by_id = {**((db.meta_get(APPLIANCES_KEY) or {}).get("names") or {}), **{a.id: a.name for a in opts.appliances}}
+    appliance_months: dict[str, dict[str, dict[str, Any]]] = {}
+    appliance_total: dict[str, dict[str, Any]] = {}
+    for row in db.bill_appliance_rows(f"{year:04d}-01-01", f"{year:04d}-12-31"):
+        month_key = row["local_date"][:7]
+        price = month_prices.get((month_key, row["tariff"]), settings_prices.get(row["tariff"], 0.0))
+        for target in (appliance_months.setdefault(month_key, {}), appliance_total):
+            entry = target.setdefault(row["appliance"], {"kwh": 0.0, "cost": 0.0, "by_tariff": {}})
+            part = entry["by_tariff"].setdefault(row["tariff"], {"kwh": 0.0, "cost": 0.0})
+            for item in (entry, part):
+                item["kwh"] += row["kwh"]
+                item["cost"] += row["kwh"] * price
+
+    def rounded_appliances(group: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+        return [
+            {"id": app_id, "name": names_by_id.get(app_id, app_id), "removed": app_id not in configured, **rounded(entry)}
+            for app_id, entry in sorted(group.items(), key=lambda kv: -kv[1]["kwh"])
+        ]
+
+    appliances = [
+        {"key": key, "appliances": rounded_appliances(appliance_months[key])}
+        for key in sorted(appliance_months, reverse=True)
+    ]
     years = sorted(set(db.bill_years()) | {today.year}, reverse=True)
     return {
+        "appliance_months": appliances,
+        "appliance_total": rounded_appliances(appliance_total),
         "year": year,
         "years": years,
         "tariffs": names,

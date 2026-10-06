@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.20
+
+- Monthly bill → **Appliances**: kWh and cost of each appliance per month (per tariff with
+  several tariffs), its share of the month's bill, and the year's total. Recorded live
+  from each appliance's power sensor from the moment it is added – an appliance added
+  this month never shows up in earlier months. Costs use the month's price per tariff, so
+  editing a month's price or *Use current prices* updates the appliances too.
+
 ## 0.4.19
 
 - **Emergency outages** sensor (Settings → Sensors, optional): while it is on, the
