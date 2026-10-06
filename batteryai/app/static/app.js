@@ -470,7 +470,12 @@ async function saveBankName(save) {
     const res = await api("api/battery_name", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: input.value }) })
       .catch((err) => ({ error: err.message }));
     if (res.error) alert(res.error);
-    else status.battery_name = res.name;
+    else {
+      status.battery_name = res.name;
+      // Keep an open Settings form in step, so saving it does not bring the old name back.
+      const field = document.querySelector('#settingsForm [name="battery_name"]');
+      if (field) field.value = res.name;
+    }
   }
   renderBankName();
 }

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.16
+
+- The battery bank name sits on the title row next to the BatteryAI logo and version
+  (click to edit), and can also be edited in Settings → Prediction tuning
+  (*Battery bank name*).
+
 ## 0.4.15
 
 - **Solar forecast correction** (Settings → Prediction tuning, 1–200%): today's and

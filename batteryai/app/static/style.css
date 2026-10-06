@@ -368,8 +368,9 @@ h1 .version:empty { display: none; }
 .bill .price-input { width: 90px; padding: 4px 6px; text-align: right; font: inherit; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--text); }
 
 /* Battery bank name in the header (click to edit) */
-.bank-name { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 10px; background: var(--chip); font-weight: 650; cursor: text; max-width: 260px; }
+.title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px; }
+.bank-name { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 10px; background: var(--chip); font-size: 17px; font-weight: 650; cursor: text; max-width: 340px; }
 .bank-name .bank-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bank-name .bank-text.placeholder { color: var(--muted); font-weight: 500; }
 .bank-name .bank-edit { color: var(--muted); font-size: 13px; }
-.bank-name input { font: inherit; width: 180px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--text); }
+.bank-name input { font: inherit; width: 220px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--text); }

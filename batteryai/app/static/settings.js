@@ -35,7 +35,7 @@ const SENSORS = SENSOR_GROUPS.flatMap((g) => g.rows);
 const NUMBER_FIELDS = ["record_interval_minutes", "history_days", "detail_days", "local_llm_threads", "prediction_margin_percent", "min_soc_percent",
   "max_soc_percent", "apply_threshold_percent", "charge_all_soc_percent",
   "outage_precharge_minutes", "outage_precharge_soc_percent", "solar_forecast_percent"];
-const TEXT_FIELDS = ["claude_effort", "response_language", "extra_instructions", "tariff_currency", "program_time_marks", "prediction_engine", "openai_effort"];
+const TEXT_FIELDS = ["battery_name", "claude_effort", "response_language", "extra_instructions", "tariff_currency", "program_time_marks", "prediction_engine", "openai_effort"];
 const PRICE_FIELDS = ["battery_capacity_kwh"];
 
 const ENGINE_HELP = {
@@ -548,6 +548,8 @@ form.addEventListener("submit", async (event) => {
       await loadModels(true);
       fillForm(body);
       initModelSelect(true);
+      if (status) status.battery_name = body.battery_name;
+      renderBankName();
       showResult(result, "ok", "✓ Saved and applied");
     }
   } catch (err) {

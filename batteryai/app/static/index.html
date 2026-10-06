@@ -17,6 +17,7 @@
 <body>
   <header class="topbar">
     <div>
+      <div class="title-row">
       <h1 class="brand">
         <svg class="logo" viewBox="0 0 64 64" aria-hidden="true">
           <circle cx="11" cy="11" r="6" fill="#f2a900"/>
@@ -36,15 +37,16 @@
         </svg>
         BatteryAI <span class="version" id="version"></span>
       </h1>
-      <p class="muted" id="schedule">Loading…</p>
-    </div>
-    <div class="header-right">
-    <span class="bank-name" id="bankName" title="Battery bank name – click to edit">
+      <span class="bank-name" id="bankName" title="Battery bank name – click to edit">
       <span class="bank-icon" aria-hidden="true">🔋</span>
       <span id="bankNameText" class="bank-text"></span>
       <input type="text" id="bankNameInput" maxlength="40" placeholder="e.g. Home battery" aria-label="Battery bank name" hidden>
       <span class="bank-edit" aria-hidden="true">✎</span>
     </span>
+      </div>
+      <p class="muted" id="schedule">Loading…</p>
+    </div>
+    <div class="header-right">
     <nav class="tabs" role="tablist">
       <a href="#dashboard" role="tab" data-tab="dashboard">Dashboard</a>
       <a href="#economy" role="tab" data-tab="economy">Economy</a>
@@ -398,6 +400,10 @@
           <label>Apply threshold (%)
             <input type="number" name="apply_threshold_percent" min="0" max="50" step="1">
             <span class="hint">Only rewrite a program when the new SOC differs by at least this much.</span>
+          </label>
+          <label>Battery bank name
+            <input type="text" name="battery_name" maxlength="40" placeholder="e.g. Home battery">
+            <span class="hint">Shown at the top of the panel; you can also click it there to edit.</span>
           </label>
           <label>Battery capacity (kWh)
             <input type="number" name="battery_capacity_kwh" min="0.1" step="0.1">
