@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.14
+
+- Fix: phone notifications failing with "HTTP 400: Bad Request".
+  - A service entered without its prefix (e.g. `iphone_denis`) is sent to
+    `notify.mobile_app_iphone_denis` when only that exists; an unknown service names the
+    ones Home Assistant has.
+  - If Home Assistant rejects the phone options (tap action, button, grouping), the
+    notification is sent again without them instead of not at all.
+
 ## 0.4.13
 
 - Monthly bill: months recorded with tariffs that are no longer in Settings (for example

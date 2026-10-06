@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from collector import program_ranges
@@ -34,11 +35,51 @@ async def send(
     errors = []
     for service in opts.notify_services:
         try:
-            await ha.call_service("notify", service, {"title": title, "message": message, "data": extra})
+            name = await resolve_service(ha, service)
+            try:
+                await ha.call_service("notify", name, {"title": title, "message": message, "data": extra})
+            except HAError as err:
+                if err.kind != "http" or "400" not in str(err):
+                    raise
+                # Some notify integrations reject the phone options (tag, push, actions, url):
+                # send the plain notification instead of none.
+                await ha.call_service("notify", name, {"title": title, "message": message})
+                _LOGGER.warning("notify.%s rejected the phone options (%s); sent without them", name, err)
         except HAError as err:
             _LOGGER.warning("Notification via notify.%s failed: %s", service, err)
             errors.append(f"notify.{service}: {err}")
     return errors
+
+
+_services_cache: tuple[float, set[str]] = (0.0, set())
+
+
+async def notify_services(ha: HomeAssistant) -> set[str]:
+    """Names of Home Assistant's notify services (cached for 10 minutes)."""
+    global _services_cache
+    if time.time() - _services_cache[0] < 600 and _services_cache[1]:
+        return _services_cache[1]
+    domains = await ha.request("/services")
+    names = set(next((d.get("services") or {} for d in domains if d.get("domain") == "notify"), {}))
+    _services_cache = (time.time(), names)
+    return names
+
+
+async def resolve_service(ha: HomeAssistant, service: str) -> str:
+    """The notify service to call: as configured, or mobile_app_<name> when only that exists
+    (phones are notify.mobile_app_<device>). Raises HAError naming the available ones."""
+    try:
+        names = await notify_services(ha)
+    except HAError:
+        return service  # cannot check; just try it
+    if service in names:
+        return service
+    if f"mobile_app_{service}" in names:
+        _LOGGER.info("notify.%s does not exist; using notify.mobile_app_%s", service, service)
+        return f"mobile_app_{service}"
+    phones = sorted(n for n in names if n.startswith("mobile_app_"))
+    available = ", ".join(f"notify.{n}" for n in (phones or sorted(names))[:8]) or "none"
+    raise HAError("not_found", f"notify.{service} does not exist in Home Assistant (available: {available})")
 
 
 def _num(value: Any, digits: int = 1) -> str:
