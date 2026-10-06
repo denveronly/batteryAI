@@ -1127,6 +1127,8 @@ async def test_notify(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "Enter a notify service first."})
     try:
         test_opts = dataclasses.replace(app.opts, notify_services=[service])
+        if "prefix" in body:  # the value in the form, saved or not
+            test_opts.notify_prefix = str(body.get("prefix") or "").strip()[:40]
         errors = await notify.send(
             app.ha, test_opts, "🔋 BatteryAI: test",
             "Test notification from BatteryAI ✓\nThe first lines are the brief. Pull this notification down "

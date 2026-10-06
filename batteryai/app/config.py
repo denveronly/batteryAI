@@ -161,9 +161,16 @@ class Options:
     settings_version: int = SETTINGS_VERSION
     extra_instructions: str = ""
     notify_services: list[str] = field(default_factory=list)
+    # Put at the start of every notification title, to tell several BatteryAI instances
+    # apart; empty = the battery bank name.
+    notify_prefix: str = ""
     notify_predictions: bool = True
     notify_soc_changes: bool = True
     notify_errors: bool = True
+
+    @property
+    def notification_prefix(self) -> str:
+        return self.notify_prefix or self.battery_name
 
     def adjust_forecast(self, value: float | None) -> float | None:
         """A solar forecast (kWh) with the solar forecast correction applied."""
@@ -306,6 +313,7 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         charge_all_soc_percent=integer("charge_all_soc_percent", 10, 100),
         solar_forecast_percent=integer("solar_forecast_percent", 1, 200),
         battery_name=text("battery_name")[:40],
+        notify_prefix=text("notify_prefix")[:40],
         outage_precharge_minutes=integer("outage_precharge_minutes", 5, 720),
         outage_precharge_soc_percent=integer("outage_precharge_soc_percent", 10, 100),
     )

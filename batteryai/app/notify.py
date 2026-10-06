@@ -21,6 +21,7 @@ async def send(
     kind: notifications of the same kind replace each other on the phone (a new plan replaces
     the previous plan), different kinds stay side by side, grouped under BatteryAI.
     url: the BatteryAI panel; tapping the notification or its "Open BatteryAI" button opens it.
+    The title starts with the notification prefix (or the battery bank name) when one is set.
     Returns error messages; failures are logged but never stop the caller.
     """
     extra: dict[str, Any] = {
@@ -32,6 +33,8 @@ async def send(
         extra["url"] = url  # iOS: tap opens this page
         extra["clickAction"] = url  # Android: tap opens this page
         extra["actions"] = [{"action": "URI", "title": "Open BatteryAI", "uri": url}]
+    if opts.notification_prefix:
+        title = f"{opts.notification_prefix} · {title}"
     errors = []
     for service in opts.notify_services:
         try:

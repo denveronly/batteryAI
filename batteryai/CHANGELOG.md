@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.17
+
+- **Notification start text** (Settings → Phone notifications): starts every notification
+  title, e.g. "Garage · 🔋 BatteryAI: new plan", to tell several BatteryAI instances apart.
+  Empty = the battery bank name. The test button uses the value in the form.
+
 ## 0.4.16
 
 - The battery bank name sits on the title row next to the BatteryAI logo and version

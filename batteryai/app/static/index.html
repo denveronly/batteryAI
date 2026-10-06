@@ -478,6 +478,10 @@
             <datalist id="notifyList"></datalist>
             <span class="hint" id="notifyHint">Phones from the Home Assistant Companion app appear as mobile_app_…</span>
           </label>
+          <label>Notification start text
+            <input type="text" name="notify_prefix" maxlength="40" placeholder="the battery bank name" autocomplete="off">
+            <span class="hint">Starts every notification title, e.g. “Garage · 🔋 BatteryAI: new plan”, so you can tell which BatteryAI is writing. Empty = the battery bank name.</span>
+          </label>
         </div>
         <fieldset class="weekend">
           <legend>Send a notification for</legend>
