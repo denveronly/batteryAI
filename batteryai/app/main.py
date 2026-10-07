@@ -235,51 +235,61 @@ class BatteryAI:
         await self.notify_actions(actions, f"outage at {at}, charging to {soc}%", reason)
 
     async def _check_emergency(self, now: float, running: dict[str, Any] | None) -> bool:
-        """Emergency outages (emergency outage sensor on): with "Charge on emergency outages"
-        every program goes to the pre-outage SOC with grid charge on right away, and the
-        outage schedule and AI predictions are ignored until the sensor turns off; then the
-        previous mode (and SOC values) come back. Returns True when it handled this check."""
+        """Emergency outages (emergency outage sensor on) with "Charge on emergency outages":
+        every program is held at the pre-outage SOC with grid charge on, and the outage
+        schedule and AI predictions are ignored until the sensor turns off; then the previous
+        mode (and SOC values) come back. It cannot be switched off by hand meanwhile: a mode
+        change starts it again right away, and every minute the programs are checked and put
+        back if anything changed them. Untick the switch to stop it. Returns True when it
+        handled this check."""
         sensor = self.opts.emergency_outage_sensor
         self.emergency = bool(sensor) and outage_plan.is_on(await self.ha.state(sensor))
-        if running and running.get("emergency"):
-            if self.control["mode"] != "charge_all":
-                self.control["precharge"] = None  # stopped by hand; not again until it turns off
-                control.save_state(self.control)
-            elif not self.emergency:
-                _LOGGER.info("Emergency outages are over")
-                self.control.pop("emergency_done", None)
-                await self.end_precharge(running)
-            return True
-        if not self.emergency:
-            if self.control.pop("emergency_done", None):
-                control.save_state(self.control)
-            return False
-        if (
-            not self.control.get("emergency_enabled", True)
-            or self.control.get("emergency_done")
-            or not any(p.soc_entity for p in self.opts.deye_programs)
-            or (self.control["mode"] == "charge_all" and not running)  # Charge all by hand
-        ):
-            return False
+        enabled = self.control.get("emergency_enabled", True)
         soc = self.opts.outage_precharge_soc_percent
-        if running:  # a scheduled pre-outage charge becomes the emergency charge
-            previous_mode, socs = running.get("previous_mode") or "off", running.get("socs") or {}
-        else:
-            previous_mode = self.control["mode"]
+        if running and running.get("emergency"):
+            if not self.emergency or not enabled:
+                _LOGGER.info("Emergency charge over (%s)", "outages ended" if not self.emergency else "switched off")
+                await self.end_precharge(running)
+            elif self.control["mode"] != "charge_all":
+                # The mode was changed by hand: charge again, and return to that mode afterwards.
+                await self._start_emergency(now, self.control["mode"], soc, "the mode was changed, charging again")
+            else:
+                actions = await control.ensure_charge(self.ha, self.opts, soc)
+                if actions:
+                    _LOGGER.info("Emergency charge: programs put back: %s", actions)
+                    await self.notify_actions(
+                        actions, "emergency charge restored",
+                        f"Emergency outages are still on: programs were changed, so they are set back to {soc}% with "
+                        "grid charge on. Untick “Charge on emergency outages” to stop it.",
+                    )
+            return True
+        if not self.emergency or not enabled or not any(p.soc_entity for p in self.opts.deye_programs):
+            return False
+        if self.control["mode"] == "charge_all" and not running:
+            return False  # Charge all by hand is already charging
+        previous_mode = (running.get("previous_mode") or "off") if running else self.control["mode"]
+        await self._start_emergency(now, previous_mode, soc, None, (running or {}).get("socs"))
+        return True
+
+    async def _start_emergency(
+        self, now: float, previous_mode: str, soc: int, why: str | None, socs: dict[str, float] | None = None
+    ) -> None:
+        if socs is None:
             socs = await control.read_socs(self.ha, self.opts) if previous_mode == "off" else {}
         actions = await control.charge_all(self.ha, self.opts, self.control, soc)
         self.control.update(
-            mode="charge_all", since=now, last_actions=actions, emergency_done=True,
+            mode="charge_all", since=now, last_actions=actions,
             precharge={"emergency": True, "outage_at": now, "previous_mode": previous_mode, "socs": socs, "soc": soc, "started": now},
         )
+        self.control.pop("emergency_done", None)
         control.save_state(self.control)
-        _LOGGER.info("Emergency outages: charging every program to %d%%: %s", soc, actions)
+        _LOGGER.info("Emergency outages: charging every program to %d%%%s: %s", soc, f" ({why})" if why else "", actions)
         await self.notify_actions(
             actions, f"emergency outages, charging to {soc}%",
-            f"Emergency outages are on: all programs are set to {soc}% with grid charge on. The outage schedule "
-            "and AI predictions are ignored until emergency outages end.",
+            f"Emergency outages are on{f' ({why})' if why else ''}: all programs are set to {soc}% with grid charge on. "
+            "The outage schedule and AI predictions are ignored until emergency outages end. Untick “Charge on "
+            "emergency outages” to stop it.",
         )
-        return True
 
     async def read_outage_duration(self) -> float | None:
         state = await self.ha.state(self.opts.outage_duration_sensor) if self.opts.outage_duration_sensor else None
@@ -1026,8 +1036,10 @@ async def set_control(request: web.Request) -> web.Response:
     mode = (await request.json()).get("mode")
     if mode not in ("off", "auto"):
         return web.json_response({"error": "mode must be off or auto"}, status=400)
-    actions = await _app(request).set_mode(mode)
-    return web.json_response({"mode": mode, "actions": actions})
+    app = _app(request)
+    actions = await app.set_mode(mode)
+    await app.check_outage()  # emergency outages on: the emergency charge starts again right away
+    return web.json_response({"mode": app.control["mode"], "actions": actions})
 
 
 @routes.post("/api/control/charge_all")

@@ -536,6 +536,8 @@ function renderControl() {
     ? `🚨 Emergency outages: charging to ${c.precharge.soc}%; the outage schedule and AI predictions are ignored until they end, then back to ${MODE_TEXT[c.precharge.previous_mode] || c.precharge.previous_mode}.`
     : o.emergency && c.emergency_enabled && c.mode === "charge_all"
       ? "🚨 Emergency outages are on (Charge all is already active)."
+      : o.emergency && c.emergency_enabled
+        ? "🚨 Emergency outages are on: the emergency charge starts within a minute."
       : !o.entity
     ? "Set the “Minutes to outage” sensor in Settings to charge before outages."
     : c.precharge

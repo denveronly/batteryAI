@@ -190,6 +190,32 @@ async def charge_all(
     return actions
 
 
+async def ensure_charge(ha: HomeAssistant, opts: Options, soc: float) -> list[dict[str, Any]]:
+    """While a charge is held (emergency outages): puts back any program whose SOC is below
+    soc or whose grid charge is off. Returns the changes (none when all is as it should be)."""
+    actions = []
+    for program in opts.deye_programs:
+        if program.soc_entity:
+            try:
+                current = to_float((await ha.fetch_state(program.soc_entity)).get("state"))
+                if current is not None and current < soc - 0.5:
+                    actions.append({"slot": program.slot, "entity_id": program.soc_entity, "time": time.time(),
+                                    "status": "set", **await set_soc(ha, program.soc_entity, soc)})
+            except HAError as err:
+                actions.append({"slot": program.slot, "entity_id": program.soc_entity, "status": "error", "error": str(err)})
+        if program.charge_entity:
+            try:
+                state = (await ha.fetch_state(program.charge_entity)).get("state")
+                if not charge_is_on(state):
+                    actions.append({"slot": program.slot, "entity_id": program.charge_entity, "kind": "grid_charge",
+                                    "time": time.time(), "status": "set", "from": state,
+                                    **await set_switch(ha, program.charge_entity, True)})
+            except HAError as err:
+                actions.append({"slot": program.slot, "entity_id": program.charge_entity, "kind": "grid_charge",
+                                "status": "error", "error": str(err)})
+    return actions
+
+
 async def read_socs(ha: HomeAssistant, opts: Options) -> dict[str, float]:
     """Current SOC of every program entity, to put back after a pre-outage charge."""
     socs = {}

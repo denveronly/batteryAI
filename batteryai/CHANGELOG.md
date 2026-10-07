@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.27
+
+- **Charge on emergency outages** is enforced while emergency outages are on and the switch
+  is ticked: changing the mode by hand (e.g. AI auto-control) starts the emergency charge
+  again right away, and every minute the programs are checked – a lower SOC or grid charge
+  turned off is put back. Untick the switch to stop it. Before, a mode change stopped it
+  until the emergency ended, so predictions could write programs without grid charge.
+
 ## 0.4.26
 
 - Night grid charge with **several tariffs** follows the tariffs:

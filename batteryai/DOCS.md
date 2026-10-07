@@ -209,7 +209,7 @@ and keep this switch on in the Battery control card. While the sensor is on, eve
 is held at the *Pre-outage SOC* with grid charge on, right away – the outage schedule and
 the AI predictions are ignored until it turns off. Then the previous mode comes back (AI
 auto-control re-applies the latest prediction; in advice-only mode the previous SOC values
-are restored). If you stop it by hand, it stays off until the sensor turns off again.
+are restored). It cannot be stopped by hand while the emergency lasts: a mode change starts it again right away, and every minute programs changed by anything else are put back. Untick the switch to stop it.
 
 **Charge before scheduled outages**:
 Set *Minutes to outage* (Settings → Sensors; the minutes and SOC are in Prediction tuning), for example
