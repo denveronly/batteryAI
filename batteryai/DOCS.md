@@ -192,8 +192,12 @@ the outage falls in daylight and PV is expected to cover it.
 
 A prediction made before 13:00 plans **today** (today's programs are still ahead); a later
 one plans tomorrow. In the evening and night programs (the hours without PV in your
-recorded data) grid charge always stays on, so the battery can recharge if an unplanned
-emergency outage comes; when outages are likely (scheduled, emergency, or recorded on any
+recorded data) grid charge stays on with a single tariff, so the battery can recharge if an
+unplanned emergency outage comes; with several tariffs it is on in the cheapest tariff and,
+in a pricier one, only when the battery would not last until the cheapest tariff begins
+(consumption and PV from your history, plus the margin) – then only to the SOC that needs,
+and during the cheap hours tonight's cheap programs charge more instead of charging at the
+higher price; when outages are likely (scheduled, emergency, or recorded on any
 of the last 7 days) these programs are also kept at the *Night reserve* SOC (Settings →
 Prediction tuning, 100% by default, 0 = off). With **Don't touch grid charge** (Battery
 control) predictions only set the SOC and never change the grid-charge switches.

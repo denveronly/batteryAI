@@ -501,6 +501,7 @@ class BatteryAI:
         changed = planning.apply_night_reserve(
             result, self.opts, snapshot, planning.night_hours(profile),
             planning.outages_likely(snapshot, outage_days), self.control.get("keep_grid_charge", False),
+            profile=profile, now_ts=float(snapshot["ts"]), tz=self.tz,
         )
         if changed:
             _LOGGER.info("Night reserve applied to programs %s", changed)

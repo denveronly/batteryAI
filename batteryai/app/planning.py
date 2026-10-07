@@ -72,15 +72,124 @@ def outages_likely(snapshot: dict[str, Any], outage_days: list[str]) -> str | No
     return None
 
 
+def _profile_w(profile: list[dict[str, Any]], key: str) -> dict[tuple[int, int], float]:
+    return {(p["is_weekend"], p["hour"]): p[key] for p in profile if p.get(key) is not None}
+
+
+def _avg_w(values: dict[tuple[int, int], float], local: datetime, opts: Options, default: float) -> float:
+    weekend = int(WEEKDAYS[local.weekday()] in opts.weekend_days)
+    value = values.get((weekend, local.hour), values.get((1 - weekend, local.hour)))
+    return default if value is None else value
+
+
+def _net_steps(
+    opts: Options, tz: tzinfo, loads: dict, pv: dict, pv_scale: float, start: float, end: float
+) -> list[float]:
+    """kWh into (+) or out of (−) the battery per 15 minutes between two moments, from the
+    recorded average load and PV per hour (PV scaled to the solar forecast)."""
+    steps, ts = [], start
+    while ts < end:
+        step = min(900, end - ts)
+        local = datetime.fromtimestamp(ts, tz)
+        load = _avg_w(loads, local, opts, 1000.0)
+        sun = _avg_w(pv, local, opts, 0.0) * pv_scale
+        steps.append((sun - load) * step / 3_600_000)
+        ts += step
+    return steps
+
+
+def _simulate(stored: float, steps: list[float], headroom: float) -> tuple[float, float]:
+    """(energy at the end, lowest level) of the battery above the minimum SOC; the sun can
+    only fill it up to the maximum SOC."""
+    level = low = stored
+    for delta in steps:
+        level = min(headroom, level + delta)
+        low = min(low, level)
+        level = max(0.0, level)  # empty: the grid covers the rest
+    return level, low
+
+
+def _next_start(now: datetime, minute: int) -> float:
+    """The next time a program starting at minute of day begins (now if it is running)."""
+    today = now.replace(hour=minute // 60, minute=minute % 60, second=0, microsecond=0)
+    return today.timestamp() if today >= now else (today + timedelta(days=1)).timestamp()
+
+
+def survives_until_cheap(
+    opts: Options, tz: tzinfo, now_ts: float, soc: float | None, program_start: int, program_running: bool,
+    profile: list[dict[str, Any]], solar_forecast_kwh: float | None, cheap_soc: float | None = None,
+) -> dict[str, Any] | None:
+    """Several tariffs, a night program in a pricier tariff that comes before the next cheap
+    tariff: with the battery as it is now, the sun until then and the expected consumption
+    (plus the margin), does it last until the cheapest tariff begins? None when the program
+    only starts after the next cheap period (a later prediction decides it)."""
+    from outage_plan import next_cheap  # outage_plan imports collector, like this module
+
+    now = datetime.fromtimestamp(now_ts, tz)
+    # The horizon: from now (or, in the cheap tariff now, from its end – the battery is
+    # charged there to the cheap programs' SOC) until the next cheap tariff begins.
+    origin = now_ts
+    if opts.is_cheap(now.hour * 60 + now.minute):
+        origin = now_ts
+        while origin < now_ts + 86400 and opts.is_cheap(datetime.fromtimestamp(origin, tz).hour * 60 + datetime.fromtimestamp(origin, tz).minute):
+            origin += 60
+    if origin > now_ts:
+        program_running = False  # its pricier part is over; the next occurrence counts
+    start = max(origin, now_ts if program_running else _next_start(now, program_start))
+    if not program_running and _next_start(datetime.fromtimestamp(origin, tz), program_start) > next_cheap(opts, tz, origin):
+        return None  # starts after the next cheap period: a later prediction decides it
+    start = max(origin, _next_start(datetime.fromtimestamp(origin, tz), program_start)) if not program_running else start
+    cheap_at = next_cheap(opts, tz, start)
+    loads, pv = _profile_w(profile, "load_power"), _profile_w(profile, "pv_power")
+    day_pv = sum(_avg_w(pv, datetime(2026, 1, 5, h), opts, 0.0) for h in range(24)) / 1000  # a weekday
+    pv_scale = (solar_forecast_kwh / day_pv) if solar_forecast_kwh and day_pv > 0.5 else 1.0
+    margin = 1 + opts.prediction_margin_percent / 100
+    capacity = opts.battery_capacity_kwh
+    headroom = (opts.max_soc_percent - opts.min_soc_percent) / 100 * capacity
+    stored = max(0.0, ((soc if soc is not None else opts.min_soc_percent) - opts.min_soc_percent) / 100 * capacity)
+    if origin > now_ts:  # cheap now: what the night leaves, at least the cheap programs' SOC
+        stored = max(_simulate(stored, _net_steps(opts, tz, loads, pv, pv_scale, now_ts, origin), headroom)[0], 0.0)
+        if cheap_soc is not None:
+            stored = max(stored, (cheap_soc - opts.min_soc_percent) / 100 * capacity)
+    before = _net_steps(opts, tz, loads, pv, pv_scale, origin, start)
+    during = [d * margin if d < 0 else d for d in _net_steps(opts, tz, loads, pv, pv_scale, start, cheap_at)]
+    available, _ = _simulate(stored, before, headroom)
+    # The smallest energy at the program's start that never runs out before the cheap tariff.
+    lo, hi = 0.0, headroom
+    for _ in range(25):
+        mid = (lo + hi) / 2
+        lo, hi = (lo, mid) if _simulate(mid, during, headroom)[1] >= 0 else (mid, hi)
+    need = hi
+    # In the cheap tariff now: the energy the cheap hours must leave in the battery instead.
+    whole = before + during
+    lo, hi = 0.0, headroom
+    for _ in range(25):
+        mid = (lo + hi) / 2
+        lo, hi = (lo, mid) if _simulate(mid, whole, headroom)[1] >= 0 else (mid, hi)
+    return {
+        "cheap_now": origin > now_ts,
+        "soc_needed_from_cheap": min(opts.max_soc_percent, round(opts.min_soc_percent + hi / capacity * 100)),
+        "survives": available + 1e-6 >= need,
+        "available_kwh": round(max(0.0, available), 1),
+        "need_kwh": round(need, 1),
+        "cheap_at": datetime.fromtimestamp(cheap_at, tz).strftime("%H:%M"),
+        "soc_needed": min(opts.max_soc_percent, round(opts.min_soc_percent + need / capacity * 100)),
+    }
+
+
 def apply_night_reserve(
     result: dict[str, Any], opts: Options, snapshot: dict[str, Any], night: set[int], reason: str | None,
-    keep_grid_charge: bool,
+    keep_grid_charge: bool, profile: list[dict[str, Any]] | None = None, now_ts: float | None = None,
+    tz: tzinfo | None = None,
 ) -> list[int]:
     """Evening/night programs (mostly hours without PV):
-    - grid charge always stays on (unless grid charge is left alone), so the battery can
-      recharge before an unplanned emergency outage – a prediction never turns it off there;
+    - one tariff: grid charge always stays on, so the battery can recharge before an
+      unplanned emergency outage;
+    - several tariffs: on in programs of the cheapest tariff; in pricier ones only when the
+      battery would not last until the cheapest tariff (consumption and PV), then with the
+      SOC that needs;
     - when outages are likely (reason), their SOC is raised to the night reserve.
-    Returns the slots it changed."""
+    Nothing touches grid charge when it is left alone. Returns the slots it changed."""
     reserve = min(opts.night_reserve_soc_percent, opts.max_soc_percent) if reason else 0
     times = {p["slot"]: p.get("time") for p in snapshot.get("deye_programs") or []}
     programs = [
@@ -88,13 +197,37 @@ def apply_night_reserve(
         for p in result.get("deye_programs") or [] if isinstance(p, dict) and p.get("slot") is not None
     ]
     ranges = program_ranges(programs, opts.program_time_marks == "end")
+    now_ts = now_ts if now_ts is not None else snapshot.get("ts")
+    now_minute = None
+    if tz is not None and now_ts is not None:
+        local_now = datetime.fromtimestamp(now_ts, tz)
+        now_minute = local_now.hour * 60 + local_now.minute
+    def span_minutes(span: tuple[int, int]) -> list[int]:
+        start, end = span
+        return list(range(start, end if end > start else end + 1440, 60))
+
+    # The SOC the cheapest-tariff programs charge to from the grid (several tariffs).
+    cheap_socs = [
+        p.get("soc_percent") for p in result.get("deye_programs") or []
+        if ranges.get(p.get("slot")) and ranges[p["slot"]][0] != ranges[p["slot"]][1]
+        and p.get("grid_charge") is not False and p.get("soc_percent") is not None
+        and sum(opts.is_cheap(m % 1440) for m in span_minutes(ranges[p["slot"]])) * 2 >= len(span_minutes(ranges[p["slot"]]))
+    ]
+    cheap_soc = max(cheap_socs) if cheap_socs else None
+    cheap_slots = [
+        p["slot"] for p in result.get("deye_programs") or []
+        if ranges.get(p.get("slot")) and ranges[p["slot"]][0] != ranges[p["slot"]][1] and p.get("grid_charge") is not None
+        and sum(opts.is_cheap(m % 1440) for m in span_minutes(ranges[p["slot"]])) * 2 >= len(span_minutes(ranges[p["slot"]]))
+    ] if not opts.single_price and not keep_grid_charge else []
+    cheap_raise = 0
     changed, raised = [], []
     for program in result.get("deye_programs") or []:
         span = ranges.get(program.get("slot"))
         if not span or span[0] == span[1]:
             continue
         start, end = span
-        hours = {(m // 60) % 24 for m in range(start, end if end > start else end + 1440, 60)}
+        minutes = span_minutes(span)
+        hours = {(m // 60) % 24 for m in minutes}
         if not hours or len(hours & night) * 2 < len(hours):
             continue  # mostly daytime: PV charges the battery there
         notes = []
@@ -102,12 +235,64 @@ def apply_night_reserve(
             program["soc_percent"] = reserve
             notes.append(f"Night reserve {reserve}%: {reason}.")
             raised.append(program["slot"])
-        if not keep_grid_charge and program.get("grid_charge") is False:
-            program["grid_charge"] = True
-            notes.append("Grid charge stays on at night, so the battery can recharge for an unplanned outage.")
+        if not keep_grid_charge and program.get("grid_charge") is not None:
+            if opts.single_price:
+                if program["grid_charge"] is False:
+                    program["grid_charge"] = True
+                    notes.append("Grid charge stays on at night, so the battery can recharge for an unplanned outage.")
+            elif sum(opts.is_cheap(m % 1440) for m in minutes) * 2 >= len(minutes):
+                if program["grid_charge"] is False:
+                    program["grid_charge"] = True
+                    notes.append("Cheapest tariff at night: grid charge on.")
+            elif profile is not None and tz is not None and now_ts is not None:
+                running = now_minute is not None and (
+                    start <= now_minute < end if start < end else now_minute >= start or now_minute < end
+                )
+                check = survives_until_cheap(
+                    opts, tz, now_ts, snapshot.get("battery_soc"), start, running, profile,
+                    (snapshot.get("plan_day") or {}).get("solar_forecast_kwh"), cheap_soc,
+                )
+                if check is None:
+                    pass  # starts after the next cheap period: the next prediction decides it
+                elif check["survives"]:
+                    if program["grid_charge"]:
+                        program["grid_charge"] = False
+                        notes.append(
+                            f"Pricier tariff: the battery (~{check['available_kwh']} kWh) lasts until the cheap tariff at "
+                            f"{check['cheap_at']} (~{check['need_kwh']} kWh needed), so no grid charge."
+                        )
+                elif check["cheap_now"] and cheap_slots:
+                    # Cheaper: charge more in tonight's cheap hours instead of in the pricier tariff.
+                    cheap_raise = max(cheap_raise, check["soc_needed_from_cheap"])
+                    if program["grid_charge"]:
+                        program["grid_charge"] = False
+                    notes.append(
+                        f"Pricier tariff: the battery would not last until the cheap tariff at {check['cheap_at']} "
+                        f"(~{check['need_kwh']} kWh needed), so the cheap hours tonight charge it to "
+                        f"{check['soc_needed_from_cheap']}% instead of charging here."
+                    )
+                else:
+                    program["grid_charge"] = True
+                    program["soc_percent"] = max(program.get("soc_percent") or 0, check["soc_needed"])
+                    notes.append(
+                        f"Pricier tariff, but the battery (~{check['available_kwh']} kWh) would not last until the cheap "
+                        f"tariff at {check['cheap_at']} (~{check['need_kwh']} kWh needed): grid charge on to "
+                        f"{program['soc_percent']}%."
+                    )
         if notes:
             program["reason"] = f"{program.get('reason') or ''} {' '.join(notes)}".strip()
             changed.append(program["slot"])
+    if cheap_raise:
+        for program in result.get("deye_programs") or []:
+            if program.get("slot") in cheap_slots and (program.get("soc_percent") or 0) < cheap_raise:
+                program["soc_percent"] = cheap_raise
+                program["grid_charge"] = True
+                program["reason"] = (
+                    f"{program.get('reason') or ''} Cheapest tariff: charged to {cheap_raise}% so the battery lasts "
+                    "through the pricier hours until the next cheap tariff."
+                ).strip()
+                if program["slot"] not in changed:
+                    changed.append(program["slot"])
     if raised:
         slots = ", ".join(f"P{s}" for s in raised)
         result["summary"] = f"{result.get('summary') or ''} Night reserve: {slots} at {reserve}% ({reason}).".strip()

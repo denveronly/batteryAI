@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.26
+
+- Night grid charge with **several tariffs** follows the tariffs:
+  - programs in the cheapest tariff: grid charge on;
+  - programs in a pricier tariff: grid charge only when the battery would not last until
+    the cheapest tariff begins (battery now, sun until then and the recorded consumption
+    and PV per hour, plus the safety margin), and then only to the SOC that needs;
+  - in the cheap tariff now (e.g. the 23:00 run): when tomorrow's pricier hours would run
+    short, tonight's cheap programs charge more instead of charging at the higher price.
+- With a single tariff the night programs keep grid charge on, as before. The night reserve
+  when outages are likely and *Don't touch grid charge* work as before.
+
 ## 0.4.25
 
 - **Grid charge as a select**: Deye integrations that expose a program's grid charge as a
