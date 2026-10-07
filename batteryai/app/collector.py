@@ -329,7 +329,12 @@ async def collect(ha: HomeAssistant, opts: Options, tz: tzinfo) -> dict[str, Any
             missing.append(program.soc_entity)
         entry: dict[str, Any] = {"slot": program.slot, "time": time_value, "soc": soc_value}
         if program.charge_entity:
-            entry["grid_charge"] = charge_value
+            # "on"/"off" for a switch or a select (Deye: Disabled / Grid / …); the raw state too.
+            text = (charge_value or "").lower()
+            entry["grid_charge"] = None if charge_value is None else (
+                "on" if text in ("on", "true", "yes", "enabled", "enable", "1") or "grid" in text else "off"
+            )
+            entry["grid_charge_state"] = charge_value
         programs.append(entry)
     snapshot["deye_programs"] = programs
 

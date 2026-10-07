@@ -66,7 +66,7 @@ The inverter has six programs. Each covers a time range and keeps the battery at
 Rules:
 - Grid power costs what the tariff of the hour says (see tariff and tariff_by_hour). Charge from the grid in the cheapest tariff's programs only as much as the following pricier hours need beyond what PV covers.
 - In programs of pricier tariffs let the battery discharge (low SOC, grid_charge false).
-- If tariff.single_price is true the price is the same all day: keep grid_charge false and the SOC low in every program (the battery stores PV), unless an outage is expected.
+- If tariff.single_price is true the price is the same all day: keep grid_charge false and the SOC low in the daytime programs (the battery stores PV); in the evening and night programs keep grid_charge true, so the battery can recharge for an unplanned outage.
 - If PV tomorrow covers the use, keep grid charging low and let the sun charge the battery.
 - If an outage is expected, keep the battery high and enable grid charge before it.
 - Keep every SOC between min_soc and max_soc. Programs marked unused: return their current SOC and grid_charge false.
@@ -169,7 +169,9 @@ def build_prompt(opts: Options, snapshot: dict[str, Any], baseline: dict[str, An
         "tariff_by_hour": [opts.tariff_at(h * 60 + 30)[1] for h in range(24)],
         "outages_state": snapshot.get("outages_state"),
         "outages_details": snapshot.get("outages_attrs"),
-        "weather_tomorrow": (snapshot.get("weather") or {}).get("tomorrow"),
+        "plan_day": snapshot.get("plan_day"),  # the day this plan is for: today (morning run) or tomorrow
+        "recent_outage_days": snapshot.get("recent_outage_days") or [],
+        "weather_tomorrow": (snapshot.get("plan_day") or {}).get("weather") or (snapshot.get("weather") or {}).get("tomorrow"),
         "forecast": {
             "consumption_tomorrow_kwh": baseline["predicted_consumption_tomorrow_kwh"],
             "pv_tomorrow_kwh": baseline["predicted_pv_tomorrow_kwh"],

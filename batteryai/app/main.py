@@ -29,6 +29,7 @@ import local_fast
 import local_llm
 import notify
 import outage_plan
+import planning
 import openai_engine
 import backup
 from bill import BillRecorder, bill_report, reprice_month
@@ -122,7 +123,7 @@ class BatteryAI:
         if mode == "auto":
             latest = next((a for a in self.db.analyses(20) if a["status"] == "ok" and a["result"]), None)
             if latest:
-                applied = await control.apply_prediction(self.ha, self.opts, latest["result"])
+                applied = await control.apply_prediction(self.ha, self.opts, latest["result"], self.control.get("keep_grid_charge", False))
                 self.db.add_actions(latest["id"], applied)
                 actions += applied
         await self.notify_actions(
@@ -487,6 +488,25 @@ class BatteryAI:
         }[self.opts.prediction_engine]
 
     async def _predict(self, snapshot: dict[str, Any], trigger: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Runs the selected engine for the plan day (today before 13:00, else tomorrow), then
+        applies the night reserve when outages are likely."""
+        snapshot = {**snapshot, "plan_day": planning.plan_day(snapshot, self.opts, self.tz)}
+        outage_days = await asyncio.to_thread(planning.recent_outage_days, self.db, int(snapshot["ts"]))
+        snapshot["recent_outage_days"] = outage_days
+        outcome, data = await self._run_engine(snapshot, trigger)
+        result = outcome["result"]
+        result["plan_date"] = snapshot["plan_day"]["date"]
+        result["plan_day"] = snapshot["plan_day"]["label"]
+        profile = await asyncio.to_thread(self.db.hourly_profile, int(snapshot["ts"]) - 14 * 86400)
+        changed = planning.apply_night_reserve(
+            result, self.opts, snapshot, planning.night_hours(profile),
+            planning.outages_likely(snapshot, outage_days), self.control.get("keep_grid_charge", False),
+        )
+        if changed:
+            _LOGGER.info("Night reserve applied to programs %s", changed)
+        return outcome, data
+
+    async def _run_engine(self, snapshot: dict[str, Any], trigger: str) -> tuple[dict[str, Any], dict[str, Any]]:
         """Runs the selected engine; returns (outcome, input data stored with the analysis)."""
         engine = self.opts.prediction_engine
         if engine == "claude":
@@ -557,7 +577,7 @@ class BatteryAI:
                 actions: list[dict[str, Any]] | None = None
                 if self.control["mode"] == "auto":
                     try:
-                        actions = await control.apply_prediction(self.ha, self.opts, result)
+                        actions = await control.apply_prediction(self.ha, self.opts, result, self.control.get("keep_grid_charge", False))
                         self.db.add_actions(analysis_id, actions)
                     except Exception as err:
                         _LOGGER.exception("Applying analysis #%d failed", analysis_id)
@@ -734,6 +754,7 @@ async def status(request: web.Request) -> web.Response:
                 "precharge_soc": opts.outage_precharge_soc_percent,
                 "precharge_smart": app.control.get("precharge_smart", True),
                 "emergency_enabled": app.control.get("emergency_enabled", True),
+                "keep_grid_charge": app.control.get("keep_grid_charge", False),
                 "precharge_smart_applies": not opts.single_price and bool(opts.outage_duration_sensor),
                 "outage_plan": app.outage_plan,
             },
@@ -1107,6 +1128,16 @@ async def set_battery_name(request: web.Request) -> web.Response:
     return web.json_response({"name": name})
 
 
+@routes.post("/api/control/keep_grid_charge")
+async def set_keep_grid_charge(request: web.Request) -> web.Response:
+    """Body {"keep": bool}: predictions never change the grid-charge switches."""
+    app = _app(request)
+    app.control["keep_grid_charge"] = bool((await request.json()).get("keep"))
+    control.save_state(app.control)
+    _LOGGER.info("Grid charge %s by predictions", "left alone" if app.control["keep_grid_charge"] else "set")
+    return web.json_response({"keep": app.control["keep_grid_charge"]})
+
+
 @routes.post("/api/control/precharge")
 async def set_precharge(request: web.Request) -> web.Response:
     """Body {"enabled": bool}: charge before an outage on/off; off also ends a running one."""
@@ -1147,7 +1178,7 @@ async def apply_analysis(request: web.Request) -> web.Response:
     analysis = app.db.analysis(int(request.match_info["analysis_id"]))
     if not analysis or analysis["status"] != "ok":
         return web.json_response({"error": "No successful prediction with this id."}, status=404)
-    actions = await control.apply_prediction(app.ha, app.opts, analysis["result"])
+    actions = await control.apply_prediction(app.ha, app.opts, analysis["result"], app.control.get("keep_grid_charge", False))
     app.db.add_actions(analysis["id"], [{**a, "manual": True} for a in actions])
     await app.notify_actions(actions, "SOC updated (manual)")
     return web.json_response({"actions": actions})
@@ -1241,8 +1272,11 @@ async def test_entity(request: web.Request) -> web.Response:
         warning = "Expected a number, but the state is not numeric."
     elif kind == "time" and parse_hhmm(value) is None:
         warning = "Expected a time such as 01:00, 01:00:00 or 100."
+    elif kind == "switch" and entity_id.split(".", 1)[0] in control.SELECT_DOMAINS:
+        if control._charge_option([str(o) for o in attributes.get("options") or []], True) is None:
+            warning = "This select has no option that turns grid charging on (such as “Grid” or “Enabled”)."
     elif kind == "switch" and str(value) not in ("on", "off"):
-        warning = "Expected a switch (on/off) that turns grid charging of this program on or off."
+        warning = "Expected a switch (on/off) or a select (Disabled / Grid …) that turns grid charging of this program on or off."
     detail = None
     if entity_id.startswith("weather."):
         weather = await weather_details(_app(request).ha, entity_id, _app(request).tz)

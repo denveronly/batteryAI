@@ -167,7 +167,7 @@ def plan_notification(
         status = "Inverter already matches the plan."
 
     brief = (
-        f"Tomorrow: use {_num(result.get('predicted_consumption_tomorrow_kwh'))} kWh, "
+        f"{str(result.get('plan_day') or 'tomorrow').capitalize()}: use {_num(result.get('predicted_consumption_tomorrow_kwh'))} kWh, "
         f"solar {_num(result.get('predicted_pv_tomorrow_kwh'))} kWh, "
         f"lowest battery {_num(result.get('predicted_min_soc_percent'), 0)}%."
     )

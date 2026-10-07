@@ -14,7 +14,7 @@ will not refill the battery, and before outages.
 from __future__ import annotations
 
 import math
-from datetime import datetime, timedelta, tzinfo
+from datetime import date, datetime, timedelta, tzinfo
 from typing import Any
 
 from collector import program_ranges
@@ -127,11 +127,14 @@ def _pv_shape(profiles: dict[str, dict[str, Any]]) -> list[float]:
 
 def forecast(db: Database, opts: Options, snapshot: dict[str, Any], tz: tzinfo) -> dict[str, Any]:
     now = datetime.fromtimestamp(snapshot["ts"], tz)
-    tomorrow = (now + timedelta(days=1)).date()
+    plan = snapshot.get("plan_day") or {}
+    # The plan day: today for a morning run, tomorrow later (planning.plan_day).
+    tomorrow = date.fromisoformat(plan["date"]) if plan.get("date") else (now + timedelta(days=1)).date()
+    day_label = (plan.get("label") or "tomorrow").capitalize()
     # All stored history: last year's days from the same season are good matches too.
     profiles = _day_profiles(db, tz, snapshot["ts"] - max(opts.history_days, 400) * 86400)
     weather = snapshot.get("weather") or {}
-    tomorrow_weather = weather.get("tomorrow") or {}
+    tomorrow_weather = (weather.get("today") if plan.get("label") == "today" else weather.get("tomorrow")) or {}
     temps = [t for t in (tomorrow_weather.get("temperature"), tomorrow_weather.get("templow")) if t is not None]
     tomorrow_temp = sum(temps) / len(temps) if temps else snapshot.get("outdoor_temp")
     tomorrow_weekend = WEEKDAYS[tomorrow.weekday()] in opts.weekend_days
@@ -166,11 +169,11 @@ def forecast(db: Database, opts: Options, snapshot: dict[str, Any], tz: tzinfo) 
     if tomorrow_temp is None:
         weather_note = "No temperature data; appliance use taken from similar days."
     elif notes:
-        weather_note = f"Tomorrow about {tomorrow_temp:.1f}°: " + "; ".join(notes) + "."
+        weather_note = f"{day_label} about {tomorrow_temp:.1f}°: " + "; ".join(notes) + "."
     else:
-        weather_note = f"Tomorrow about {tomorrow_temp:.1f}°; days with similar temperature were used."
+        weather_note = f"{day_label} about {tomorrow_temp:.1f}°; days with similar temperature were used."
 
-    pv_total = snapshot.get("tomorrow_forecast") or 0
+    pv_total = (plan.get("solar_forecast_kwh") if plan else snapshot.get("tomorrow_forecast")) or 0
     shape = _pv_shape(profiles)
     pv_hourly = [round(pv_total * 1000 * s) for s in shape]
 
@@ -190,6 +193,7 @@ def forecast(db: Database, opts: Options, snapshot: dict[str, Any], tz: tzinfo) 
         "consumption_tomorrow_kwh": round(sum(e["load_w"] for e in hourly) / 1000, 1),
         "rest_of_today_kwh": round(rest_today, 1),
         "pv_tomorrow_kwh": round(pv_total, 1),
+        "day_label": day_label,
     }
 
 
@@ -322,17 +326,17 @@ def analyze(db: Database, opts: Options, snapshot: dict[str, Any], tz: tzinfo) -
             cheapest = opts.tariff_dict()["cheapest"]
             recommendations.append(f"If possible, move {appliance.name} from pricier hours ({_windows(peak_hours)}) to the {cheapest} tariff.")
     if p["pv_short"] and opts.single_price:
-        recommendations.append("PV will not cover tomorrow's use: with a single price, run flexible loads in the sunniest hours.")
+        recommendations.append(f"PV will not cover {fc['day_label'].lower()}'s use: with a single price, run flexible loads in the sunniest hours.")
     elif p["pv_short"]:
-        recommendations.append(f"PV will not cover tomorrow's use: charge from the grid during the {opts.tariff_dict()['cheapest']} tariff.")
+        recommendations.append(f"PV will not cover {fc['day_label'].lower()}'s use: charge from the grid during the {opts.tariff_dict()['cheapest']} tariff.")
     else:
-        recommendations.append("PV should cover most of tomorrow: run flexible loads in the sunniest hours.")
+        recommendations.append(f"PV should cover most of {fc['day_label'].lower()}: run flexible loads in the sunniest hours.")
 
     days = len(fc["similar_days"])
     confidence = "medium" if days >= 4 else "low"
     min_soc = min((r["soc_percent"] for r in p["programs"]), default=opts.min_soc_percent)
     summary = (
-        f"Tomorrow ~{fc['consumption_tomorrow_kwh']} kWh use vs ~{fc['pv_tomorrow_kwh']} kWh PV"
+        f"{fc['day_label']} ~{fc['consumption_tomorrow_kwh']} kWh use vs ~{fc['pv_tomorrow_kwh']} kWh PV"
         + (", outage expected – battery kept full" if p["outage"] else "")
         + f". Based on {days} similar day(s)."
     )

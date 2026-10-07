@@ -745,7 +745,8 @@ def accuracy_report(db: Database, days: int, today: date, tz: tzinfo) -> dict[st
     predictions: dict[str, dict[str, Any]] = {}
     for analysis in db.ok_analyses_since(first_ts):
         made_on = datetime.fromtimestamp(analysis["ts"], tz).date()
-        predictions[(made_on + timedelta(days=1)).isoformat()] = analysis  # later runs overwrite
+        # The plan day it was made for (today for morning runs); later runs overwrite.
+        predictions[analysis["result"].get("plan_date") or (made_on + timedelta(days=1)).isoformat()] = analysis
 
     out = []
     for day in summary[-days:]:

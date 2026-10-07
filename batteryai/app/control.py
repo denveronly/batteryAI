@@ -31,6 +31,7 @@ def load_state() -> dict[str, Any]:
     state.setdefault("since", None)
     state.setdefault("saved_switches", {})
     state.setdefault("precharge_enabled", True)  # charge before an outage (outage minutes sensor)
+    state.setdefault("keep_grid_charge", False)  # predictions leave the grid-charge switches alone
     state.setdefault("emergency_enabled", True)  # charge right away while emergency outages are on
     state.setdefault("precharge_smart", True)  # tariff-aware: charge only what the outage needs
     state.setdefault("precharge", None)  # the running pre-outage charge, see BatteryAI.check_outage
@@ -69,15 +70,54 @@ async def set_soc(ha: HomeAssistant, entity_id: str, value: float) -> dict[str, 
     return {"entity_id": entity_id, "from": current, "to": target}
 
 
-async def set_switch(ha: HomeAssistant, entity_id: str, on: bool) -> dict[str, Any]:
+SELECT_DOMAINS = ("select", "input_select")
+ON_WORDS = {"on", "true", "yes", "enabled", "enable", "1"}
+OFF_WORDS = ("disabled", "disable", "off", "no", "none", "false", "0")
+
+
+def charge_is_on(state: Any) -> bool:
+    """Grid charge on: a switch that is on, or a select on an option with grid charging
+    (Deye "Grid", "Grid & Gen", "Enabled")."""
+    text = str(state or "").strip().lower()
+    return text in ON_WORDS or "grid" in text
+
+
+def _charge_option(options: list[str], on: bool) -> str | None:
+    lowered = [(o, o.strip().lower()) for o in options]
+    if on:
+        for test in (
+            lambda t: t == "grid",
+            lambda t: "grid" in t and "gen" not in t,
+            lambda t: "grid" in t,
+            lambda t: t in ON_WORDS,
+        ):
+            match = next((o for o, t in lowered if test(t)), None)
+            if match:
+                return match
+        return None
+    return next((o for word in OFF_WORDS for o, t in lowered if t == word), None)
+
+
+async def set_switch(ha: HomeAssistant, entity_id: str, on: bool, option: str | None = None) -> dict[str, Any]:
+    """Turns grid charge of a program on/off: a switch / input_boolean, or a select whose
+    options name it (Deye: Disabled / Grid / …). option restores an exact select option."""
     domain = entity_id.split(".", 1)[0]
-    if domain not in SWITCH_DOMAINS:
-        raise HAError("unsupported", f"{entity_id}: only switch or input_boolean entities can be turned on/off")
-    await ha.call_service(domain, "turn_on" if on else "turn_off", {"entity_id": entity_id})
-    return {"entity_id": entity_id, "to": "on" if on else "off"}
+    if domain in SWITCH_DOMAINS:
+        await ha.call_service(domain, "turn_on" if on else "turn_off", {"entity_id": entity_id})
+        return {"entity_id": entity_id, "to": "on" if on else "off"}
+    if domain in SELECT_DOMAINS:
+        options = [str(o) for o in ((await ha.fetch_state(entity_id)).get("attributes") or {}).get("options") or []]
+        choice = option if option in options else _charge_option(options, on)
+        if choice is None:
+            raise HAError("unsupported", f"{entity_id}: no option for grid charge {'on' if on else 'off'} in {options}")
+        await ha.call_service(domain, "select_option", {"entity_id": entity_id, "option": choice})
+        return {"entity_id": entity_id, "to": choice}
+    raise HAError("unsupported", f"{entity_id}: only switch, input_boolean or select entities can turn grid charge on/off")
 
 
-async def apply_prediction(ha: HomeAssistant, opts: Options, result: dict[str, Any]) -> list[dict[str, Any]]:
+async def apply_prediction(
+    ha: HomeAssistant, opts: Options, result: dict[str, Any], keep_grid_charge: bool = False
+) -> list[dict[str, Any]]:
     """Writes the suggested program SOCs, clamped to the configured range.
 
     A program is only changed when the suggestion differs from the current value by at least
@@ -87,7 +127,7 @@ async def apply_prediction(ha: HomeAssistant, opts: Options, result: dict[str, A
     actions = []
     for program in opts.deye_programs:
         suggested = by_slot.get(program.slot) or {}
-        if program.charge_entity and isinstance(suggested.get("grid_charge"), bool):
+        if program.charge_entity and isinstance(suggested.get("grid_charge"), bool) and not keep_grid_charge:
             actions.append(await _apply_switch(ha, program.slot, program.charge_entity, suggested["grid_charge"]))
         suggestion = suggested.get("soc_percent")
         if not program.soc_entity or suggestion is None:
@@ -112,7 +152,7 @@ async def _apply_switch(ha: HomeAssistant, slot: int, entity_id: str, on: bool) 
     action: dict[str, Any] = {"slot": slot, "entity_id": entity_id, "kind": "grid_charge", "time": time.time()}
     try:
         current = (await ha.fetch_state(entity_id)).get("state")
-        if current == ("on" if on else "off"):
+        if charge_is_on(current) == on:
             action.update(status="unchanged", value=current, suggested="on" if on else "off")
         else:
             action.update(status="set", **{"from": current}, **await set_switch(ha, entity_id, on))
@@ -140,8 +180,8 @@ async def charge_all(
                 previous = (await ha.fetch_state(program.charge_entity)).get("state")
                 if program.charge_entity not in state["saved_switches"]:
                     state["saved_switches"][program.charge_entity] = {"slot": program.slot, "state": previous}
-                if previous == "on":
-                    action.update(status="unchanged", value="on", suggested="on")
+                if charge_is_on(previous):
+                    action.update(status="unchanged", value=previous, suggested="on")
                 else:
                     action.update(status="set", **{"from": previous}, **await set_switch(ha, program.charge_entity, True))
             except HAError as err:
@@ -182,7 +222,7 @@ async def restore_switches(ha: HomeAssistant, state: dict[str, Any]) -> list[dic
     actions = []
     for entity_id, saved in state["saved_switches"].items():
         previous = saved.get("state") if isinstance(saved, dict) else saved
-        if previous not in ("on", "off"):
+        if previous is None or str(previous).lower() in ("unknown", "unavailable", ""):
             continue
         action: dict[str, Any] = {
             "slot": saved.get("slot") if isinstance(saved, dict) else None,
@@ -194,7 +234,7 @@ async def restore_switches(ha: HomeAssistant, state: dict[str, Any]) -> list[dic
             current = (await ha.fetch_state(entity_id)).get("state")
             if current == previous:
                 continue
-            action.update(status="set", **{"from": current}, **await set_switch(ha, entity_id, previous == "on"))
+            action.update(status="set", **{"from": current}, **await set_switch(ha, entity_id, charge_is_on(previous), option=previous))
         except HAError as err:
             action.update(status="error", error=str(err))
         actions.append(action)

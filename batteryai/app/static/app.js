@@ -518,6 +518,8 @@ function renderControl() {
     "Charge before scheduled outages ",
     el("span", { class: "hint" }, `— set every program to ${c.precharge_smart && c.precharge_smart_applies ? "up to " : ""}${c.precharge_soc}% with grid charge on ${fmtDuration(c.precharge_minutes)} before an outage`),
   );
+  $("keepGridCharge").checked = c.keep_grid_charge;
+  $("keepGridCharge").disabled = !c.can_write;
   $("emergencyToggle").checked = c.emergency_enabled;
   $("emergencyToggle").disabled = !c.can_write || !o.emergency_entity;
   $("emergencyLabel").replaceChildren(
@@ -642,6 +644,7 @@ async function controlAction(path, body) {
 }
 
 $("autoToggle").addEventListener("change", (e) => controlAction("api/control", { mode: e.target.checked ? "auto" : "off" }));
+$("keepGridCharge").addEventListener("change", (e) => controlAction("api/control/keep_grid_charge", { keep: e.target.checked }));
 $("emergencyToggle").addEventListener("change", (e) => controlAction("api/control/precharge", { emergency: e.target.checked }));
 $("prechargeSmart").addEventListener("change", (e) => controlAction("api/control/precharge", { smart: e.target.checked }));
 $("prechargeToggle").addEventListener("change", (e) => controlAction("api/control/precharge", { enabled: e.target.checked }));
@@ -664,11 +667,11 @@ function predictionChips(r) {
     "div",
     { class: "chips" },
     el("span", { class: "chip" }, "Rest of today ", el("b", {}, `${fmt(r.predicted_consumption_rest_of_today_kwh)} kWh`)),
-    el("span", { class: "chip" }, "Tomorrow ", el("b", {}, `${fmt(r.predicted_consumption_tomorrow_kwh)} kWh`)),
-    r.predicted_pv_tomorrow_kwh !== undefined ? el("span", { class: "chip" }, "PV tomorrow ", el("b", {}, `${fmt(r.predicted_pv_tomorrow_kwh)} kWh`)) : null,
+    el("span", { class: "chip" }, `${planDay(r, true)} `, el("b", {}, `${fmt(r.predicted_consumption_tomorrow_kwh)} kWh`)),
+    r.predicted_pv_tomorrow_kwh !== undefined ? el("span", { class: "chip" }, `PV ${planDay(r)} `, el("b", {}, `${fmt(r.predicted_pv_tomorrow_kwh)} kWh`)) : null,
     el("span", { class: "chip" }, "Min SOC ", el("b", {}, `${fmt(r.predicted_min_soc_percent, 0)} %`)),
     r.estimated_grid_cost_tomorrow !== undefined
-      ? el("span", { class: "chip" }, "Grid cost tomorrow ", el("b", {}, `${fmt(r.estimated_grid_cost_tomorrow, 2)} ${status?.tariff?.currency || ""}`))
+      ? el("span", { class: "chip" }, `Grid cost ${planDay(r)} `, el("b", {}, `${fmt(r.estimated_grid_cost_tomorrow, 2)} ${status?.tariff?.currency || ""}`))
       : null,
     el("span", { class: "chip" }, "Outage risk ", el("b", {}, r.outage_risk)),
     el("span", { class: "chip" }, "Confidence ", el("b", {}, r.confidence)),
@@ -696,7 +699,7 @@ function renderPrediction(analysis) {
     r.weather_impact ? el("p", { class: "muted prediction-meta" }, "Weather: ", r.weather_impact) : null,
     r.appliance_forecast?.length
       ? el("ul", { class: "appliances" }, ...r.appliance_forecast.map((a) =>
-        el("li", {}, el("b", {}, applianceName(a.appliance)), ` ${fmt(a.expected_kwh_tomorrow)} kWh tomorrow · ${a.expected_usage_windows}`)))
+        el("li", {}, el("b", {}, applianceName(a.appliance)), ` ${fmt(a.expected_kwh_tomorrow)} kWh ${planDay(r)} · ${a.expected_usage_windows}`)))
       : null,
     r.hourly_forecast_tomorrow?.length ? el("div", { class: "chart small" }, el("canvas", { id: "forecastChart" })) : null,
     programTable(r) ? el("details", {}, el("summary", {}, "Suggested Deye programs"), programTable(r)) : null,
@@ -721,12 +724,18 @@ function renderPrediction(analysis) {
       },
       options: {
         responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
-        plugins: { legend: { labels: { color: text, boxWidth: 10 } }, title: { display: true, text: "Predicted power tomorrow (W)", color: text } },
+        plugins: { legend: { labels: { color: text, boxWidth: 10 } }, title: { display: true, text: `Predicted power ${planDay(r)} (W)`, color: text } },
         scales: { x: { ticks: { color: text, maxTicksLimit: 8 }, grid: { display: false } }, y: { beginAtZero: true, ticks: { color: text }, grid: { color: css("--grid") } } },
       },
     });
   }
 }
+
+// The day a prediction is for: "today" (morning run) or "tomorrow".
+const planDay = (r, capital = false) => {
+  const day = r?.plan_day || "tomorrow";
+  return capital ? day[0].toUpperCase() + day.slice(1) : day;
+};
 
 function programTable(r) {
   if (!(r.deye_programs || []).length) return null;

@@ -188,6 +188,16 @@ prediction (at most once every 30 minutes). Claude raises the SOC and turns on f
 charge before an outage when the battery would not otherwise cover the load — unless
 the outage falls in daylight and PV is expected to cover it.
 
+## Night and plan day
+
+A prediction made before 13:00 plans **today** (today's programs are still ahead); a later
+one plans tomorrow. In the evening and night programs (the hours without PV in your
+recorded data) grid charge always stays on, so the battery can recharge if an unplanned
+emergency outage comes; when outages are likely (scheduled, emergency, or recorded on any
+of the last 7 days) these programs are also kept at the *Night reserve* SOC (Settings →
+Prediction tuning, 100% by default, 0 = off). With **Don't touch grid charge** (Battery
+control) predictions only set the SOC and never change the grid-charge switches.
+
 ## Charge before an outage
 
 **Charge on emergency outages**: set the *Emergency outages* sensor (Settings → Sensors)

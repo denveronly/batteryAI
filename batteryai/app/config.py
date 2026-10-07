@@ -143,6 +143,8 @@ class Options:
     # Solar forecasts (today and tomorrow) are multiplied by this: 110 = PV comes out 10%
     # above the forecast in this home, 90 = 10% below.
     solar_forecast_percent: int = 100
+    # SOC of the evening/night programs (no PV) when outages are likely; 0 = off.
+    night_reserve_soc_percent: int = 100
     battery_name: str = ""  # shown in the panel header
     # Minutes until the next outage (e.g. sensor.svitlo_..._minutes_to_outage): this long
     # before it every program is set to the pre-outage SOC with grid charge on.
@@ -318,6 +320,7 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         apply_threshold_percent=integer("apply_threshold_percent", 0, 50),
         charge_all_soc_percent=integer("charge_all_soc_percent", 10, 100),
         solar_forecast_percent=integer("solar_forecast_percent", 1, 200),
+        night_reserve_soc_percent=integer("night_reserve_soc_percent", 0, 100),
         battery_name=text("battery_name")[:40],
         notify_prefix=text("notify_prefix")[:40],
         outage_precharge_minutes=integer("outage_precharge_minutes", 5, 720),

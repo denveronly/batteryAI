@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.25
+
+- **Grid charge as a select**: Deye integrations that expose a program's grid charge as a
+  select (Disabled / Grid / Gen / Grid & Gen) now work everywhere – Charge all, outage
+  charging, predictions, the program table and restoring afterwards. Before, only
+  switches worked, so Charge all could not turn grid charge on.
+- **Don't touch grid charge** (Battery control): predictions only set the SOC; the
+  grid-charge switches stay as you set them. Charge all and outage charging still turn
+  them on.
+- **Plan day**: a prediction run before 13:00 plans **today** (its programs are still
+  ahead), later runs plan tomorrow. The prediction, the notification and the accuracy
+  report say and use which day.
+- **Night**: evening and night programs (hours without PV, from your recorded PV) always
+  keep grid charge on, so the battery can recharge for an unplanned emergency outage.
+  When outages are likely – scheduled, emergency, or recorded in the last 7 days – they are
+  also kept at the **night reserve** SOC (Settings → Prediction tuning, 100% by default,
+  0 = off).
+
 ## 0.4.24
 
 - Fix: appliances with an energy sensor (kWh / Wh) were read as power (W), so the

@@ -84,6 +84,10 @@
           <input type="checkbox" id="autoToggle">
           <span>AI auto-control <span class="hint">— write each prediction's SOC and grid charge to the Deye programs</span></span>
         </label>
+        <label class="switch sub-switch">
+          <input type="checkbox" id="keepGridCharge">
+          <span>Don't touch grid charge <span class="hint">— predictions only set the SOC; the grid-charge switches stay as you set them (Charge all and outage charging still turn them on)</span></span>
+        </label>
         <label class="switch">
           <input type="checkbox" id="emergencyToggle">
           <span id="emergencyLabel">Charge on emergency outages</span>
@@ -426,6 +430,10 @@
           </label>
           <label>“Charge all” SOC (%)
             <input type="number" name="charge_all_soc_percent" min="10" max="100" step="1">
+          </label>
+          <label>Night reserve when outages are likely (%)
+            <input type="number" name="night_reserve_soc_percent" min="0" max="100" step="1">
+            <span class="hint">Evening and night programs (no PV) are kept at this SOC when an outage is scheduled, emergency outages are on or outages happened in the last 7 days. 0 = off. Their grid charge always stays on.</span>
           </label>
           <label>Solar forecast correction (%)
             <input type="number" name="solar_forecast_percent" min="1" max="200" step="1">
