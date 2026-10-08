@@ -28,6 +28,7 @@ import control
 import local_fast
 import local_llm
 import notify
+import grid
 import outage_plan
 import planning
 import openai_engine
@@ -69,6 +70,7 @@ class BatteryAI:
         self.panel_url: str | None = None  # opened by tapping a notification
         self._last_outage_run = 0.0
         self.bill = BillRecorder(db)
+        self.grid = grid.GridMonitor(db)
         self.outage_minutes: float | None = None  # from the outage minutes sensor
         self.outage_minutes_ts: float | None = None
         self._outage_lock = asyncio.Lock()
@@ -157,6 +159,7 @@ class BatteryAI:
         finally:
             self.db = Database(db_path)
             self.bill = BillRecorder(self.db)
+            self.grid = grid.GridMonitor(self.db)
         self.control = control.load_state()
         self.opts = load_settings()
         self._client = self._make_client(self.opts.claude_api_key)
@@ -326,6 +329,13 @@ class BatteryAI:
 
     async def outage_loop(self) -> None:
         while True:
+            try:
+                await self.grid.check(self.ha, self.opts)
+                if self.opts.grid_status_sensor and not self.grid.backfilling:
+                    if self.db.meta_get(grid.BACKFILL_KEY) != self.opts.grid_status_sensor:
+                        self.spawn(self.grid.backfill(self.ha, self.opts))
+            except Exception:
+                _LOGGER.exception("Checking the grid status sensor failed")
             try:
                 await self.check_outage()
             except Exception:
@@ -502,6 +512,10 @@ class BatteryAI:
         applies the night reserve when outages are likely."""
         snapshot = {**snapshot, "plan_day": planning.plan_day(snapshot, self.opts, self.tz)}
         outage_days = await asyncio.to_thread(planning.recent_outage_days, self.db, int(snapshot["ts"]))
+        if self.opts.grid_status_sensor:
+            snapshot["grid"] = await asyncio.to_thread(grid.summary, self.db, self.tz, float(snapshot["ts"]))
+            grid_days = {o["start"][:10] for o in snapshot["grid"]["outages_last_7_days"]}
+            outage_days = sorted(set(outage_days) | grid_days)
         snapshot["recent_outage_days"] = outage_days
         outcome, data = await self._run_engine(snapshot, trigger)
         result = outcome["result"]
@@ -515,6 +529,13 @@ class BatteryAI:
         )
         if changed:
             _LOGGER.info("Night reserve applied to programs %s", changed)
+        if self.opts.grid_status_sensor:
+            windows = grid.expected(self.db, self.tz, float(snapshot["ts"]))[snapshot["plan_day"]["label"]]
+            covered = planning.apply_expected_outages(
+                result, self.opts, snapshot, windows, profile, self.control.get("keep_grid_charge", False), self.tz,
+            )
+            if covered:
+                _LOGGER.info("Charge before expected outages: programs %s", covered)
         return outcome, data
 
     async def _run_engine(self, snapshot: dict[str, Any], trigger: str) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -769,6 +790,7 @@ async def status(request: web.Request) -> web.Response:
                 "precharge_smart_applies": not opts.single_price and bool(opts.outage_duration_sensor),
                 "outage_plan": app.outage_plan,
             },
+            "grid": {"entity": opts.grid_status_sensor, "up": app.grid.up, "checked": app.grid.checked},
             "outage_minutes": {
                 "entity": opts.outage_minutes_sensor,
                 "minutes": app.outage_minutes,
@@ -1139,6 +1161,25 @@ async def set_battery_name(request: web.Request) -> web.Response:
     app.opts.battery_name = name
     save_settings(app.opts)
     return web.json_response({"name": name})
+
+
+@routes.get("/api/grid")
+async def grid_view(request: web.Request) -> web.Response:
+    """Grid outages in the last ?hours (default 48) and the expected windows today/tomorrow."""
+    app = _app(request)
+    hours = _int_param(request, "hours", 48, 1, 24 * 400)
+    now = time.time()
+
+    def collect() -> dict[str, Any]:
+        recent = grid.outages(app.db, app.tz, now - hours * 3600, now)
+        week = grid.outages(app.db, app.tz, now - 7 * 86400, now)
+        return {
+            "entity": app.opts.grid_status_sensor, "up": app.grid.up, "checked": app.grid.checked,
+            "backfilling": app.grid.backfilling, "outages": recent, "expected": grid.expected(app.db, app.tz, now),
+            "week": {"count": len(week), "minutes": sum(o["minutes"] for o in week)},
+        }
+
+    return web.json_response(await asyncio.to_thread(collect))
 
 
 @routes.post("/api/control/keep_grid_charge")

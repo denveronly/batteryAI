@@ -348,6 +348,49 @@ function renderAccuracy(report) {
   );
 }
 
+// Grid availability -----------------------------------------------------------
+
+function renderGrid(g, hours) {
+  $("gridCard").hidden = !g.entity;
+  if (!g.entity) return;
+  const now = Date.now();
+  const from = now - hours * 3600 * 1000;
+  const at = (ts) => new Date(ts * 1000).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
+  const dur = (m) => (m >= 60 ? `${Math.floor(m / 60)} h ${pad2(m % 60)} min` : `${m} min`);
+  // Stepped availability: 1 = grid on, 0 = outage.
+  const points = [{ x: from, y: 1 }];
+  for (const o of g.outages) {
+    const start = Math.max(o.start * 1000, from);
+    const end = o.end ? o.end * 1000 : now;
+    points.push({ x: start, y: 1 }, { x: start, y: 0 }, { x: end, y: 0 });
+    if (o.end) points.push({ x: end, y: 1 });
+  }
+  if (g.up !== false) points.push({ x: now, y: 1 });
+  const options = timeOptions("Grid", { min: -0.1, max: 1.1, ticks: { color: css("--muted"), stepSize: 1, callback: (v) => (v === 1 ? "On" : v === 0 ? "Off" : "") } });
+  options.scales.x.min = from;
+  options.scales.x.max = now;
+  options.plugins.legend = { display: false };
+  upsertChart("gridChart", {
+    type: "line",
+    data: { datasets: [line("Grid", css("--series-pv"), points, { stepped: true, fill: "origin", backgroundColor: css("--series-pv") + "22" })] },
+    options,
+  }, "No grid data yet.");
+  $("gridInfo").textContent = `${g.up === false ? "⚠ Outage now" : g.up ? "Grid on" : "Unknown"} · last 7 days: ${g.week.count} outages, ${dur(g.week.minutes)}`
+    + (g.backfilling ? " · reading history…" : "");
+  const recent = g.outages.slice().reverse().slice(0, 10);
+  $("gridOutages").replaceChildren(
+    el("tr", {}, el("th", {}, "Outage"), el("th", {}, "Until"), el("th", { class: "num" }, "Duration")),
+    ...(recent.length ? recent.map((o) => el("tr", {}, el("td", {}, at(o.start)), el("td", {}, o.end ? at(o.end) : "now"), el("td", { class: "num" }, dur(o.minutes))))
+      : [el("tr", {}, el("td", { class: "empty", colspan: 3 }, "No outages in this period."))]),
+  );
+  const expectedRows = [["Today", g.expected.today], ["Tomorrow", g.expected.tomorrow]].flatMap(([day, list]) =>
+    list.map((w) => el("tr", {}, el("td", {}, day), el("td", {}, `${w.from}–${w.to}`), el("td", { class: "num" }, dur(w.minutes)))));
+  $("gridExpected").replaceChildren(
+    el("tr", {}, el("th", {}, "Expected"), el("th", {}, "Window"), el("th", { class: "num" }, "Length")),
+    ...(expectedRows.length ? expectedRows : [el("tr", {}, el("td", { class: "empty", colspan: 3 }, "No outages expected (none yesterday)."))]),
+  );
+}
+
 // Status, tiles, programs, control ---------------------------------------------
 
 function tile(label, value, suffix) {
@@ -419,6 +462,7 @@ function renderStatus() {
   }
   tiles.push(
     ...outageTiles(latest, status.outage_minutes || {}),
+    ...(status.grid?.entity ? [tile("Grid", status.grid.up === false ? "⚠ Off" : status.grid.up ? "On" : "—", status.grid.up === false ? "outage now" : "")] : []),
     tile("Day", weekday, latest.is_weekend ? "weekend" : latest.weekday ? "weekday" : ""),
     tile("Last reading", latest.ts ? fmtTime(latest.ts) : "—"),
   );
@@ -1235,6 +1279,7 @@ async function refresh() {
       api("api/accuracy?days=14"),
       api(`api/predicted_load?hours=${hours}`),
     ]);
+    api(`api/grid?hours=${hours}`).then((g) => renderGrid(g, Number(hours))).catch(() => {});
     status = s;
     renderStatus();
     renderBattery(rows);

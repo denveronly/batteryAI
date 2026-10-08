@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.28
+
+- **Grid status** sensor (Settings → Sensors): a binary_sensor (on = power; device class
+  *problem* is reversed), an On-Grid / Off-Grid status or a grid voltage (V).
+  - It is checked every minute; every outage is stored with its start, end and duration
+    (new database table). On first setup the last 14 days are imported from Home Assistant.
+  - Dashboard → **Grid**: availability chart over the chart range, recent outages with their
+    durations, the expected windows, and a *Grid* tile (⚠ Off during an outage).
+  - **Yesterday's outages are expected again today and tomorrow** at the same times (today's
+    so far also tomorrow). Before each expected window on the plan day, the program in
+    effect just before it is raised to the SOC the window needs (recorded load × margin)
+    with grid charge on.
+  - The AI predictions get the last week's outages and the expected windows; real outages
+    also count for the night reserve.
+
 ## 0.4.27
 
 - **Charge on emergency outages** is enforced while emergency outages are on and the switch

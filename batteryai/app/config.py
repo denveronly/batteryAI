@@ -32,6 +32,7 @@ SENSOR_KEYS = (
     "outage_minutes_sensor",
     "outage_duration_sensor",
     "emergency_outage_sensor",
+    "grid_status_sensor",
 )
 # Settings saved by 0.1/0.2 used "today_load_sensor" for what is a load power sensor.
 LEGACY_KEYS = {"load_power_sensor": "today_load_sensor"}
@@ -155,6 +156,9 @@ class Options:
     # On while emergency outages are in effect: tariffs are ignored, the battery is charged
     # to the pre-outage SOC.
     emergency_outage_sensor: str = ""
+    # Grid power present or not (binary_sensor, On-Grid/Off-Grid status, or grid voltage):
+    # outages are recorded and yesterday's are expected again today and tomorrow.
+    grid_status_sensor: str = ""
     outage_precharge_minutes: int = 90
     outage_precharge_soc_percent: int = 100
     battery_capacity_kwh: float = 10.0

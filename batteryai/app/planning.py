@@ -297,3 +297,54 @@ def apply_night_reserve(
         slots = ", ".join(f"P{s}" for s in raised)
         result["summary"] = f"{result.get('summary') or ''} Night reserve: {slots} at {reserve}% ({reason}).".strip()
     return changed
+
+
+def apply_expected_outages(
+    result: dict[str, Any], opts: Options, snapshot: dict[str, Any], windows: list[dict[str, Any]],
+    profile: list[dict[str, Any]], keep_grid_charge: bool, tz: tzinfo,
+) -> list[int]:
+    """Outage windows expected on the plan day (yesterday's outages repeat): the program in
+    effect just before each window is raised to the SOC the window needs (recorded load per
+    hour plus the margin) with grid charge on, so the battery is full enough when the grid
+    goes. Returns the slots it changed."""
+    from outage_plan import energy_kwh, load_profile  # outage_plan imports collector, like this module
+
+    if not windows:
+        return []
+    loads = load_profile(profile)
+    times = {p["slot"]: p.get("time") for p in snapshot.get("deye_programs") or []}
+    programs = [
+        {**p, "time": times.get(p.get("slot")) or p.get("time")}
+        for p in result.get("deye_programs") or [] if isinstance(p, dict) and p.get("slot") is not None
+    ]
+    ranges = program_ranges(programs, opts.program_time_marks == "end")
+    by_slot = {p.get("slot"): p for p in result.get("deye_programs") or []}
+    margin = 1 + opts.prediction_margin_percent / 100
+    changed = []
+    for window in windows:
+        need = energy_kwh(loads, opts, tz, window["start"], window["end"]) * margin
+        target = min(opts.max_soc_percent, round(opts.min_soc_percent + need / opts.battery_capacity_kwh * 100))
+        before = datetime.fromtimestamp(window["start"] - 60, tz)
+        minute = before.hour * 60 + before.minute
+        slot = next(
+            (s for s, (a, b) in ranges.items() if a != b and (a <= minute < b if a < b else minute >= a or minute < b)),
+            None,
+        )
+        program = by_slot.get(slot)
+        if program is None:
+            continue
+        notes = []
+        if (program.get("soc_percent") or 0) < target:
+            program["soc_percent"] = target
+            notes.append(f"{target}% for the outage expected {window['from']}–{window['to']} (~{need:.1f} kWh; it happened yesterday at that time).")
+        if not keep_grid_charge and program.get("grid_charge") is False:
+            program["grid_charge"] = True
+            notes.append(f"Grid charge on to be full before the expected outage at {window['from']}.")
+        if notes:
+            program["reason"] = f"{program.get('reason') or ''} {' '.join(notes)}".strip()
+            if slot not in changed:
+                changed.append(slot)
+    if changed:
+        spans = ", ".join(f"{w['from']}–{w['to']}" for w in windows)
+        result["summary"] = f"{result.get('summary') or ''} Expected outages ({spans}, as yesterday): P{', P'.join(map(str, changed))} charged before them.".strip()
+    return changed

@@ -202,6 +202,18 @@ of the last 7 days) these programs are also kept at the *Night reserve* SOC (Set
 Prediction tuning, 100% by default, 0 = off). With **Don't touch grid charge** (Battery
 control) predictions only set the SOC and never change the grid-charge switches.
 
+## Grid status and outage patterns
+
+Set *Grid status* (Settings → Sensors): a binary_sensor that is on while there is grid power
+(a *problem* sensor counts the other way round), a status such as On-Grid / Off-Grid, or the
+grid voltage. BatteryAI checks it every minute and stores every outage (start, end, length);
+on first setup it imports the last 14 days from Home Assistant. The dashboard's **Grid**
+card shows availability over the chart range, the recent outages and the windows expected
+next. Outages tend to repeat at the same times, so yesterday's outages are expected again
+today and tomorrow (and today's tomorrow): before each expected window the program in
+effect just before it is raised to the SOC the window needs, with grid charge on. The AI
+predictions see the same history, and real outages count for the night reserve.
+
 ## Charge before an outage
 
 **Charge on emergency outages**: set the *Emergency outages* sensor (Settings → Sensors)

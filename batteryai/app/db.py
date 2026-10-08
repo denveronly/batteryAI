@@ -76,6 +76,14 @@ CREATE TABLE IF NOT EXISTS bill_prices (
     PRIMARY KEY (month, tariff)
 );
 
+-- Grid outages from the grid status sensor (end_ts NULL while it lasts).
+CREATE TABLE IF NOT EXISTS grid_outages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    start_ts INTEGER NOT NULL,
+    end_ts INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_grid_outages_start ON grid_outages (start_ts);
+
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -234,7 +242,7 @@ class Database:
         path = self._conn.execute("PRAGMA database_list").fetchone()["file"]
         files = {suffix: os.path.getsize(path + suffix) for suffix in ("", "-wal", "-shm") if os.path.exists(path + suffix)}
         tables = {}
-        for name in ("readings", "analyses", "bill_days", "bill_appliances"):
+        for name in ("readings", "analyses", "bill_days", "bill_appliances", "grid_outages"):
             tables[name] = self._query(f"SELECT COUNT(*) AS n FROM {name}")[0]["n"]
         span = self._query("SELECT MIN(ts) AS first, MAX(ts) AS last FROM readings")[0]
         sources = {row["source"] or "live": row["n"] for row in self._query("SELECT source, COUNT(*) AS n FROM readings GROUP BY source")}
@@ -617,6 +625,31 @@ class Database:
                 [(r["local_date"], r["appliance"], tariff, r["kwh"]) for r in rows],
             )
             self._conn.commit()
+
+    # Grid outages ------------------------------------------------------
+
+    def open_grid_outage(self) -> dict[str, Any] | None:
+        rows = self._query("SELECT id, start_ts FROM grid_outages WHERE end_ts IS NULL ORDER BY start_ts DESC LIMIT 1")
+        return rows[0] if rows else None
+
+    def add_grid_outage(self, start_ts: int) -> None:
+        self._execute("INSERT INTO grid_outages (start_ts) VALUES (?)", (start_ts,))
+
+    def end_grid_outage(self, outage_id: int, end_ts: int) -> None:
+        self._execute("UPDATE grid_outages SET end_ts = ? WHERE id = ?", (end_ts, outage_id))
+
+    def add_grid_outages(self, intervals: list[tuple[int, int]]) -> None:
+        with self._lock:
+            self._conn.executemany("INSERT INTO grid_outages (start_ts, end_ts) VALUES (?, ?)", intervals)
+            self._conn.commit()
+
+    def first_grid_outage_ts(self) -> int | None:
+        return self._query("SELECT MIN(start_ts) AS ts FROM grid_outages")[0]["ts"]
+
+    def grid_outages_since(self, since_ts: int) -> list[dict[str, Any]]:
+        return self._query(
+            "SELECT start_ts, end_ts FROM grid_outages WHERE end_ts IS NULL OR end_ts >= ? ORDER BY start_ts", (since_ts,)
+        )
 
     def bill_prices(self, year: int) -> dict[tuple[str, str], float]:
         return {
