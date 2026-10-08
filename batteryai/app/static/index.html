@@ -138,7 +138,7 @@
         <div class="table-scroll"><table class="programs" id="gridOutages"></table></div>
         <div class="table-scroll"><table class="programs" id="gridExpected"></table></div>
       </div>
-      <p class="hint">Outages from the grid status sensor. Yesterday's outages are expected again today and tomorrow at the same times: the program before each expected window is charged enough to cover it.</p>
+      <p class="hint">Outages from the grid status sensor. Yesterday's outages are expected again today and tomorrow at about the same times (± the shift in Settings): the battery is kept charged around each expected window. More than the strict limit of hours without grid a day makes the plan strict.</p>
     </section>
 
     <section class="card">
@@ -447,6 +447,17 @@
           <label>Night reserve when outages are likely (%)
             <input type="number" name="night_reserve_soc_percent" min="0" max="100" step="1">
             <span class="hint">Evening and night programs (no PV) are kept at this SOC when an outage is scheduled, emergency outages are on or outages happened in the last 7 days. 0 = off. Their grid charge always stays on.</span>
+          </label>
+          <label>Outages may shift by (hours)
+            <input type="number" name="outage_shift_hours" min="0" max="8" step="1">
+            <span class="hint">Yesterday's outages are expected today give or take this much: the battery is charged this much earlier and grid charge stays on this much longer around each expected window.</span>
+          </label>
+          <label>Strict above (hours without grid a day)
+            <input type="number" name="strict_outage_hours" min="1" max="24" step="1">
+            <span class="hint">More outage hours than this yesterday or today: charge to the maximum before expected outages and keep every program at least at the strict minimum SOC.</span>
+          </label>
+          <label>Strict minimum SOC (%)
+            <input type="number" name="strict_min_soc_percent" min="0" max="100" step="1">
           </label>
           <label>Solar forecast correction (%)
             <input type="number" name="solar_forecast_percent" min="1" max="200" step="1">

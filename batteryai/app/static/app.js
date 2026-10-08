@@ -375,8 +375,9 @@ function renderGrid(g, hours) {
     data: { datasets: [line("Grid", css("--series-pv"), points, { stepped: true, fill: "origin", backgroundColor: css("--series-pv") + "22" })] },
     options,
   }, "No grid data yet.");
-  $("gridInfo").textContent = `${g.up === false ? "⚠ Outage now" : g.up ? "Grid on" : "Unknown"} · last 7 days: ${g.week.count} outages, ${dur(g.week.minutes)}`
-    + (g.backfilling ? " · reading history…" : "");
+  const h = g.hours_without_grid || {};
+  $("gridInfo").textContent = `${g.up === false ? "⚠ Outage now" : g.up ? "Grid on" : "Unknown"} · without grid: yesterday ${h.yesterday ?? 0} h, today ${h.today ?? 0} h · last 7 days: ${g.week.count} outages, ${dur(g.week.minutes)}`
+    + (g.strict ? ` · 🔒 strict: ${g.strict}` : "") + (g.backfilling ? " · reading history…" : "");
   const recent = g.outages.slice().reverse().slice(0, 10);
   $("gridOutages").replaceChildren(
     el("tr", {}, el("th", {}, "Outage"), el("th", {}, "Until"), el("th", { class: "num" }, "Duration")),
@@ -384,7 +385,7 @@ function renderGrid(g, hours) {
       : [el("tr", {}, el("td", { class: "empty", colspan: 3 }, "No outages in this period."))]),
   );
   const expectedRows = [["Today", g.expected.today], ["Tomorrow", g.expected.tomorrow]].flatMap(([day, list]) =>
-    list.map((w) => el("tr", {}, el("td", {}, day), el("td", {}, `${w.from}–${w.to}`), el("td", { class: "num" }, dur(w.minutes)))));
+    list.map((w) => el("tr", {}, el("td", {}, day), el("td", {}, `${w.from}–${w.to}`, w.shift_hours ? el("span", { class: "hint" }, ` ±${w.shift_hours} h`) : ""), el("td", { class: "num" }, dur(w.minutes)))));
   $("gridExpected").replaceChildren(
     el("tr", {}, el("th", {}, "Expected"), el("th", {}, "Window"), el("th", { class: "num" }, "Length")),
     ...(expectedRows.length ? expectedRows : [el("tr", {}, el("td", { class: "empty", colspan: 3 }, "No outages expected (none yesterday)."))]),

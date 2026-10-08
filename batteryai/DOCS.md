@@ -210,8 +210,12 @@ grid voltage. BatteryAI checks it every minute and stores every outage (start, e
 on first setup it imports the last 14 days from Home Assistant. The dashboard's **Grid**
 card shows availability over the chart range, the recent outages and the windows expected
 next. Outages tend to repeat at the same times, so yesterday's outages are expected again
-today and tomorrow (and today's tomorrow): before each expected window the program in
-effect just before it is raised to the SOC the window needs, with grid charge on. The AI
+today and tomorrow (and today's tomorrow): outages shift a little from day to day, so each window is
+expected give or take *Outages may shift by* (2 h): from its earliest possible start to
+its latest possible end the programs hold the SOC the window needs, with grid charge on.
+With more than *Strict above* hours (4) without grid yesterday or today the plan is strict:
+the maximum SOC before expected outages and every program at least at the *Strict
+minimum SOC* (60%). The AI
 predictions see the same history, and real outages count for the night reserve.
 
 ## Charge before an outage

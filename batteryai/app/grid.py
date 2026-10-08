@@ -154,9 +154,10 @@ def _merge(windows: list[tuple[int, int]]) -> list[tuple[int, int]]:
     return [(a, b) for a, b in merged]
 
 
-def expected(db: Database, tz: tzinfo, now_ts: float) -> dict[str, Any]:
-    """Expected outage windows: yesterday's outages repeat today and tomorrow at the same
-    times, today's (so far) repeat tomorrow."""
+def expected(db: Database, tz: tzinfo, now_ts: float, shift_hours: int = 2) -> dict[str, Any]:
+    """Expected outage windows: yesterday's outages repeat today and tomorrow at about the
+    same times, today's (so far) repeat tomorrow. They may shift by shift_hours either way:
+    prepare_from / until give the widened span."""
     now = datetime.fromtimestamp(now_ts, tz)
     rows = outages(db, tz, now_ts - 3 * 86400, now_ts)
     yesterday = _day_windows(rows, now - timedelta(days=1), tz, now_ts)
@@ -169,19 +170,42 @@ def expected(db: Database, tz: tzinfo, now_ts: float) -> dict[str, Any]:
                 "start": (base + timedelta(minutes=a)).timestamp(), "end": (base + timedelta(minutes=b)).timestamp(),
                 "from": f"{a // 60:02d}:{a % 60:02d}", "to": f"{b // 60:02d}:{b % 60:02d}" if b < 1440 else "24:00",
                 "minutes": b - a, "source": source,
+                "prepare_from": (base + timedelta(minutes=a)).timestamp() - shift_hours * 3600,
+                "until": (base + timedelta(minutes=b)).timestamp() + shift_hours * 3600,
+                "shift_hours": shift_hours,
             }
             for a, b in _merge(windows)
         ]
 
     tomorrow = now + timedelta(days=1)
     return {
-        "today": [w for w in as_dict(yesterday, now, "yesterday") if w["end"] > now_ts],
+        "today": [w for w in as_dict(yesterday, now, "yesterday") if w["until"] > now_ts],
         "tomorrow": as_dict(yesterday + today_so_far, tomorrow, "yesterday and today"),
     }
 
 
-def summary(db: Database, tz: tzinfo, now_ts: float) -> dict[str, Any]:
-    """For the predictions: the last week's outages and the expected windows."""
+def outage_hours(db: Database, tz: tzinfo, now_ts: float) -> dict[str, float]:
+    """Hours without grid yesterday and today so far."""
+    now = datetime.fromtimestamp(now_ts, tz)
+    rows = outages(db, tz, now_ts - 3 * 86400, now_ts)
+    hours = {}
+    for label, day in (("yesterday", now - timedelta(days=1)), ("today", now)):
+        windows = _day_windows(rows, day, tz, now_ts)
+        hours[label] = round(sum(b - a for a, b in _merge(windows)) / 60, 1)
+    return hours
+
+
+def strict_reason(db: Database, tz: tzinfo, now_ts: float, limit_hours: int) -> str | None:
+    """Why the plan should be strict (more than limit_hours without grid yesterday or today)."""
+    hours = outage_hours(db, tz, now_ts)
+    worst = max(hours, key=lambda k: hours[k])
+    if hours[worst] > limit_hours:
+        return f"{hours[worst]:g} h without grid {worst} (more than {limit_hours} h)"
+    return None
+
+
+def summary(db: Database, tz: tzinfo, now_ts: float, shift_hours: int = 2, limit_hours: int = 4) -> dict[str, Any]:
+    """For the predictions: the last week's outages, the expected windows and strictness."""
     week = outages(db, tz, now_ts - 7 * 86400, now_ts)
     return {
         "outages_last_7_days": [
@@ -189,5 +213,10 @@ def summary(db: Database, tz: tzinfo, now_ts: float) -> dict[str, Any]:
         ],
         "outage_count_7_days": len(week),
         "outage_minutes_7_days": sum(o["minutes"] for o in week),
-        "expected": {k: [{"from": w["from"], "to": w["to"]} for w in v] for k, v in expected(db, tz, now_ts).items()},
+        "expected": {
+            k: [{"from": w["from"], "to": w["to"], "may_shift_hours": shift_hours} for w in v]
+            for k, v in expected(db, tz, now_ts, shift_hours).items()
+        },
+        "hours_without_grid": outage_hours(db, tz, now_ts),
+        "strict": strict_reason(db, tz, now_ts, limit_hours),
     }

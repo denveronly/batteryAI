@@ -513,7 +513,9 @@ class BatteryAI:
         snapshot = {**snapshot, "plan_day": planning.plan_day(snapshot, self.opts, self.tz)}
         outage_days = await asyncio.to_thread(planning.recent_outage_days, self.db, int(snapshot["ts"]))
         if self.opts.grid_status_sensor:
-            snapshot["grid"] = await asyncio.to_thread(grid.summary, self.db, self.tz, float(snapshot["ts"]))
+            snapshot["grid"] = await asyncio.to_thread(
+                grid.summary, self.db, self.tz, float(snapshot["ts"]), self.opts.outage_shift_hours, self.opts.strict_outage_hours,
+            )
             grid_days = {o["start"][:10] for o in snapshot["grid"]["outages_last_7_days"]}
             outage_days = sorted(set(outage_days) | grid_days)
         snapshot["recent_outage_days"] = outage_days
@@ -530,12 +532,15 @@ class BatteryAI:
         if changed:
             _LOGGER.info("Night reserve applied to programs %s", changed)
         if self.opts.grid_status_sensor:
-            windows = grid.expected(self.db, self.tz, float(snapshot["ts"]))[snapshot["plan_day"]["label"]]
+            strict = snapshot["grid"]["strict"]
+            windows = grid.expected(self.db, self.tz, float(snapshot["ts"]), self.opts.outage_shift_hours)[snapshot["plan_day"]["label"]]
             covered = planning.apply_expected_outages(
-                result, self.opts, snapshot, windows, profile, self.control.get("keep_grid_charge", False), self.tz,
+                result, self.opts, snapshot, windows, profile, self.control.get("keep_grid_charge", False), self.tz, strict,
             )
             if covered:
                 _LOGGER.info("Charge before expected outages: programs %s", covered)
+            if planning.apply_strict(result, self.opts, strict):
+                _LOGGER.info("Strict mode: %s", strict)
         return outcome, data
 
     async def _run_engine(self, snapshot: dict[str, Any], trigger: str) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -1175,7 +1180,10 @@ async def grid_view(request: web.Request) -> web.Response:
         week = grid.outages(app.db, app.tz, now - 7 * 86400, now)
         return {
             "entity": app.opts.grid_status_sensor, "up": app.grid.up, "checked": app.grid.checked,
-            "backfilling": app.grid.backfilling, "outages": recent, "expected": grid.expected(app.db, app.tz, now),
+            "backfilling": app.grid.backfilling, "outages": recent,
+            "expected": grid.expected(app.db, app.tz, now, app.opts.outage_shift_hours),
+            "hours_without_grid": grid.outage_hours(app.db, app.tz, now),
+            "strict": grid.strict_reason(app.db, app.tz, now, app.opts.strict_outage_hours),
             "week": {"count": len(week), "minutes": sum(o["minutes"] for o in week)},
         }
 

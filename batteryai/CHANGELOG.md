@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.29
+
+- Expected outages **may shift**: each window from yesterday is expected today and
+  tomorrow give or take *Outages may shift by* (2 h by default). The battery is charged
+  from the earliest possible start and the programs keep grid charge on until the latest
+  possible end.
+- **Strict mode** when the grid was out more than *Strict above* hours (4 by default)
+  yesterday or today: the battery is charged to the maximum before expected outages and
+  every program is held at least at the *Strict minimum SOC* (60% by default). The Grid card
+  shows the hours without grid and 🔒 strict; the AI predictions are told to be strict.
+
 ## 0.4.28
 
 - **Grid status** sensor (Settings → Sensors): a binary_sensor (on = power; device class

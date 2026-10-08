@@ -30,7 +30,7 @@ Each request gives you one JSON document with:
 - current: the latest values: battery SOC, PV power and load power right now (pv_surplus_w > 0 means the battery is being charged by the sun), solar forecast for today and tomorrow, total load power (W), today's consumption counter (kWh), the power of each listed appliance (W), outdoor temperature, probable outages (outages_state on/off, with minutes_to_outage, outage_starts, outage_duration_minutes and emergency_outages in its attributes), local time and weekday.
 - plan_day: the day this plan is for (date, label today/tomorrow, weekday, solar forecast, weather).
 - recent_outage_days: days of the last week with a scheduled, emergency or real grid outage.
-- grid: real grid outages recorded by the grid status sensor in the last 7 days (start, end, minutes) and the windows expected today and tomorrow (yesterday's outages tend to repeat at the same times). Make sure the battery is charged before each expected window and holds enough for its length.
+- grid: real grid outages recorded by the grid status sensor in the last 7 days (start, end, minutes) and the windows expected today and tomorrow (yesterday's outages tend to repeat at the same times). Outages shift by a few hours from day to day (may_shift_hours): make sure the battery is charged from the earliest possible start of each expected window and holds enough for its length. If grid.strict is set (many hours without grid lately), be strict: keep every program's SOC high (at least tuning.strict_min_soc_percent), charge to the maximum before expected outages and keep grid_charge on.
 - weather: the current condition and the forecast for today and tomorrow (daily and, when available, hourly temperatures).
 - deye_programs: the inverter's six time-of-use programs. Each has a range (already worked out for you, e.g. "23:15-05:00", which crosses midnight) during which the inverter keeps the battery at or above the program's SOC capacity. "time" is only the value of the program's time setting; always reason with "range". When a program has grid_charge ("on"/"off"), that is its grid-charge switch: when on, the inverter charges the battery from the grid up to the program's SOC.
 - schedule: when this plan is applied and when the next run will replace it. Plan for the whole period until the next run.
@@ -248,6 +248,7 @@ def build_input(
             "battery_capacity_kwh": opts.battery_capacity_kwh,
             "prediction_margin_percent": opts.prediction_margin_percent,
             "min_soc_percent": opts.min_soc_percent,
+            "strict_min_soc_percent": opts.strict_min_soc_percent,
             "max_soc_percent": opts.max_soc_percent,
         },
         "user_notes": opts.extra_instructions or None,

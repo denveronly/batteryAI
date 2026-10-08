@@ -299,14 +299,28 @@ def apply_night_reserve(
     return changed
 
 
+def _slots_between(ranges: dict[int, tuple[int, int]], start: datetime, end: datetime) -> list[int]:
+    """Programs in effect at any moment from start to end (at most a day)."""
+    slots: list[int] = []
+    t = start
+    while t <= end:
+        minute = t.hour * 60 + t.minute
+        for slot, (a, b) in ranges.items():
+            if a != b and (a <= minute < b if a < b else minute >= a or minute < b) and slot not in slots:
+                slots.append(slot)
+        t += timedelta(minutes=15)
+    return slots
+
+
 def apply_expected_outages(
     result: dict[str, Any], opts: Options, snapshot: dict[str, Any], windows: list[dict[str, Any]],
-    profile: list[dict[str, Any]], keep_grid_charge: bool, tz: tzinfo,
+    profile: list[dict[str, Any]], keep_grid_charge: bool, tz: tzinfo, strict: str | None = None,
 ) -> list[int]:
-    """Outage windows expected on the plan day (yesterday's outages repeat): the program in
-    effect just before each window is raised to the SOC the window needs (recorded load per
-    hour plus the margin) with grid charge on, so the battery is full enough when the grid
-    goes. Returns the slots it changed."""
+    """Outage windows expected on the plan day (yesterday's outages repeat, give or take
+    outage_shift_hours): every program from the earliest possible start until the latest
+    possible end holds the SOC the window needs (recorded load per hour plus the margin;
+    the maximum SOC when strict) with grid charge on, so the battery is ready whenever the
+    grid goes. Returns the slots it changed."""
     from outage_plan import energy_kwh, load_profile  # outage_plan imports collector, like this module
 
     if not windows:
@@ -320,31 +334,57 @@ def apply_expected_outages(
     ranges = program_ranges(programs, opts.program_time_marks == "end")
     by_slot = {p.get("slot"): p for p in result.get("deye_programs") or []}
     margin = 1 + opts.prediction_margin_percent / 100
+    now_ts = float(snapshot.get("ts") or 0)
     changed = []
     for window in windows:
         need = energy_kwh(loads, opts, tz, window["start"], window["end"]) * margin
         target = min(opts.max_soc_percent, round(opts.min_soc_percent + need / opts.battery_capacity_kwh * 100))
-        before = datetime.fromtimestamp(window["start"] - 60, tz)
-        minute = before.hour * 60 + before.minute
-        slot = next(
-            (s for s, (a, b) in ranges.items() if a != b and (a <= minute < b if a < b else minute >= a or minute < b)),
-            None,
-        )
-        program = by_slot.get(slot)
-        if program is None:
-            continue
-        notes = []
-        if (program.get("soc_percent") or 0) < target:
-            program["soc_percent"] = target
-            notes.append(f"{target}% for the outage expected {window['from']}–{window['to']} (~{need:.1f} kWh; it happened yesterday at that time).")
-        if not keep_grid_charge and program.get("grid_charge") is False:
-            program["grid_charge"] = True
-            notes.append(f"Grid charge on to be full before the expected outage at {window['from']}.")
-        if notes:
-            program["reason"] = f"{program.get('reason') or ''} {' '.join(notes)}".strip()
-            if slot not in changed:
-                changed.append(slot)
+        if strict:
+            target = opts.max_soc_percent
+        shift = window.get("shift_hours", 0)
+        prepare_from = max(window.get("prepare_from", window["start"]), now_ts) - 60
+        until = window.get("until", window["end"])
+        span = f"{window['from']}–{window['to']}" + (f" (±{shift} h)" if shift else "")
+        for slot in _slots_between(ranges, datetime.fromtimestamp(prepare_from, tz), datetime.fromtimestamp(until, tz)):
+            program = by_slot.get(slot)
+            if program is None:
+                continue
+            notes = []
+            if (program.get("soc_percent") or 0) < target:
+                program["soc_percent"] = target
+                notes.append(
+                    f"{target}% for the outage expected {span} (~{need:.1f} kWh; it happened yesterday at about that time"
+                    + (f"; strict: {strict}" if strict else "") + ")."
+                )
+            if not keep_grid_charge and program.get("grid_charge") is False:
+                program["grid_charge"] = True
+                notes.append(f"Grid charge on so the battery is full whenever the outage starts.")
+            if notes:
+                program["reason"] = f"{program.get('reason') or ''} {' '.join(notes)}".strip()
+                if slot not in changed:
+                    changed.append(slot)
     if changed:
         spans = ", ".join(f"{w['from']}–{w['to']}" for w in windows)
-        result["summary"] = f"{result.get('summary') or ''} Expected outages ({spans}, as yesterday): P{', P'.join(map(str, changed))} charged before them.".strip()
+        shift = windows[0].get("shift_hours", 0)
+        result["summary"] = (
+            f"{result.get('summary') or ''} Expected outages ({spans}{f', ±{shift} h' if shift else ''}, as yesterday): "
+            f"P{', P'.join(map(str, changed))} kept charged around them."
+        ).strip()
+    return changed
+
+
+def apply_strict(result: dict[str, Any], opts: Options, strict: str | None) -> list[int]:
+    """Long outages lately (strict): every program keeps at least strict_min_soc_percent, so
+    there is a reserve for an outage at any time of day."""
+    floor = min(opts.strict_min_soc_percent, opts.max_soc_percent)
+    if not strict or floor <= opts.min_soc_percent:
+        return []
+    changed = []
+    for program in result.get("deye_programs") or []:
+        if program.get("soc_percent") is not None and program["soc_percent"] < floor:
+            program["soc_percent"] = floor
+            program["reason"] = f"{program.get('reason') or ''} Strict: at least {floor}% ({strict}).".strip()
+            changed.append(program.get("slot"))
+    if changed:
+        result["summary"] = f"{result.get('summary') or ''} Strict mode ({strict}): every program at least {floor}%.".strip()
     return changed

@@ -36,7 +36,8 @@ const SENSOR_GROUPS = [
 const SENSORS = SENSOR_GROUPS.flatMap((g) => g.rows);
 const NUMBER_FIELDS = ["record_interval_minutes", "history_days", "detail_days", "local_llm_threads", "prediction_margin_percent", "min_soc_percent",
   "max_soc_percent", "apply_threshold_percent", "charge_all_soc_percent",
-  "outage_precharge_minutes", "outage_precharge_soc_percent", "solar_forecast_percent", "night_reserve_soc_percent"];
+  "outage_precharge_minutes", "outage_precharge_soc_percent", "solar_forecast_percent", "night_reserve_soc_percent",
+  "outage_shift_hours", "strict_outage_hours", "strict_min_soc_percent"];
 const TEXT_FIELDS = ["battery_name", "notify_prefix", "claude_effort", "response_language", "extra_instructions", "tariff_currency", "program_time_marks", "prediction_engine", "openai_effort"];
 const PRICE_FIELDS = ["battery_capacity_kwh"];
 
