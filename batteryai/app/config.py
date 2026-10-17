@@ -38,6 +38,7 @@ SENSOR_KEYS = (
 LEGACY_KEYS = {"load_power_sensor": "today_load_sensor"}
 ENTITY_RE = re.compile(r"^[a-z_]+\.[a-z0-9_]+$")
 TIME_RE = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+STRICT_HOURS = (6, 8)  # choices for strict_outage_hours
 
 
 @dataclass
@@ -144,14 +145,17 @@ class Options:
     # Solar forecasts (today and tomorrow) are multiplied by this: 110 = PV comes out 10%
     # above the forecast in this home, 90 = 10% below.
     solar_forecast_percent: int = 100
-    # SOC of the evening/night programs (no PV) when outages are likely; 0 = off.
+    # SOC of the evening/night programs (no PV) in strict mode or while the emergency charge
+    # is on; raised only in programs that charge from the grid (the cheapest tariff). 0 = off.
     night_reserve_soc_percent: int = 100
     # Recorded outages repeat, give or take this many hours: charge this much earlier and
     # keep grid charge on this much longer around each expected window.
     outage_shift_hours: int = 2
-    # Strict when the grid was out more than this many hours yesterday or today: charge to
-    # the maximum before expected outages and hold every program at least at strict_min_soc.
-    strict_outage_hours: int = 4
+    # Strict when the grid was out more than this many hours yesterday or today (6 or 8):
+    # charge to the maximum before expected outages, hold every program at least at
+    # strict_min_soc and keep the night reserve. Otherwise the battery is used in the day and
+    # recharged at night.
+    strict_outage_hours: int = 8
     strict_min_soc_percent: int = 60
     battery_name: str = ""  # shown in the panel header
     # Minutes until the next outage (e.g. sensor.svitlo_..._minutes_to_outage): this long
@@ -295,6 +299,13 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
             value = raw.get(key, getattr(base, key))
         return "" if value is None else str(value).strip()
 
+    def strict_hours(value: Any) -> int:
+        """6 or 8 hours; anything else (e.g. 4 from 0.4.29) becomes 8."""
+        try:
+            return int(value) if int(value) in STRICT_HOURS else 8
+        except (TypeError, ValueError):
+            return 8
+
     def integer(key: str, low: int, high: int) -> int:
         value = raw.get(key, getattr(base, key))
         try:
@@ -333,7 +344,7 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         solar_forecast_percent=integer("solar_forecast_percent", 1, 200),
         night_reserve_soc_percent=integer("night_reserve_soc_percent", 0, 100),
         outage_shift_hours=integer("outage_shift_hours", 0, 8),
-        strict_outage_hours=integer("strict_outage_hours", 1, 24),
+        strict_outage_hours=strict_hours(raw.get("strict_outage_hours", base.strict_outage_hours)),
         strict_min_soc_percent=integer("strict_min_soc_percent", 0, 100),
         battery_name=text("battery_name")[:40],
         notify_prefix=text("notify_prefix")[:40],

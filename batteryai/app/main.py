@@ -509,7 +509,8 @@ class BatteryAI:
 
     async def _predict(self, snapshot: dict[str, Any], trigger: str) -> tuple[dict[str, Any], dict[str, Any]]:
         """Runs the selected engine for the plan day (today before 13:00, else tomorrow), then
-        applies the night reserve when outages are likely."""
+        applies the shared rules: one entry per program, tariff-aware night grid charge, the
+        night reserve (strict mode or emergency charge only), expected outages and strict mode."""
         snapshot = {**snapshot, "plan_day": planning.plan_day(snapshot, self.opts, self.tz)}
         outage_days = await asyncio.to_thread(planning.recent_outage_days, self.db, int(snapshot["ts"]))
         if self.opts.grid_status_sensor:
@@ -519,20 +520,24 @@ class BatteryAI:
             grid_days = {o["start"][:10] for o in snapshot["grid"]["outages_last_7_days"]}
             outage_days = sorted(set(outage_days) | grid_days)
         snapshot["recent_outage_days"] = outage_days
+        snapshot["emergency_charge"] = bool(self.control.get("emergency_enabled", True))
         outcome, data = await self._run_engine(snapshot, trigger)
         result = outcome["result"]
         result["plan_date"] = snapshot["plan_day"]["date"]
         result["plan_day"] = snapshot["plan_day"]["label"]
+        fixed = planning.dedupe_programs(result, snapshot)
+        if fixed:
+            _LOGGER.warning("Prediction programs fixed: %s", " ".join(fixed))
+        strict = snapshot["grid"]["strict"] if self.opts.grid_status_sensor else None
         profile = await asyncio.to_thread(self.db.hourly_profile, int(snapshot["ts"]) - 14 * 86400)
         changed = planning.apply_night_reserve(
             result, self.opts, snapshot, planning.night_hours(profile),
-            planning.outages_likely(snapshot, outage_days), self.control.get("keep_grid_charge", False),
-            profile=profile, now_ts=float(snapshot["ts"]), tz=self.tz,
+            planning.reserve_reason(snapshot, strict, snapshot["emergency_charge"]),
+            self.control.get("keep_grid_charge", False), profile=profile, now_ts=float(snapshot["ts"]), tz=self.tz,
         )
         if changed:
-            _LOGGER.info("Night reserve applied to programs %s", changed)
+            _LOGGER.info("Night programs adjusted: %s", changed)
         if self.opts.grid_status_sensor:
-            strict = snapshot["grid"]["strict"]
             windows = grid.expected(self.db, self.tz, float(snapshot["ts"]), self.opts.outage_shift_hours)[snapshot["plan_day"]["label"]]
             covered = planning.apply_expected_outages(
                 result, self.opts, snapshot, windows, profile, self.control.get("keep_grid_charge", False), self.tz, strict,

@@ -444,17 +444,20 @@
           <label>“Charge all” SOC (%)
             <input type="number" name="charge_all_soc_percent" min="10" max="100" step="1">
           </label>
-          <label>Night reserve when outages are likely (%)
+          <label>Night reserve in strict mode (%)
             <input type="number" name="night_reserve_soc_percent" min="0" max="100" step="1">
-            <span class="hint">Evening and night programs (no PV) are kept at this SOC when an outage is scheduled, emergency outages are on or outages happened in the last 7 days. 0 = off. Their grid charge always stays on.</span>
+            <span class="hint">In strict mode, or while emergency outages are on with “Charge on emergency outages” ticked, the evening and night programs that charge from the grid (the cheapest tariff) are kept at this SOC. Pricier-tariff programs without grid charge are never held high. 0 = off.</span>
           </label>
           <label>Outages may shift by (hours)
             <input type="number" name="outage_shift_hours" min="0" max="8" step="1">
             <span class="hint">Yesterday's outages are expected today give or take this much: the battery is charged this much earlier and grid charge stays on this much longer around each expected window.</span>
           </label>
           <label>Strict above (hours without grid a day)
-            <input type="number" name="strict_outage_hours" min="1" max="24" step="1">
-            <span class="hint">More outage hours than this yesterday or today: charge to the maximum before expected outages and keep every program at least at the strict minimum SOC.</span>
+            <select name="strict_outage_hours">
+              <option value="6">6 hours</option>
+              <option value="8">8 hours</option>
+            </select>
+            <span class="hint">Needs the Grid status sensor. More hours without grid than this yesterday or today: charge to the maximum before expected outages, keep every program at least at the strict minimum SOC and keep the night reserve. Below it the battery is used in the day and recharged at night.</span>
           </label>
           <label>Strict minimum SOC (%)
             <input type="number" name="strict_min_soc_percent" min="0" max="100" step="1">

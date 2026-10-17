@@ -2,10 +2,12 @@
 
 - Plan day: a prediction run before PLAN_TODAY_BEFORE_HOUR plans today (its programs are
   still ahead), a later run plans tomorrow.
-- Night reserve: when outages are likely (an outage is scheduled or emergency outages are
-  on now, or outages were recorded in the last days), the programs that run in the evening
-  and night – when there is no PV – are kept at the night reserve SOC, so the battery is
-  full when the sun is gone.
+- Night reserve: only in strict mode (more than the strict limit of hours without grid
+  yesterday or today) or while emergency outages are on with "Charge on emergency outages"
+  ticked. Then the evening/night programs that charge from the grid (the cheapest tariff,
+  or every night program with a single price) are raised to the night reserve SOC. A
+  scheduled outage or outages in the last days alone are no reason: the battery is used in
+  the day and evening and recharged at night; expected windows get the SOC they need.
 """
 
 from __future__ import annotations
@@ -60,16 +62,55 @@ def recent_outage_days(db: Any, now_ts: int) -> list[str]:
     return [r["local_date"] for r in rows]
 
 
-def outages_likely(snapshot: dict[str, Any], outage_days: list[str]) -> str | None:
-    """Why outages are likely tonight, or None."""
+def reserve_reason(snapshot: dict[str, Any], strict: str | None, emergency_charge: bool) -> str | None:
+    """Why the evening/night programs keep the night reserve, or None (use the battery and
+    recharge it at night). Emergency outages count only with "Charge on emergency outages"."""
+    if strict:
+        return f"strict: {strict}"
     attrs = snapshot.get("outages_attrs") or {}
-    if attrs.get("emergency_outages"):
+    if emergency_charge and attrs.get("emergency_outages"):
         return "emergency outages are on"
-    if attrs.get("scheduled_outage"):
-        return f"an outage is scheduled ({attrs.get('outage_starts') or 'soon'})"
-    if outage_days:
-        return f"outages on {len(outage_days)} of the last {OUTAGE_LOOKBACK_DAYS} days"
     return None
+
+
+def dedupe_programs(result: dict[str, Any], snapshot: dict[str, Any]) -> list[str]:
+    """One entry per program slot. An engine sometimes returns a slot twice (and misses
+    another): a repeat whose time matches a missing slot's time takes that slot, any other
+    repeat is dropped. Missing slots keep their current values. Returns notes on what changed."""
+    current = [p for p in snapshot.get("deye_programs") or [] if p.get("slot") is not None]
+    known = {p["slot"] for p in current}
+    by_time = {str(p.get("time") or "")[:5]: p["slot"] for p in current if p.get("time")}
+    seen, kept, notes, repeats = set(), [], [], []
+    for program in result.get("deye_programs") or []:
+        if not isinstance(program, dict) or program.get("slot") is None:
+            continue
+        if program["slot"] in seen:
+            repeats.append(program)
+            continue
+        seen.add(program["slot"])
+        kept.append(program)
+    for program in repeats:
+        slot = by_time.get(str(program.get("time") or "")[:5])
+        if slot is not None and slot not in seen:
+            notes.append(f"P{program['slot']} returned twice: the second (time {program.get('time')}) is P{slot}.")
+            program["slot"] = slot
+            seen.add(slot)
+            kept.append(program)
+        else:
+            notes.append(f"P{program['slot']} returned twice: the repeat was ignored.")
+    if result.get("deye_programs") and known:
+        for program in current:
+            if program["slot"] not in seen:
+                kept.append({
+                    "slot": program["slot"], "time": program.get("time"), "soc_percent": program.get("soc"),
+                    "grid_charge": None if program.get("grid_charge") is None else program.get("grid_charge") == "on",
+                    "reason": "Not in the prediction: kept as it is.",
+                })
+                notes.append(f"P{program['slot']} missing from the prediction: kept as it is.")
+        kept.sort(key=lambda p: p["slot"])
+    if notes:
+        result["deye_programs"] = kept
+    return notes
 
 
 def _profile_w(profile: list[dict[str, Any]], key: str) -> dict[tuple[int, int], float]:
@@ -188,7 +229,9 @@ def apply_night_reserve(
     - several tariffs: on in programs of the cheapest tariff; in pricier ones only when the
       battery would not last until the cheapest tariff (consumption and PV), then with the
       SOC that needs;
-    - when outages are likely (reason), their SOC is raised to the night reserve.
+    - with a reason (strict mode, emergency charge), the SOC of the ones that charge from the
+      grid is raised to the night reserve; a pricier-tariff program with grid charge off is
+      never held high, since the grid would then cover its load at the higher price.
     Nothing touches grid charge when it is left alone. Returns the slots it changed."""
     reserve = min(opts.night_reserve_soc_percent, opts.max_soc_percent) if reason else 0
     times = {p["slot"]: p.get("time") for p in snapshot.get("deye_programs") or []}
@@ -231,10 +274,7 @@ def apply_night_reserve(
         if not hours or len(hours & night) * 2 < len(hours):
             continue  # mostly daytime: PV charges the battery there
         notes = []
-        if reserve and (program.get("soc_percent") is None or program["soc_percent"] < reserve):
-            program["soc_percent"] = reserve
-            notes.append(f"Night reserve {reserve}%: {reason}.")
-            raised.append(program["slot"])
+        cheap = opts.single_price or sum(opts.is_cheap(m % 1440) for m in minutes) * 2 >= len(minutes)
         if not keep_grid_charge and program.get("grid_charge") is not None:
             if opts.single_price:
                 if program["grid_charge"] is False:
@@ -279,6 +319,13 @@ def apply_night_reserve(
                         f"tariff at {check['cheap_at']} (~{check['need_kwh']} kWh needed): grid charge on to "
                         f"{program['soc_percent']}%."
                     )
+        # The reserve: only where the battery is charged from the grid (cheapest tariff or
+        # grid charge on); without grid charge a high SOC just makes the grid cover the load.
+        charging = program.get("grid_charge") is True or (program.get("grid_charge") is None and cheap)
+        if reserve and charging and (program.get("soc_percent") or 0) < reserve:
+            program["soc_percent"] = reserve
+            notes.append(f"Night reserve {reserve}%: {reason}.")
+            raised.append(program["slot"])
         if notes:
             program["reason"] = f"{program.get('reason') or ''} {' '.join(notes)}".strip()
             changed.append(program["slot"])

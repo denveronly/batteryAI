@@ -197,9 +197,13 @@ unplanned emergency outage comes; with several tariffs it is on in the cheapest 
 in a pricier one, only when the battery would not last until the cheapest tariff begins
 (consumption and PV from your history, plus the margin) – then only to the SOC that needs,
 and during the cheap hours tonight's cheap programs charge more instead of charging at the
-higher price; when outages are likely (scheduled, emergency, or recorded on any
-of the last 7 days) these programs are also kept at the *Night reserve* SOC (Settings →
-Prediction tuning, 100% by default, 0 = off). With **Don't touch grid charge** (Battery
+higher price. A scheduled outage or outages in the last days alone do not keep the battery
+full: it is used in the day and evening and recharged at night, holding back only what the
+expected outages need. Only in **strict mode** (below), or while emergency outages are on
+with *Charge on emergency outages* ticked, the night programs that charge from the grid are
+kept at the *Night reserve* SOC (Settings → Prediction tuning, 100% by default, 0 = off). A
+pricier-tariff program with grid charge off is never held high: a program's SOC is a floor,
+so the grid would cover its load at the higher price. With **Don't touch grid charge** (Battery
 control) predictions only set the SOC and never change the grid-charge switches.
 
 ## Grid status and outage patterns
@@ -213,10 +217,10 @@ next. Outages tend to repeat at the same times, so yesterday's outages are expec
 today and tomorrow (and today's tomorrow): outages shift a little from day to day, so each window is
 expected give or take *Outages may shift by* (2 h): from its earliest possible start to
 its latest possible end the programs hold the SOC the window needs, with grid charge on.
-With more than *Strict above* hours (4) without grid yesterday or today the plan is strict:
-the maximum SOC before expected outages and every program at least at the *Strict
-minimum SOC* (60%). The AI
-predictions see the same history, and real outages count for the night reserve.
+With more than *Strict above* hours (6 or 8, 8 by default) without grid yesterday or today
+the plan is strict: the maximum SOC before expected outages, every program at least at the
+*Strict minimum SOC* (60%) and the night reserve. The AI predictions see the same history
+and are told to be strict only then.
 
 ## Charge before an outage
 

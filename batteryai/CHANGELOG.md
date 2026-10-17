@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.30
+
+- **Less strict by default**: a scheduled outage, emergency outages or outages in the last
+  days no longer keep the battery full. It is used in the day and evening and recharged at
+  night in the cheap tariff; expected outage windows still get the SOC they need.
+- **Strict above** (Settings → Prediction tuning) is now a choice of **6 or 8 hours** without
+  grid yesterday or today (8 by default; 4 from 0.4.29 becomes 8). Only strict mode makes
+  every program high, charges to the maximum before outages and keeps the night reserve.
+- **Night reserve** only in strict mode or while emergency outages are on with *Charge on
+  emergency outages* ticked, and only in programs that charge from the grid (the cheapest
+  tariff). A pricier-tariff program with grid charge off is never held at a high SOC, since
+  the grid would cover its load at the higher price.
+- *Charge on emergency outages* off now also means the predictions do not plan for them.
+- The AI prompt no longer asks to keep the battery full after any outage day.
+- A prediction that returns a program twice (e.g. P5 twice, no P6) is fixed: the repeat
+  takes the missing slot by its time, or is dropped; missing programs keep their values.
+
 ## 0.4.29
 
 - Expected outages **may shift**: each window from yesterday is expected today and
