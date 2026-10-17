@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.31
+
+- **Not strict: programs outside the cheap tariff are capped** at what the next outage needs
+  (its expected load plus the margin), or at the minimum SOC when no outage comes before the
+  next grid charge. A program's SOC is a floor: holding more only stops the battery and the
+  grid covers the load at the higher price. Applies to every engine, so an AI that keeps
+  everything high (e.g. 90/85/80/98) is corrected; each program's reason says why.
+  Programs in the cheapest tariff are never lowered – that is where the battery charges.
+- Not strict: a pricier-tariff night program no longer turns grid charge on because the
+  battery may run low before the cheap tariff – that energy costs the same from the grid
+  directly, without battery losses.
+- Tip: set the *Minimum SOC* in Settings to the lowest level you want to keep (e.g. 40%);
+  the cap never goes below it.
+
 ## 0.4.30
 
 - **Less strict by default**: a scheduled outage, emergency outages or outages in the last

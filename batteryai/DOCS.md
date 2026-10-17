@@ -199,7 +199,10 @@ in a pricier one, only when the battery would not last until the cheapest tariff
 and during the cheap hours tonight's cheap programs charge more instead of charging at the
 higher price. A scheduled outage or outages in the last days alone do not keep the battery
 full: it is used in the day and evening and recharged at night, holding back only what the
-expected outages need. Only in **strict mode** (below), or while emergency outages are on
+expected outages need. Programs outside the cheapest tariff are capped at that need (or at
+the *Minimum SOC* when no outage comes before the next grid charge), whatever the prediction
+suggested, and a pricier night program does not grid-charge just to reach the cheap hours.
+Only in **strict mode** (below), or while emergency outages are on
 with *Charge on emergency outages* ticked, the night programs that charge from the grid are
 kept at the *Night reserve* SOC (Settings → Prediction tuning, 100% by default, 0 = off). A
 pricier-tariff program with grid charge off is never held high: a program's SOC is a floor,

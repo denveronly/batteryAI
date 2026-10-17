@@ -530,9 +530,19 @@ class BatteryAI:
             _LOGGER.warning("Prediction programs fixed: %s", " ".join(fixed))
         strict = snapshot["grid"]["strict"] if self.opts.grid_status_sensor else None
         profile = await asyncio.to_thread(self.db.hourly_profile, int(snapshot["ts"]) - 14 * 86400)
+        reason = planning.reserve_reason(snapshot, strict, snapshot["emergency_charge"])
+        if reason is None:  # not strict, no emergency charge: use the battery, charge it cheaply
+            windows = [w for w in [planning.scheduled_window(snapshot)] if w]
+            if self.opts.grid_status_sensor:
+                windows += [
+                    (w["start"], w["end"]) for day in ("today", "tomorrow")
+                    for w in grid.expected(self.db, self.tz, float(snapshot["ts"]), self.opts.outage_shift_hours)[day]
+                ]
+            capped = planning.apply_outage_cap(result, self.opts, snapshot, windows, profile, self.tz)
+            if capped:
+                _LOGGER.info("Not strict: programs %s capped at what the outages need", capped)
         changed = planning.apply_night_reserve(
-            result, self.opts, snapshot, planning.night_hours(profile),
-            planning.reserve_reason(snapshot, strict, snapshot["emergency_charge"]),
+            result, self.opts, snapshot, planning.night_hours(profile), reason,
             self.control.get("keep_grid_charge", False), profile=profile, now_ts=float(snapshot["ts"]), tz=self.tz,
         )
         if changed:

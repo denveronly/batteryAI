@@ -311,6 +311,15 @@ def apply_night_reserve(
                         f"(~{check['need_kwh']} kWh needed), so the cheap hours tonight charge it to "
                         f"{check['soc_needed_from_cheap']}% instead of charging here."
                     )
+                elif not reason:
+                    # Not strict: charging here costs the same as the grid covering the load
+                    # later in this tariff (plus battery losses), so the grid covers it.
+                    if program["grid_charge"]:
+                        program["grid_charge"] = False
+                    notes.append(
+                        f"Pricier tariff: the battery may run low before the cheap tariff at {check['cheap_at']}; "
+                        "the grid covers the rest at the same price, so no grid charge here."
+                    )
                 else:
                     program["grid_charge"] = True
                     program["soc_percent"] = max(program.get("soc_percent") or 0, check["soc_needed"])
@@ -343,6 +352,108 @@ def apply_night_reserve(
     if raised:
         slots = ", ".join(f"P{s}" for s in raised)
         result["summary"] = f"{result.get('summary') or ''} Night reserve: {slots} at {reserve}% ({reason}).".strip()
+    return changed
+
+
+def scheduled_window(snapshot: dict[str, Any]) -> tuple[float, float] | None:
+    """The scheduled outage from the outage sensors as (start, end) timestamps, or None."""
+    attrs = snapshot.get("outages_attrs") or {}
+    starts = attrs.get("outage_starts")
+    if not attrs.get("scheduled_outage") or not starts:
+        return None
+    try:
+        start = datetime.fromisoformat(str(starts)).timestamp()
+    except ValueError:
+        return None
+    minutes = attrs.get("outage_duration_minutes") or 120
+    return start, start + float(minutes) * 60
+
+
+def apply_outage_cap(
+    result: dict[str, Any], opts: Options, snapshot: dict[str, Any], windows: list[tuple[float, float]],
+    profile: list[dict[str, Any]], tz: tzinfo,
+) -> list[int]:
+    """Not strict: a program outside the cheapest tariff never holds more than the next
+    outage needs. Its SOC is a floor – above what an outage needs it only stops the battery
+    from discharging, so the grid covers the load at the higher price. The cap is the SOC
+    the next outage needs (its expected load plus the margin) for a program that runs before
+    it, with no grid-charging program in between, or during it; otherwise the minimum SOC.
+    Programs in the cheapest tariff are left alone (that is where the battery is charged).
+    Only lowers SOCs. Returns the slots it changed."""
+    from outage_plan import energy_kwh, load_profile  # outage_plan imports collector, like this module
+
+    now_ts = float(snapshot.get("ts") or 0)
+    now = datetime.fromtimestamp(now_ts, tz)
+    now_minute = now.hour * 60 + now.minute
+    times = {p["slot"]: p.get("time") for p in snapshot.get("deye_programs") or []}
+    programs = [
+        {**p, "time": times.get(p.get("slot")) or p.get("time")}
+        for p in result.get("deye_programs") or [] if isinstance(p, dict) and p.get("slot") is not None
+    ]
+    ranges = program_ranges(programs, opts.program_time_marks == "end")
+    loads = load_profile(profile)
+    margin = 1 + opts.prediction_margin_percent / 100
+    windows = sorted(w for w in windows if w[1] > now_ts)
+
+    occurrences: dict[int, tuple[float, float, bool]] = {}  # slot -> (start, end, charges from the grid)
+    for program in result.get("deye_programs") or []:
+        span = ranges.get(program.get("slot"))
+        if not span or span[0] == span[1]:
+            continue
+        start, end = span
+        length = (end - start) % 1440 or 1440
+        elapsed = (now_minute - start) % 1440
+        if elapsed < length:  # running now
+            occ_start, occ_end = now_ts, now_ts + (length - elapsed) * 60
+        else:
+            occ_start = _next_start(now, start)
+            occ_end = occ_start + length * 60
+        minutes = [(start + m) % 1440 for m in range(0, length, 15)]
+        cheap = not opts.single_price and sum(opts.is_cheap(m) for m in minutes) * 2 >= len(minutes)
+        occurrences[program["slot"]] = (occ_start, occ_end, cheap or program.get("grid_charge") is True)
+
+    def need_soc(start: float, end: float) -> int:
+        need = energy_kwh(loads, opts, tz, start, end) * margin
+        return min(opts.max_soc_percent, round(opts.min_soc_percent + need / opts.battery_capacity_kwh * 100))
+
+    changed = []
+    for program in result.get("deye_programs") or []:
+        slot = program.get("slot")
+        if slot not in occurrences or program.get("soc_percent") is None:
+            continue
+        span = ranges[slot]
+        minutes = [(span[0] + m) % 1440 for m in range(0, (span[1] - span[0]) % 1440 or 1440, 15)]
+        if opts.single_price or sum(opts.is_cheap(m) for m in minutes) * 2 >= len(minutes):
+            continue  # cheapest tariff: the battery is charged here
+        occ_start, occ_end, _ = occurrences[slot]
+        cap, why = opts.min_soc_percent, "no outage expected before the next grid charge"
+        for w_start, w_end in windows:
+            if occ_start < w_end - 900 and occ_end > w_start + 900:  # runs during the outage
+                cap = need_soc(max(occ_start, w_start), w_end)
+                why = f"the outage until {datetime.fromtimestamp(w_end, tz):%H:%M} needs it"
+                break
+            if occ_end <= w_start and w_start - occ_end < 18 * 3600:
+                charger = any(
+                    s != slot and o_start >= occ_end - 60 and o_start < w_start and charges
+                    for s, (o_start, _, charges) in occurrences.items()
+                )
+                if not charger:
+                    cap = need_soc(w_start, w_end)
+                    why = (f"the outage {datetime.fromtimestamp(w_start, tz):%H:%M}–"
+                           f"{datetime.fromtimestamp(w_end, tz):%H:%M} needs it")
+                break
+        if program["soc_percent"] > cap:
+            program["reason"] = (
+                f"{program.get('reason') or ''} Lowered {program['soc_percent']:g}% → {cap}%: {why}; holding more "
+                "would only make the grid cover the load at the higher price."
+            ).strip()
+            program["soc_percent"] = cap
+            changed.append(slot)
+    if changed:
+        result["summary"] = (
+            f"{result.get('summary') or ''} Not strict: P{', P'.join(map(str, changed))} lowered to what the outages "
+            "need; the battery is used now and recharged in the cheap tariff."
+        ).strip()
     return changed
 
 
