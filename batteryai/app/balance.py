@@ -1,6 +1,7 @@
 """Cell Balance to 100% in morning – a fixed rule, no AI.
 
-At 06:30, if program 1 is running and the battery is above 95%, program 1's SOC is set
+At balance_time (06:30), if program 1 is running and the battery is above
+balance_soc_above (95%), program 1's SOC is set
 to 100% (grid charge turned on if it was off), so the battery tops up to full and the BMS
 can balance the cells. While program 1 runs the 100% is held (a prediction that lowers it
 is put back); when program 1 ends its previous SOC and grid charge come back.
@@ -29,10 +30,13 @@ _LOGGER = logging.getLogger(__name__)
 
 NAME = "Cell Balance to 100% in morning"
 SLOT = 1
-CHECK_AT = 6 * 60 + 30  # 06:30
-CHECK_WINDOW = 10  # minutes after CHECK_AT the check may still run (add-on restarts)
-SOC_ABOVE = 95.0
+CHECK_WINDOW = 10  # minutes after the check time it may still run (add-on restarts)
 TARGET = 100
+
+
+def check_at(opts: Options) -> int:
+    hh, mm = (opts.balance_time or "06:30").split(":")
+    return int(hh) * 60 + int(mm)
 
 
 def state(ctl: dict[str, Any]) -> dict[str, Any]:
@@ -80,7 +84,7 @@ async def check(
 
     if not st.get("enabled") or program is None or st.get("checked") == now.date().isoformat():
         return None
-    if not CHECK_AT <= minute < CHECK_AT + CHECK_WINDOW:
+    if not 0 <= (minute - check_at(opts)) % 1440 < CHECK_WINDOW:
         return None
     st["checked"] = now.date().isoformat()
     soc = to_float(((await ha.state(opts.battery_soc_sensor)) or {}).get("state")) if opts.battery_soc_sensor else None
@@ -88,11 +92,11 @@ async def check(
     if ctl.get("mode") == "charge_all":
         why = "Charge all / outage charging is active"
     elif not running:
-        why = "program 1 is not running at 06:30"
+        why = f"program 1 is not running at {opts.balance_time}"
     elif soc is None:
         why = "the battery SOC sensor has no value"
-    elif soc <= SOC_ABOVE:
-        why = f"battery at {soc:g}% (needs above {SOC_ABOVE:g}%)"
+    elif soc <= opts.balance_soc_above:
+        why = f"battery at {soc:g}% (needs above {opts.balance_soc_above}%)"
     if why:
         st["last"] = {"date": st["checked"], "done": False, "soc": soc, "reason": why}
         control.save_state(ctl)

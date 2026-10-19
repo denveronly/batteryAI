@@ -596,13 +596,17 @@ function renderControl() {
   const b = c.balance || {};
   $("balanceToggle").checked = !!b.enabled;
   $("balanceToggle").disabled = !c.can_write || !b.available;
+  $("balanceLabel").replaceChildren(
+    "Cell Balance to 100% in morning ",
+    el("span", { class: "hint" }, `— no AI: at ${b.time || "06:30"}, if program 1 is running and the battery is above ${b.soc_above ?? 95}%, program 1 is set to 100% (grid charge on) so the cells can balance; when program 1 ends its previous SOC and grid charge come back (time and % in Settings → Cell balance)`),
+  );
   $("balanceInfo").textContent = !b.available
     ? "Needs program 1's SOC entity and the battery SOC sensor in Settings."
     : b.active
       ? `🔋 Balancing: program 1 held at ${b.active.set}% until it ends, then back to ${b.active.soc}%.`
       : b.last
         ? `Last check ${b.last.date}: ${b.last.done ? "✓ " : "skipped – "}${b.last.reason}.`
-        : b.enabled ? "Waiting for 06:30." : "";
+        : b.enabled ? `Waiting for ${b.time || "06:30"}.` : "";
   const since = c.since ? ` since ${fmtTime(c.since)}` : "";
   $("controlInfo").textContent = !c.can_write
     ? "Configure the Deye program SOC entities in Settings to control the inverter."

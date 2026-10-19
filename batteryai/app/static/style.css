@@ -377,3 +377,13 @@ h1 .version:empty { display: none; }
 .switch.sub-switch { margin-left: 28px; }
 .bill tr.group-start td { border-top: 2px solid var(--border); }
 .bill tr.total-more td { font-weight: 650; border-bottom: none; }
+
+/* Foldable Settings cards: click the title row; the state is remembered per card. */
+#view-settings .card > .card-head { cursor: pointer; user-select: none; }
+#view-settings .card > .card-head > h2::before {
+  content: "▾"; display: inline-block; width: 1.1em; color: var(--muted, #888); transition: transform .15s;
+}
+#view-settings .card.folded > .card-head { margin-bottom: 0; }
+#view-settings .card.folded > .card-head > h2::before { transform: rotate(-90deg); }
+#view-settings .card.folded > :not(.card-head) { display: none !important; }
+#view-settings .card.folded > .card-head > :not(h2) { display: none; }

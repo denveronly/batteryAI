@@ -103,7 +103,7 @@
         <p class="muted" id="prechargeInfo"></p>
         <label class="switch">
           <input type="checkbox" id="balanceToggle">
-          <span>Cell Balance to 100% in morning <span class="hint">— no AI: at 06:30, if program 1 is running and the battery is above 95%, program 1 is set to 100% (grid charge on) so the cells can balance; when program 1 ends its previous SOC and grid charge come back</span></span>
+          <span id="balanceLabel">Cell Balance to 100% in morning</span>
         </label>
         <p class="muted" id="balanceInfo"></p>
         <div class="control-buttons">
@@ -477,6 +477,20 @@
           </label>
           <label>Pre-outage SOC (%)
             <input type="number" name="outage_precharge_soc_percent" min="10" max="100" step="1">
+          </label>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>Cell balance</h2><span class="muted">Cell Balance to 100% in morning – a fixed rule without AI; turn it on in Battery control on the dashboard</span></div>
+        <div class="form-grid">
+          <label>Check at
+            <input type="time" name="balance_time" step="60">
+            <span class="hint">At this time, if program 1 is running, the battery SOC is checked.</span>
+          </label>
+          <label>Battery above (%)
+            <input type="number" name="balance_soc_above" min="50" max="99" step="1">
+            <span class="hint">Above this SOC program 1 is set to 100% with grid charge on, held until program 1 ends, then put back.</span>
           </label>
         </div>
       </section>

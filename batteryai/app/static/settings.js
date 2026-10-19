@@ -37,8 +37,8 @@ const SENSORS = SENSOR_GROUPS.flatMap((g) => g.rows);
 const NUMBER_FIELDS = ["record_interval_minutes", "history_days", "detail_days", "local_llm_threads", "prediction_margin_percent", "min_soc_percent",
   "max_soc_percent", "apply_threshold_percent", "charge_all_soc_percent",
   "outage_precharge_minutes", "outage_precharge_soc_percent", "solar_forecast_percent", "night_reserve_soc_percent",
-  "outage_shift_hours", "strict_outage_hours", "strict_min_soc_percent"];
-const TEXT_FIELDS = ["battery_name", "notify_prefix", "claude_effort", "response_language", "extra_instructions", "tariff_currency", "program_time_marks", "prediction_engine", "openai_effort"];
+  "outage_shift_hours", "strict_outage_hours", "strict_min_soc_percent", "balance_soc_above"];
+const TEXT_FIELDS = ["battery_name", "notify_prefix", "claude_effort", "response_language", "extra_instructions", "tariff_currency", "program_time_marks", "prediction_engine", "openai_effort", "balance_time"];
 const PRICE_FIELDS = ["battery_capacity_kwh"];
 
 const ENGINE_HELP = {
@@ -554,6 +554,7 @@ form.addEventListener("submit", async (event) => {
         return `${key.replace(/_/g, " ")}: ${msg}`;
       });
       showResult(result, "error", `✕ ${messages.join("; ")}`);
+      form.querySelectorAll(".invalid").forEach((i) => i.closest("section.card")?.classList.remove("folded"));  // show errors in folded cards
       form.querySelector(".invalid")?.scrollIntoView({ behavior: "smooth", block: "center" });
     } else if (!resp.ok) {
       showResult(result, "error", `✕ HTTP ${resp.status}`);
@@ -614,3 +615,27 @@ window.addEventListener("batteryai:tab", (event) => {
   if (event.detail === "settings") openSettings();
 });
 if (location.hash === "#settings") openSettings();
+
+// Foldable cards ---------------------------------------------------------------
+// Every card in Settings folds by clicking its title row (not its buttons); folded cards
+// are remembered in this browser (localStorage), keyed by the card's title.
+(function foldableCards() {
+  const KEY = "batteryai-folded";
+  let folded = [];
+  try { folded = JSON.parse(localStorage.getItem(KEY) || "[]"); } catch (e) { folded = []; }
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(folded)); } catch (e) {} };
+  for (const card of document.querySelectorAll("#view-settings section.card")) {
+    const head = card.querySelector(":scope > .card-head");
+    const title = head?.querySelector("h2")?.textContent.trim();
+    if (!title) continue;
+    head.title = "Click to fold or unfold";
+    card.classList.toggle("folded", folded.includes(title));
+    head.addEventListener("click", (event) => {
+      if (event.target.closest("button, a, input, select, label")) return;
+      const now = !card.classList.contains("folded");
+      card.classList.toggle("folded", now);
+      folded = now ? [...new Set([...folded, title])] : folded.filter((t) => t !== title);
+      save();
+    });
+  }
+})();

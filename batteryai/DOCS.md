@@ -212,7 +212,7 @@ control) predictions only set the SOC and never change the grid-charge switches.
 ## Cell Balance to 100% in morning
 
 A fixed rule in Battery control, without AI. At 06:30, if program 1 is running and the
-battery is above 95%, program 1 is set to 100% with grid charge on (the *Maximum SOC* does
+battery is above 95% (both in Settings → *Cell balance*), program 1 is set to 100% with grid charge on (the *Maximum SOC* does
 not apply), so the battery tops up to full and the BMS can balance the cells. While program
 1 runs the 100% is held – a prediction that lowers it is put back within a minute. When
 program 1 ends, its previous SOC and grid charge come back (unless something else changed

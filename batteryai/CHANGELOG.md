@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.33
+
+- Settings → **Cell balance**: the check time (06:30) and the battery SOC it needs (above
+  95%) for *Cell Balance to 100% in morning* can be changed.
+- **Foldable Settings blocks**: click a block's title (Sensors, Deye programs, …) to fold or
+  unfold it. Folded blocks are remembered in this browser; a block with a save error opens
+  by itself.
+
 ## 0.4.32
 
 - **Cell Balance to 100% in morning** (Battery control, a fixed rule without AI): at 06:30,

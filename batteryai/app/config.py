@@ -157,6 +157,10 @@ class Options:
     # recharged at night.
     strict_outage_hours: int = 8
     strict_min_soc_percent: int = 60
+    # Cell Balance to 100% in morning (toggle in Battery control): at balance_time, if
+    # program 1 runs and the battery is above balance_soc_above %, program 1 goes to 100%.
+    balance_time: str = "06:30"
+    balance_soc_above: int = 95
     battery_name: str = ""  # shown in the panel header
     # Minutes until the next outage (e.g. sensor.svitlo_..._minutes_to_outage): this long
     # before it every program is set to the pre-outage SOC with grid charge on.
@@ -346,6 +350,8 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         outage_shift_hours=integer("outage_shift_hours", 0, 8),
         strict_outage_hours=strict_hours(raw.get("strict_outage_hours", base.strict_outage_hours)),
         strict_min_soc_percent=integer("strict_min_soc_percent", 0, 100),
+        balance_time=text("balance_time") or "06:30",
+        balance_soc_above=integer("balance_soc_above", 50, 99),
         battery_name=text("battery_name")[:40],
         notify_prefix=text("notify_prefix")[:40],
         outage_precharge_minutes=integer("outage_precharge_minutes", 5, 720),
@@ -359,6 +365,8 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
     opts.program_time_marks = text("program_time_marks") or "start"
     if opts.program_time_marks not in ("end", "start"):
         errors["program_time_marks"] = "must be end or start"
+    if not TIME_RE.match(opts.balance_time):
+        errors["balance_time"] = "must be HH:MM (24-hour), e.g. 06:30"
     if opts.claude_effort not in EFFORTS:
         errors["claude_effort"] = "must be one of " + ", ".join(EFFORTS)
     if opts.openai_effort not in OPENAI_EFFORTS:

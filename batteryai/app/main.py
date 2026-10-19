@@ -830,6 +830,8 @@ async def status(request: web.Request) -> web.Response:
                 "balance": {
                     **balance.state(app.control),
                     "available": balance._program(opts) is not None and bool(opts.battery_soc_sensor),
+                    "time": opts.balance_time,
+                    "soc_above": opts.balance_soc_above,
                 },
             },
             "grid": {"entity": opts.grid_status_sensor, "up": app.grid.up, "checked": app.grid.checked},
