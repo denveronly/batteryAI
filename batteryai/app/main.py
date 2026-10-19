@@ -24,6 +24,7 @@ import anthropic
 from aiohttp import web
 
 from analyzer import AnalysisError, analyze, build_input
+import balance
 import control
 import local_fast
 import local_llm
@@ -340,7 +341,24 @@ class BatteryAI:
                 await self.check_outage()
             except Exception:
                 _LOGGER.exception("Checking the outage minutes sensor failed")
+            try:
+                await self.check_balance()
+            except Exception:
+                _LOGGER.exception("%s failed", balance.NAME)
             await asyncio.sleep(60)
+
+    async def check_balance(self) -> None:
+        """Cell Balance to 100% in morning (fixed rule, no AI), see balance.py."""
+        async with self._outage_lock:
+            actions = await balance.check(self.ha, self.opts, self.control, self.last_snapshot, self.tz)
+        if actions:
+            last = balance.state(self.control).get("last") or {}
+            done = bool(balance.state(self.control).get("active"))
+            await self.notify_actions(
+                actions, "cell balance: program 1 to 100%" if done else "cell balance over",
+                f"{balance.NAME}: {last.get('reason')}." if done
+                else "Program 1 is over: its previous SOC and grid charge are back.",
+            )
 
     @staticmethod
     def _make_client(api_key: str) -> anthropic.AsyncAnthropic | None:
@@ -809,6 +827,10 @@ async def status(request: web.Request) -> web.Response:
                 "keep_grid_charge": app.control.get("keep_grid_charge", False),
                 "precharge_smart_applies": not opts.single_price and bool(opts.outage_duration_sensor),
                 "outage_plan": app.outage_plan,
+                "balance": {
+                    **balance.state(app.control),
+                    "available": balance._program(opts) is not None and bool(opts.battery_soc_sensor),
+                },
             },
             "grid": {"entity": opts.grid_status_sensor, "up": app.grid.up, "checked": app.grid.checked},
             "outage_minutes": {
@@ -1213,6 +1235,19 @@ async def set_keep_grid_charge(request: web.Request) -> web.Response:
     control.save_state(app.control)
     _LOGGER.info("Grid charge %s by predictions", "left alone" if app.control["keep_grid_charge"] else "set")
     return web.json_response({"keep": app.control["keep_grid_charge"]})
+
+
+@routes.post("/api/control/balance")
+async def set_balance(request: web.Request) -> web.Response:
+    """Body {"enabled": bool}: Cell Balance to 100% in morning on/off; off puts program 1 back."""
+    app = _app(request)
+    enabled = bool((await request.json()).get("enabled"))
+    balance.state(app.control)["enabled"] = enabled
+    control.save_state(app.control)
+    _LOGGER.info("%s %s", balance.NAME, "on" if enabled else "off")
+    if not enabled:
+        await app.check_balance()  # puts program 1 back if the 100% is held now
+    return web.json_response({"enabled": enabled})
 
 
 @routes.post("/api/control/precharge")

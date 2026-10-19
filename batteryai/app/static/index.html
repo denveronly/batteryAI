@@ -101,6 +101,11 @@
           <span>Tariff-aware <span class="hint">— charge only what the outage needs: in a pricier tariff only if the battery cannot last until the outage ends; in the cheapest tariff for the outage (and until the cheap hours return)</span></span>
         </label>
         <p class="muted" id="prechargeInfo"></p>
+        <label class="switch">
+          <input type="checkbox" id="balanceToggle">
+          <span>Cell Balance to 100% in morning <span class="hint">— no AI: at 06:30, if program 1 is running and the battery is above 95%, program 1 is set to 100% (grid charge on) so the cells can balance; when program 1 ends its previous SOC and grid charge come back</span></span>
+        </label>
+        <p class="muted" id="balanceInfo"></p>
         <div class="control-buttons">
           <button type="button" id="chargeAll" class="warn-button">Charge all to 98%</button>
         </div>

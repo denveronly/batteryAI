@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.32
+
+- **Cell Balance to 100% in morning** (Battery control, a fixed rule without AI): at 06:30,
+  if program 1 is running and the battery is above 95%, program 1 is set to 100% with grid
+  charge on, so the battery tops up and the BMS can balance the cells. The 100% is held
+  while program 1 runs (a prediction that lowers it is put back); when program 1 ends its
+  previous SOC and grid charge come back. Bypasses the maximum SOC. Off by default; the
+  dashboard shows the last check and a notification is sent when it fires.
+
 ## 0.4.31
 
 - **Not strict: programs outside the cheap tariff are capped** at what the next outage needs

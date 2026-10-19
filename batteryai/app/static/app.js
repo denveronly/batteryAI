@@ -593,6 +593,16 @@ function renderControl() {
           + (o.emergency && c.precharge_smart
             ? ` 🚨 Emergency outages: tariffs ignored, charging to ${c.precharge_soc}% before the outage.`
             : c.precharge_smart && c.outage_plan ? ` ${c.outage_plan.charge ? "⚡ Will charge: " : "✓ "}${c.outage_plan.reason}` : "");
+  const b = c.balance || {};
+  $("balanceToggle").checked = !!b.enabled;
+  $("balanceToggle").disabled = !c.can_write || !b.available;
+  $("balanceInfo").textContent = !b.available
+    ? "Needs program 1's SOC entity and the battery SOC sensor in Settings."
+    : b.active
+      ? `🔋 Balancing: program 1 held at ${b.active.set}% until it ends, then back to ${b.active.soc}%.`
+      : b.last
+        ? `Last check ${b.last.date}: ${b.last.done ? "✓ " : "skipped – "}${b.last.reason}.`
+        : b.enabled ? "Waiting for 06:30." : "";
   const since = c.since ? ` since ${fmtTime(c.since)}` : "";
   $("controlInfo").textContent = !c.can_write
     ? "Configure the Deye program SOC entities in Settings to control the inverter."
@@ -694,6 +704,7 @@ $("autoToggle").addEventListener("change", (e) => controlAction("api/control", {
 $("keepGridCharge").addEventListener("change", (e) => controlAction("api/control/keep_grid_charge", { keep: e.target.checked }));
 $("emergencyToggle").addEventListener("change", (e) => controlAction("api/control/precharge", { emergency: e.target.checked }));
 $("prechargeSmart").addEventListener("change", (e) => controlAction("api/control/precharge", { smart: e.target.checked }));
+$("balanceToggle").addEventListener("change", (e) => controlAction("api/control/balance", { enabled: e.target.checked }));
 $("prechargeToggle").addEventListener("change", (e) => controlAction("api/control/precharge", { enabled: e.target.checked }));
 $("chargeAll").addEventListener("click", () => {
   const soc = status?.control?.charge_all_soc ?? 98;
