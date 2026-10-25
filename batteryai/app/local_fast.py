@@ -251,12 +251,15 @@ def plan(opts: Options, snapshot: dict[str, Any], fc: dict[str, Any]) -> dict[st
         mid = ((span[0] + duration // 2) // 60) % 24
         end_h = (span[1] // 60) % 24
         if opts.single_price:
+            # One price all day: draining the battery saves nothing and only risks an outage
+            # with an empty battery. Keep it full; the "room for PV" rule lowers programs
+            # before sunny hours by the surplus the sun will bring.
             daytime_pv = sum(surplus[h] for h in hours)
-            soc = opts.min_soc_percent
-            grid = False
+            soc = opts.max_soc_percent
+            grid = True
             reason = (
-                "Single price all day: charging from the grid saves nothing, the battery stores PV"
-                + (f" (~{daytime_pv:.1f} kWh surplus in this window)." if daytime_pv > 0.5 else " and covers the load.")
+                "Single price all day: the battery is kept full as an outage reserve (draining it saves nothing)"
+                + (f"; ~{daytime_pv:.1f} kWh PV surplus in this window." if daytime_pv > 0.5 else ".")
             )
         elif offpeak[mid]:
             # Charge window: hold enough for the peak hours until the next off-peak period,

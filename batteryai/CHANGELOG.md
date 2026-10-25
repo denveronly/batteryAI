@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.35
+
+- **Single price: the battery is kept full.** With one price all day, running the battery
+  down saves nothing and only risks an outage with an empty battery. Every engine (Claude,
+  ChatGPT, local LLM, local fast) now keeps every program at the maximum SOC with grid charge
+  on, and *Leave room for PV* lowers only the programs before sunny hours by the surplus the
+  sun will bring (e.g. 100 / 80 / 80 / 85 / 100 / 100). Before, they were told to keep the
+  daytime SOC low with grid charge off.
+
 ## 0.4.34
 
 - **Leave room for PV** (Settings → Prediction tuning, 20% by default, 0 = off): a program's

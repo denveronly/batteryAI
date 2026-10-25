@@ -66,7 +66,7 @@ The inverter has six programs. Each covers a time range and keeps the battery at
 Rules:
 - Grid power costs what the tariff of the hour says (see tariff and tariff_by_hour). Charge from the grid in the cheapest tariff's programs only as much as the following pricier hours need beyond what PV covers.
 - In programs of pricier tariffs let the battery discharge (low SOC, grid_charge false).
-- If tariff.single_price is true the price is the same all day: keep grid_charge false and the SOC low in the daytime programs (the battery stores PV); in the evening and night programs keep grid_charge true, so the battery can recharge for an unplanned outage.
+- If tariff.single_price is true the price is the same all day: draining the battery saves nothing and risks an outage with an empty battery. Keep every program near max_soc with grid_charge true; only leave room for the PV surplus expected after a program starts.
 - If PV tomorrow covers the use, keep grid charging low and let the sun charge the battery.
 - If an outage is expected, keep the battery high and enable grid charge before it.
 - Keep every SOC between min_soc and max_soc. Programs marked unused: return their current SOC and grid_charge false.
