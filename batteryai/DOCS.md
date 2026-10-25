@@ -216,7 +216,8 @@ charges it to. A program at 100% before sunny hours therefore fills the battery 
 and with zero export the sun is throttled. After every prediction, each program is lowered
 below the maximum SOC by the PV surplus still expected after it starts (your recorded PV shape
 scaled to today's or tomorrow's forecast, minus the margin), less what the load uses anyway
-before the sun comes – at most by *Leave room for PV* (Settings → Prediction tuning, 20% by
+before the sun comes (a program that ends before the sun only leaves room for the first two
+hours of surplus, to keep more reserve overnight) – at most by *Leave room for PV* (Settings → Prediction tuning, 20% by
 default, 0 = off), never below the minimum SOC or what an outage in or right after the program
 needs. On a cloudy forecast nothing changes. Not applied in strict mode or during the
 emergency charge.

@@ -469,6 +469,9 @@ def _occurrence(span: tuple[int, int], now: datetime) -> tuple[float, float]:
     return occ_start, occ_start + length * 60
 
 
+PV_ROOM_EARLY = 2 * 3600  # programs before the sun: room for its first two hours only
+
+
 def apply_pv_room(
     result: dict[str, Any], opts: Options, snapshot: dict[str, Any], windows: list[tuple[float, float]],
     profile: list[dict[str, Any]], tz: tzinfo,
@@ -476,7 +479,8 @@ def apply_pv_room(
     """Leave room for PV: a program's SOC is also the level the grid charges to, so a program
     at 100% before sunny hours fills the battery from the grid and the sun has nowhere to go
     (zero export: PV is throttled). Each program is capped at the maximum SOC minus the PV
-    surplus still expected after it starts (recorded PV shape scaled to today's/tomorrow's
+    surplus still expected after it starts – for a program that ends before the sun, only the
+    first two hours of it (recorded PV shape scaled to today's/tomorrow's
     forecast, minus the margin), less what the load drains anyway between the program's end
     and the sun. At most pv_room_percent is left free; never below the minimum SOC or the SOC
     an outage starting in or right after the program needs. Only lowers SOCs."""
@@ -524,10 +528,18 @@ def apply_pv_room(
             continue
         occ_start, occ_end = _occurrence(span, now)
         # PV surplus from the program's start through the next sunny stretch (up to a day).
+        # A program that ends before the sun only leaves room for the first PV_ROOM_EARLY
+        # seconds of surplus (more reserve at night and in the morning); a program the sun
+        # shines in leaves room for the whole sunny stretch.
         surplus, drain, ts, seen_sun, shade = 0.0, 0.0, occ_start, False, 0
+        sun_from, early = None, False
         while ts < occ_start + 86400:
             delta = net_kwh(ts, 900)
             if delta > 0:
+                if sun_from is None:
+                    sun_from, early = ts, ts >= occ_end
+                if early and ts >= sun_from + PV_ROOM_EARLY:
+                    break
                 surplus += delta
                 seen_sun, shade = True, 0
             else:
@@ -548,7 +560,9 @@ def apply_pv_room(
         if target < program["soc_percent"]:
             program["reason"] = (
                 f"{program.get('reason') or ''} Room for PV: {program['soc_percent']:g}% → {target}% "
-                f"(~{surplus:.1f} kWh PV surplus expected after {datetime.fromtimestamp(occ_start, tz):%H:%M}"
+                f"(~{surplus:.1f} kWh PV surplus expected "
+                + (f"in the first 2 h of sun from {datetime.fromtimestamp(sun_from, tz):%H:%M}" if early
+                   else f"after {datetime.fromtimestamp(occ_start, tz):%H:%M}")
                 + (f", the load uses ~{drain:.1f} kWh before the sun" if drain > 0.5 else "") + ")."
             ).strip()
             program["soc_percent"] = target

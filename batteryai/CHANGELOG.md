@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.36
+
+- *Leave room for PV*: a program that ends before the sun (e.g. 03:00–08:00) now leaves room
+  only for the first two hours of PV surplus, less what the load uses before the sun – more
+  reserve overnight and in the morning, when outages hit. Programs the sun shines in still
+  leave room for the whole sunny stretch (e.g. 100 / 92 / 80 / 85 / 100 / 100 instead of
+  95 / 80 / 80 / 85 / 100 / 100).
+
 ## 0.4.35
 
 - **Single price: the battery is kept full.** With one price all day, running the battery
