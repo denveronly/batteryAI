@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.34
+
+- **Leave room for PV** (Settings → Prediction tuning, 20% by default, 0 = off): a program's
+  SOC is also what the grid charges to, so 100% before sunny hours fills the battery from the
+  grid and the sun is throttled (zero export). Every program is now lowered below the maximum
+  SOC by the PV surplus still expected after it starts – the recorded PV shape scaled to
+  today's / tomorrow's forecast, minus the margin, less what the load uses anyway before the
+  sun (e.g. 100 → 95 / 80 / 85%). Never below an outage's need or the minimum SOC; a cloudy
+  forecast changes nothing. For every engine; not in strict mode or during the emergency
+  charge. Works with *Don't touch grid charge*, where the SOC is the only lever.
+- **Local fast and outages**: a scheduled outage no longer keeps every program at 100% all
+  day. Only the programs running during it or in the two hours before it hold the energy it
+  needs (recorded load × margin) with grid charge on. Without a known start time, or with the
+  emergency charge on, the battery is kept full as before.
+
 ## 0.4.33
 
 - Settings → **Cell balance**: the check time (06:30) and the battery SOC it needs (above

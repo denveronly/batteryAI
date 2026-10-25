@@ -467,6 +467,10 @@
           <label>Strict minimum SOC (%)
             <input type="number" name="strict_min_soc_percent" min="0" max="100" step="1">
           </label>
+          <label>Leave room for PV (up to % of the battery)
+            <input type="number" name="pv_room_percent" min="0" max="50" step="1">
+            <span class="hint">A program's SOC is also what the grid charges to. Before sunny hours each program is lowered below the maximum SOC by the PV surplus still expected (e.g. 98 → 90%), so the sun fills the battery instead of the grid – at most by this much, never below an outage's need. Not in strict mode. 0 = off.</span>
+          </label>
           <label>Solar forecast correction (%)
             <input type="number" name="solar_forecast_percent" min="1" max="200" step="1">
             <span class="hint">Today's and tomorrow's solar forecast are multiplied by this: 110 = PV usually comes out 10% above the forecast, 90 = 10% below. 100 = as forecast.</span>

@@ -209,6 +209,18 @@ pricier-tariff program with grid charge off is never held high: a program's SOC 
 so the grid would cover its load at the higher price. With **Don't touch grid charge** (Battery
 control) predictions only set the SOC and never change the grid-charge switches.
 
+## Leave room for PV
+
+A Deye program's SOC is both the floor the battery discharges to and the level the grid
+charges it to. A program at 100% before sunny hours therefore fills the battery from the grid,
+and with zero export the sun is throttled. After every prediction, each program is lowered
+below the maximum SOC by the PV surplus still expected after it starts (your recorded PV shape
+scaled to today's or tomorrow's forecast, minus the margin), less what the load uses anyway
+before the sun comes – at most by *Leave room for PV* (Settings → Prediction tuning, 20% by
+default, 0 = off), never below the minimum SOC or what an outage in or right after the program
+needs. On a cloudy forecast nothing changes. Not applied in strict mode or during the
+emergency charge.
+
 ## Cell Balance to 100% in morning
 
 A fixed rule in Battery control, without AI. At 06:30, if program 1 is running and the

@@ -219,6 +219,18 @@ def plan(opts: Options, snapshot: dict[str, Any], fc: dict[str, Any]) -> dict[st
     prices = [opts.tariff_at(h * 60 + 30)[0] for h in range(24)]
     names = [opts.tariff_at(h * 60 + 30)[1] for h in range(24)]
     outage = _outage_expected(snapshot)
+    # The scheduled outage as minutes of the day (start, end); programs that run during it or
+    # in the two hours before it hold what it needs. Without a known window (or with the
+    # emergency charge on) every program is kept full, as before.
+    attrs = snapshot.get("outages_attrs") or {}
+    window = None
+    if outage and attrs.get("outage_starts") and not (attrs.get("emergency_outages") and snapshot.get("emergency_charge")):
+        try:
+            begin = datetime.fromisoformat(str(attrs["outage_starts"]))
+            length = int(attrs.get("outage_duration_minutes") or 120)
+            window = (begin.hour * 60 + begin.minute, length)
+        except ValueError:
+            window = None
     pv_short = fc["pv_tomorrow_kwh"] < fc["consumption_tomorrow_kwh"] * 0.8
 
     programs = snapshot.get("deye_programs") or []
@@ -276,7 +288,15 @@ def plan(opts: Options, snapshot: dict[str, Any], fc: dict[str, Any]) -> dict[st
                 if daytime_pv > 0.5
                 else f"{names[mid]} tariff: use the battery down to the minimum SOC."
             )
-        if outage:
+        if outage and window:
+            begin, length = window
+            near = any(((span[0] + m) - (begin - 120)) % 1440 < length + 120 for m in range(0, duration, 15))
+            if near:
+                need = sum(load[((begin + m) // 60) % 24] for m in range(0, length, 15)) / 4 / 1000 * margin
+                soc = max(soc, opts.min_soc_percent + need / capacity * 100)
+                grid = True
+                reason += f" Outage at {begin // 60:02d}:{begin % 60:02d} ({length} min, ~{need:.1f} kWh): kept for it with grid charge on."
+        elif outage:
             soc = max(soc, opts.max_soc_percent)
             grid = True
             reason += " Outage expected: keep the battery full."

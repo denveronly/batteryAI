@@ -159,6 +159,9 @@ class Options:
     strict_min_soc_percent: int = 60
     # Cell Balance to 100% in morning (toggle in Battery control): at balance_time, if
     # program 1 runs and the battery is above balance_soc_above %, program 1 goes to 100%.
+    # Leave room for PV: programs before sunny hours are capped below the maximum SOC by the
+    # PV surplus still expected, at most this many % of the battery. 0 = off.
+    pv_room_percent: int = 20
     balance_time: str = "06:30"
     balance_soc_above: int = 95
     battery_name: str = ""  # shown in the panel header
@@ -350,6 +353,7 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         outage_shift_hours=integer("outage_shift_hours", 0, 8),
         strict_outage_hours=strict_hours(raw.get("strict_outage_hours", base.strict_outage_hours)),
         strict_min_soc_percent=integer("strict_min_soc_percent", 0, 100),
+        pv_room_percent=integer("pv_room_percent", 0, 50),
         balance_time=text("balance_time") or "06:30",
         balance_soc_above=integer("balance_soc_above", 50, 99),
         battery_name=text("battery_name")[:40],

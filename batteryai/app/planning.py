@@ -457,6 +457,110 @@ def apply_outage_cap(
     return changed
 
 
+def _occurrence(span: tuple[int, int], now: datetime) -> tuple[float, float]:
+    """(start, end) timestamps of a program's current run, or its next one."""
+    start, end = span
+    length = (end - start) % 1440 or 1440
+    minute = now.hour * 60 + now.minute
+    elapsed = (minute - start) % 1440
+    if elapsed < length:  # running now
+        return now.timestamp(), now.timestamp() + (length - elapsed) * 60
+    occ_start = _next_start(now, start)
+    return occ_start, occ_start + length * 60
+
+
+def apply_pv_room(
+    result: dict[str, Any], opts: Options, snapshot: dict[str, Any], windows: list[tuple[float, float]],
+    profile: list[dict[str, Any]], tz: tzinfo,
+) -> list[int]:
+    """Leave room for PV: a program's SOC is also the level the grid charges to, so a program
+    at 100% before sunny hours fills the battery from the grid and the sun has nowhere to go
+    (zero export: PV is throttled). Each program is capped at the maximum SOC minus the PV
+    surplus still expected after it starts (recorded PV shape scaled to today's/tomorrow's
+    forecast, minus the margin), less what the load drains anyway between the program's end
+    and the sun. At most pv_room_percent is left free; never below the minimum SOC or the SOC
+    an outage starting in or right after the program needs. Only lowers SOCs."""
+    if opts.pv_room_percent <= 0:
+        return []
+    loads, pv = _profile_w(profile, "load_power"), _profile_w(profile, "pv_power")
+    if not pv:
+        return []
+    now_ts = float(snapshot.get("ts") or 0)
+    now = datetime.fromtimestamp(now_ts, tz)
+    capacity = opts.battery_capacity_kwh
+    margin = opts.prediction_margin_percent / 100
+
+    def scale(day: datetime) -> float:
+        offset = (day.date() - now.date()).days
+        forecast = snapshot.get("today_forecast") if offset == 0 else snapshot.get("tomorrow_forecast") if offset == 1 else None
+        base = sum(_avg_w(pv, day.replace(hour=h, minute=0), opts, 0.0) for h in range(24)) / 1000
+        return forecast / base if forecast is not None and base > 0.5 else 1.0
+
+    scales: dict[Any, float] = {}
+
+    def net_kwh(ts: float, step: float) -> float:
+        local = datetime.fromtimestamp(ts, tz)
+        if local.date() not in scales:
+            scales[local.date()] = scale(local)
+        sun = _avg_w(pv, local, opts, 0.0) * scales[local.date()]
+        return (sun - _avg_w(loads, local, opts, 1000.0)) * step / 3_600_000
+
+    times = {p["slot"]: p.get("time") for p in snapshot.get("deye_programs") or []}
+    programs = [
+        {**p, "time": times.get(p.get("slot")) or p.get("time")}
+        for p in result.get("deye_programs") or [] if isinstance(p, dict) and p.get("slot") is not None
+    ]
+    ranges = program_ranges(programs, opts.program_time_marks == "end")
+    from outage_plan import energy_kwh, load_profile  # outage_plan imports collector, like this module
+
+    outage_loads = load_profile(profile)
+    lowest = max(opts.min_soc_percent, opts.max_soc_percent - opts.pv_room_percent)
+    changed = []
+    for program in result.get("deye_programs") or []:
+        span = ranges.get(program.get("slot"))
+        if not span or span[0] == span[1] or program.get("soc_percent") is None:
+            continue
+        if program["soc_percent"] <= lowest:
+            continue
+        occ_start, occ_end = _occurrence(span, now)
+        # PV surplus from the program's start through the next sunny stretch (up to a day).
+        surplus, drain, ts, seen_sun, shade = 0.0, 0.0, occ_start, False, 0
+        while ts < occ_start + 86400:
+            delta = net_kwh(ts, 900)
+            if delta > 0:
+                surplus += delta
+                seen_sun, shade = True, 0
+            else:
+                if seen_sun:
+                    shade += 1
+                    if shade >= 4:  # an hour without surplus after the sun: the stretch is over
+                        break
+                elif ts >= occ_end:
+                    drain -= delta  # the load empties the battery anyway before the sun comes
+            ts += 900
+        room = max(0.0, surplus * (1 - margin) - drain)
+        target = max(lowest, int(opts.max_soc_percent - room / capacity * 100))
+        # Outages in the program or within two hours after it keep what they need.
+        for w_start, w_end in windows:
+            if w_end > occ_start and w_start < occ_end + 7200:
+                need = energy_kwh(outage_loads, opts, tz, max(w_start, occ_start), w_end) * (1 + margin)
+                target = max(target, min(opts.max_soc_percent, round(opts.min_soc_percent + need / capacity * 100)))
+        if target < program["soc_percent"]:
+            program["reason"] = (
+                f"{program.get('reason') or ''} Room for PV: {program['soc_percent']:g}% → {target}% "
+                f"(~{surplus:.1f} kWh PV surplus expected after {datetime.fromtimestamp(occ_start, tz):%H:%M}"
+                + (f", the load uses ~{drain:.1f} kWh before the sun" if drain > 0.5 else "") + ")."
+            ).strip()
+            program["soc_percent"] = target
+            changed.append(program["slot"])
+    if changed:
+        result["summary"] = (
+            f"{result.get('summary') or ''} Room for PV: P{', P'.join(map(str, changed))} lowered so the sun can "
+            "fill the battery instead of the grid."
+        ).strip()
+    return changed
+
+
 def _slots_between(ranges: dict[int, tuple[int, int]], start: datetime, end: datetime) -> list[int]:
     """Programs in effect at any moment from start to end (at most a day)."""
     slots: list[int] = []

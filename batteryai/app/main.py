@@ -559,6 +559,9 @@ class BatteryAI:
             capped = planning.apply_outage_cap(result, self.opts, snapshot, windows, profile, self.tz)
             if capped:
                 _LOGGER.info("Not strict: programs %s capped at what the outages need", capped)
+            roomy = planning.apply_pv_room(result, self.opts, snapshot, windows, profile, self.tz)
+            if roomy:
+                _LOGGER.info("Room for PV: programs %s lowered", roomy)
         changed = planning.apply_night_reserve(
             result, self.opts, snapshot, planning.night_hours(profile), reason,
             self.control.get("keep_grid_charge", False), profile=profile, now_ts=float(snapshot["ts"]), tz=self.tz,
