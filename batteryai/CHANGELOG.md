@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.38
+
+- **Manual program changes no longer flip back on the dashboard**: after a change in the
+  Deye programs table the add-on waits (up to 20 s) until Home Assistant reports the new
+  value – inverter integrations such as Solarman only update after their next poll – before
+  redrawing the table. If it is still not confirmed, the result says so (⚠), so a change the
+  inverter did not take is visible.
+
 ## 0.4.37
 
 - **Pre-outage charge shown as such**: while *Charge before scheduled outages* (or the

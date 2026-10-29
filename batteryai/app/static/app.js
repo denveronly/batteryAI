@@ -684,18 +684,19 @@ async function setProgram(slot, body, controls) {
 function actionsList(actions) {
   if (!actions?.length) return null;
   return el("ul", { class: "actions-list" }, ...actions.map((a) =>
-    el("li", { class: a.status === "error" ? "error" : "" },
+    el("li", { class: a.status === "error" || a.warning ? "error" : "" },
       a.slot ? `Program ${a.slot}: ` : "",
       a.kind === "grid_charge" ? "grid charge " : "",
       a.status === "set" ? `${a.entity_id} ${a.from ?? ""} → ${a.to}` :
         a.status === "unchanged" ? (a.kind === "grid_charge" ? `${a.entity_id} already ${a.value}` : `${a.entity_id} kept at ${fmt(a.value, 0)} (suggested ${fmt(a.suggested, 0)}, below threshold)`) :
-          `${a.entity_id}: ${a.error}`)));
+          `${a.entity_id}: ${a.error}`,
+      a.warning ? ` ⚠ ${a.warning}` : "")));
 }
 
 async function controlAction(path, body) {
   const result = $("controlResult");
   result.className = "result";
-  result.textContent = "Working…";
+  result.textContent = path.startsWith("api/programs/") ? "Writing to the inverter, waiting for it to confirm (up to 20 s)…" : "Working…";
   const res = await api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) })
     .catch((err) => ({ error: err.message }));
   if (res.error) {

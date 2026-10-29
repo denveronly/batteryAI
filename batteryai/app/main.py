@@ -1082,7 +1082,34 @@ async def set_program(request: web.Request) -> web.Response:
         actions.append(action)
     _LOGGER.info("Manual program change: %s", actions)
     await app.notify_actions(actions, "program changed manually")
-    await asyncio.sleep(1)  # let the inverter integration report the new state
+    # Inverter integrations (Solarman, Modbus) report the new value only after their next poll:
+    # wait up to 20 s for Home Assistant to show it, so the table doesn't flip back.
+    pending = [a for a in actions if a.get("status") == "set"]
+    deadline = time.monotonic() + 20
+    while pending and time.monotonic() < deadline:
+        await asyncio.sleep(1)
+        still = []
+        for a in pending:
+            try:
+                state = (await app.ha.fetch_state(a["entity_id"])).get("state")
+            except HAError:
+                still.append(a)
+                continue
+            if a.get("kind") == "grid_charge":
+                done = control.charge_is_on(state) == control.charge_is_on(a.get("to"))
+            else:
+                value = to_float(state)
+                done = value is not None and abs(value - float(a.get("to") or 0)) < 0.5
+            if not done:
+                still.append(a)
+        pending = still
+    for a in pending:
+        a["warning"] = (
+            "Home Assistant still reports the old value after 20 s: the inverter integration may update "
+            "later, or the inverter did not take the change."
+        )
+    if pending:
+        _LOGGER.warning("Manual program change not confirmed yet: %s", [a["entity_id"] for a in pending])
     await app.record()
     return web.json_response({"actions": actions})
 
