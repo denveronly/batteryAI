@@ -295,7 +295,7 @@ function buildForm() {
         el("h3", {}, `Program ${slot}`),
         entityRow({ name: `deye_programs.${slot}.time_entity`, label: "Start time", hint: "time / select / sensor", kind: "time" }),
         entityRow({ name: `deye_programs.${slot}.soc_entity`, label: "SOC capacity", hint: "% (number or select)", kind: "numeric" }),
-        entityRow({ name: `deye_programs.${slot}.charge_entity`, label: "Grid charge", hint: "grid charge switch or select, e.g. Disabled / Grid (optional)", kind: "switch" }),
+        entityRow({ name: `deye_programs.${slot}.charge_entity`, label: "Grid charge", hint: "grid charge switch or select (optional). With a generator, use the charge-source select (Disabled / Grid / Gen / Grid & Gen): only its grid part is changed, Gen is kept", kind: "switch" }),
       ),
     );
   }

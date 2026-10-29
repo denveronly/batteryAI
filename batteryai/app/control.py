@@ -82,8 +82,17 @@ def charge_is_on(state: Any) -> bool:
     return text in ON_WORDS or "grid" in text
 
 
-def _charge_option(options: list[str], on: bool) -> str | None:
+def _charge_option(options: list[str], on: bool, current: str | None = None) -> str | None:
+    """The select option for grid charge on/off. Generator charging ("Gen") is kept: with Gen
+    selected now, on means "Grid & Gen" and off means "Gen" – only the grid part changes."""
     lowered = [(o, o.strip().lower()) for o in options]
+    if current is not None and "gen" in current.strip().lower():
+        both = next((o for o, t in lowered if "grid" in t and "gen" in t), None)
+        gen_only = next((o for o, t in lowered if "gen" in t and "grid" not in t), None)
+        if on and both:
+            return both
+        if not on and gen_only:
+            return gen_only
     if on:
         for test in (
             lambda t: t == "grid",
@@ -106,8 +115,9 @@ async def set_switch(ha: HomeAssistant, entity_id: str, on: bool, option: str | 
         await ha.call_service(domain, "turn_on" if on else "turn_off", {"entity_id": entity_id})
         return {"entity_id": entity_id, "to": "on" if on else "off"}
     if domain in SELECT_DOMAINS:
-        options = [str(o) for o in ((await ha.fetch_state(entity_id)).get("attributes") or {}).get("options") or []]
-        choice = option if option in options else _charge_option(options, on)
+        state = await ha.fetch_state(entity_id)
+        options = [str(o) for o in (state.get("attributes") or {}).get("options") or []]
+        choice = option if option in options else _charge_option(options, on, state.get("state"))
         if choice is None:
             raise HAError("unsupported", f"{entity_id}: no option for grid charge {'on' if on else 'off'} in {options}")
         await ha.call_service(domain, "select_option", {"entity_id": entity_id, "option": choice})

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.39
+
+- **Generator charging is kept**: with a Deye charge-source select (Disabled / Grid / Gen /
+  Grid & Gen) as a program's grid-charge entity, BatteryAI now only changes the grid part:
+  Gen + grid charge on = Grid & Gen, Grid & Gen + off = Gen. "Gen" counts as grid charge off.
+  Use the select rather than an on/off switch when the generator charges the battery – a
+  switch cannot tell Grid from Gen.
+
 ## 0.4.38
 
 - **Manual program changes no longer flip back on the dashboard**: after a change in the
