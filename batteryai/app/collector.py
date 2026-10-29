@@ -22,6 +22,7 @@ NUMERIC_FIELDS = (
     *POWER_FIELDS,
     "pv_today",
     "grid_import_today",
+    "battery_discharge_today",
     "outdoor_temp",
 )
 FORECAST_CACHE_SECONDS = 1800

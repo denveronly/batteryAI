@@ -387,3 +387,6 @@ h1 .version:empty { display: none; }
 #view-settings .card.folded > .card-head > h2::before { transform: rotate(-90deg); }
 #view-settings .card.folded > :not(.card-head) { display: none !important; }
 #view-settings .card.folded > .card-head > :not(h2) { display: none; }
+
+/* Economy: the period total under the days */
+.total-row td { font-weight: 650; border-top: 2px solid var(--border); }

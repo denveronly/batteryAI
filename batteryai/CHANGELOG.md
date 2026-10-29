@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.42
+
+- **Economy tab, new layout** per day and in total for the period:
+  - per grid tariff (Peak, then Off-peak): kWh · price paid · money; **Grid total**;
+  - **PV**: kWh (PV production counter) · peak price · money;
+  - **Battery discharged**: kWh · off-peak price · money;
+  - **Inverter savings** = PV money + battery money.
+  Tiles and the chart follow the same split.
+- New optional sensor **Battery discharge today** (Settings → Sensors; kWh counter, e.g. the
+  Deye daily battery discharge). It is recorded from now on; days before it show "—".
+
 ## 0.4.41
 
 - Deye programs table: a program whose charge entity is a **switch** has a Grid charge

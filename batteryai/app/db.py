@@ -104,6 +104,7 @@ NEW_READING_COLUMNS = {
     "source": "TEXT DEFAULT 'live'",
     "resolution_s": "INTEGER",
     "appliances": "TEXT",  # JSON {appliance id: W}; replaces the three fixed columns above
+    "battery_discharge_today": "REAL",
 }
 NEW_ANALYSIS_COLUMNS = {"actions_json": "TEXT"}
 
@@ -120,6 +121,7 @@ READING_FIELDS = (
     "pv_power",
     "control_mode",
     "resolution_s",
+    "battery_discharge_today",
 )
 # Older readings are compressed to one row per hour (see compress_before).
 HOURLY = 3600
@@ -849,7 +851,7 @@ def economy_report(
     first = (today - timedelta(days=days - 1)).isoformat()
     rows = db._query(
         """SELECT ts, local_date, weekday, is_weekend, minute_of_day, load_power, pv_power,
-                  grid_import_today, control_mode, resolution_s
+                  grid_import_today, pv_today, battery_discharge_today, control_mode, resolution_s
            FROM readings WHERE local_date >= ? ORDER BY ts""",
         (first,),
     )
@@ -867,6 +869,9 @@ def economy_report(
                 "pv_saved": 0.0,
                 "grid_kwh": 0.0,
                 "grid_by_tariff": {},  # tariff name -> kWh bought
+                "grid_cost_by_tariff": {},  # tariff name -> money paid
+                "pv_kwh": None,  # PV production counter (end of day)
+                "battery_kwh": None,  # battery discharge counter (end of day)
                 "paid": 0.0,
                 "_grid_samples": 0,
                 "_auto": 0,
@@ -874,6 +879,9 @@ def economy_report(
             }
         day["_samples"] += 1
         day["_auto"] += row["control_mode"] == "auto"
+        if row["minute_of_day"] >= DAILY_RESET_GRACE_MINUTES:  # daily counters reset at midnight
+            day["pv_kwh"] = _max(day["pv_kwh"], row["pv_today"])
+            day["battery_kwh"] = _max(day["battery_kwh"], row["battery_discharge_today"])
         if (
             day["_samples"] == 1
             and (row["resolution_s"] or 0) >= HOURLY
@@ -884,6 +892,7 @@ def economy_report(
             price0, zone0 = tariff_at(row["minute_of_day"])
             day["grid_kwh"] += row["grid_import_today"]
             day["grid_by_tariff"][zone0] = day["grid_by_tariff"].get(zone0, 0.0) + row["grid_import_today"]
+            day["grid_cost_by_tariff"][zone0] = day["grid_cost_by_tariff"].get(zone0, 0.0) + row["grid_import_today"] * price0
             day["paid"] += row["grid_import_today"] * price0
             day["_grid_samples"] += 1
         if index + 1 >= len(rows):
@@ -913,17 +922,26 @@ def economy_report(
                 )
                 day["grid_kwh"] += delta
                 day["grid_by_tariff"][grid_zone] = day["grid_by_tariff"].get(grid_zone, 0.0) + delta
+                day["grid_cost_by_tariff"][grid_zone] = day["grid_cost_by_tariff"].get(grid_zone, 0.0) + delta * grid_price
                 day["paid"] += delta * grid_price
                 day["_grid_samples"] += 1
 
+    # PV is valued at the highest (peak) price, battery discharge at the cheapest (off-peak).
+    prices = {tariff_at(m)[0] for m in range(0, 1440, 15)}
+    peak_price, cheap_price = max(prices), min(prices)
     result = []
     for day in out.values():
+        day["pv_money"] = None if day["pv_kwh"] is None else day["pv_kwh"] * peak_price
+        day["battery_money"] = None if day["battery_kwh"] is None else day["battery_kwh"] * cheap_price
+        parts = [v for v in (day["pv_money"], day["battery_money"]) if v is not None]
+        day["inverter_saved"] = sum(parts) if parts else None
         has_grid = day.pop("_grid_samples") > 0
         samples = day.pop("_samples")
         day["ai_control_share"] = round(day.pop("_auto") / samples * 100) if samples else 0
         if not has_grid:
             day["paid"] = day["grid_kwh"] = None
             day["grid_by_tariff"] = {}
+            day["grid_cost_by_tariff"] = {}
         day["total_saved"] = day["without_system"] - day["paid"] if has_grid else None
         day["battery_saved"] = day["total_saved"] - day["pv_saved"] if has_grid else None
         day["saved_percent"] = (
@@ -935,6 +953,7 @@ def economy_report(
             if isinstance(value, float):
                 day[key] = round(value, 2)
         day["grid_by_tariff"] = {k: round(v, 2) for k, v in day["grid_by_tariff"].items()}
+        day["grid_cost_by_tariff"] = {k: round(v, 2) for k, v in day["grid_cost_by_tariff"].items()}
         result.append(day)
 
     def total(key: str) -> float | None:
@@ -943,13 +962,18 @@ def economy_report(
 
     totals = {key: total(key) for key in (
         "load_kwh", "without_system", "paid", "pv_saved", "battery_saved", "total_saved",
-        "grid_kwh", "pv_direct_kwh",
+        "grid_kwh", "pv_direct_kwh", "pv_kwh", "battery_kwh", "pv_money", "battery_money", "inverter_saved",
     )}
     by_tariff: dict[str, float] = {}
+    cost_by_tariff: dict[str, float] = {}
     for day in result:
         for name, kwh in day["grid_by_tariff"].items():
             by_tariff[name] = round(by_tariff.get(name, 0.0) + kwh, 2)
+        for name, cost in day["grid_cost_by_tariff"].items():
+            cost_by_tariff[name] = round(cost_by_tariff.get(name, 0.0) + cost, 2)
     totals["grid_by_tariff"] = by_tariff
+    totals["grid_cost_by_tariff"] = cost_by_tariff
+    totals["peak_price"], totals["cheap_price"] = peak_price, cheap_price
     totals["saved_percent"] = (
         round(totals["total_saved"] / totals["without_system"] * 100, 1)
         if totals["total_saved"] is not None and totals["without_system"]

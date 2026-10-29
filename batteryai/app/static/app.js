@@ -852,24 +852,31 @@ async function refreshEconomy() {
   const t = report.totals;
   const notes = [];
   if (!report.has_grid_sensor) notes.push("Set a “Grid import today” sensor in Settings to calculate what was paid and the savings.");
-  if (!report.has_pv_power_sensor) notes.push("Set a “PV power” sensor in Settings to split savings into PV and battery.");
-  $("economyNotes").replaceChildren(...notes.map((n) => el("div", { class: "banner" }, n)));
+  if (!report.has_pv_energy_sensor) notes.push("Set a “PV production today” sensor in Settings to value the PV.");
   $("economyInfo").textContent = status?.tariff
     ? status.tariff.tariffs.length === 1
       ? `${status.tariff.tariffs[0].name} ${status.tariff.tariffs[0].price_per_kwh} ${cur}/kWh (all day)`
       : status.tariff.tariffs.map((x) => `${x.name} ${x.price_per_kwh} ${cur}/kWh (${Array.isArray(x.windows) ? x.windows.join(", ") : x.windows})`).join(" · ")
     : "";
-  const tariffNames = (status?.tariff?.tariffs || []).map((x) => x.name);
-  const cheapest = status?.tariff?.cheapest;
+  // Grid tariffs from the most to the least expensive (Peak, then Off-peak).
+  const tariffs = (status?.tariff?.tariffs || []).slice().sort((a, b) => b.price_per_kwh - a.price_per_kwh);
+  const kwh = (v) => (v === null || v === undefined ? "—" : `${fmt(v)} kWh`);
+  const rate = (v) => (v === null || v === undefined ? "—" : `${fmt(v, 2)} ${cur}`);
+  // The price actually paid in a tariff (prices may change during the period), else today's.
+  const paidRate = (row, tariff) => {
+    const k = row.grid_by_tariff?.[tariff.name];
+    const c = row.grid_cost_by_tariff?.[tariff.name];
+    return k ? c / k : tariff.price_per_kwh;
+  };
+  if (!report.has_battery_sensor) notes.push("Set a “Battery discharge today” sensor in Settings to value what the battery gave.");
+  $("economyNotes").replaceChildren(...notes.map((n) => el("div", { class: "banner" }, n)));
   $("economyTiles").replaceChildren(
-    tile("Saved", money(t.total_saved), t.saved_percent !== null ? `${fmt(t.saved_percent, 0)} %` : ""),
-    tile("Saved by PV", money(t.pv_saved)),
-    tile("Saved by battery & AI plan", money(t.battery_saved)),
-    tile("Paid for grid", money(t.paid)),
-    tile("Without PV & battery", money(t.without_system)),
-    tile("Grid energy", t.grid_kwh === null ? "—" : fmt(t.grid_kwh),
-      t.grid_kwh === null ? "" : status?.tariff?.single_price ? "kWh" : `kWh (${fmt(t.grid_by_tariff?.[cheapest] ?? 0)} at ${cheapest})`),
-    tile("Consumption", fmt(t.load_kwh), "kWh"),
+    ...tariffs.map((x) => tile(`Grid ${x.name}`, money(t.grid_cost_by_tariff?.[x.name] ?? (t.grid_kwh === null ? null : 0)),
+      `${fmt(t.grid_by_tariff?.[x.name] ?? 0)} kWh`)),
+    tile("Grid total", money(t.paid), t.grid_kwh === null ? "" : `${fmt(t.grid_kwh)} kWh`),
+    tile("PV", money(t.pv_money), t.pv_kwh === null ? "" : `${fmt(t.pv_kwh)} kWh × ${fmt(t.peak_price, 2)}`),
+    tile("Battery discharged", money(t.battery_money), t.battery_kwh === null ? "" : `${fmt(t.battery_kwh)} kWh × ${fmt(t.cheap_price, 2)}`),
+    tile("Inverter savings", money(t.inverter_saved)),
   );
 
   const rows = report.days;
@@ -881,30 +888,43 @@ async function refreshEconomy() {
     data: {
       labels: rows.map((d) => shortDate(d.date)),
       datasets: [
-        bar("Paid", css("--series-load"), col("paid"), { stack: "cost" }),
-        bar("Saved by PV", css("--series-pv"), col("pv_saved"), { stack: "cost" }),
-        bar("Saved by battery & AI", css("--series-soc"), rows.map((d) => (d.battery_saved === null ? null : Math.max(0, d.battery_saved))), { stack: "cost" }),
+        bar("Grid paid", css("--series-load"), col("paid"), { stack: "cost" }),
+        bar("PV", css("--series-pv"), col("pv_money"), { stack: "cost" }),
+        bar("Battery discharged", css("--series-soc"), col("battery_money"), { stack: "cost" }),
       ],
     },
     options,
     plugins: [weekendShading],
   }, NO_READINGS);
 
-  const header = ["Day", "Consumption", ...tariffNames.map((n) => (tariffNames.length === 1 ? "Grid" : `Grid ${n}`)), "Paid", "Without system", "PV saved", "Battery/AI saved", "Saved", "AI control"];
+  const header = [
+    "Day",
+    ...tariffs.flatMap((x) => [`${x.name} kWh`, `${x.name} price`, `${x.name} money`]),
+    "Grid total",
+    "PV kWh", "PV price", "PV money",
+    "Battery kWh", "Battery price", "Battery money",
+    "Inverter savings",
+  ];
+  const line = (d, label, cls) => el("tr", { class: cls || "" },
+    el("td", { class: "nowrap" }, label),
+    ...tariffs.flatMap((x) => [
+      el("td", { class: "num" }, d.grid_kwh === null ? "—" : kwh(d.grid_by_tariff?.[x.name] ?? 0)),
+      el("td", { class: "num muted" }, rate(paidRate(d, x))),
+      el("td", { class: "num" }, d.grid_kwh === null ? "—" : money(d.grid_cost_by_tariff?.[x.name] ?? 0)),
+    ]),
+    el("td", { class: "num" }, money(d.paid)),
+    el("td", { class: "num" }, kwh(d.pv_kwh)),
+    el("td", { class: "num muted" }, rate(t.peak_price)),
+    el("td", { class: "num" }, money(d.pv_money)),
+    el("td", { class: "num" }, kwh(d.battery_kwh)),
+    el("td", { class: "num muted" }, rate(t.cheap_price)),
+    el("td", { class: "num" }, money(d.battery_money)),
+    el("td", { class: "num saved" }, money(d.inverter_saved)),
+  );
   $("economyTable").replaceChildren(
     el("tr", {}, ...header.map((h, i) => el("th", { class: i ? "num" : "" }, h))),
-    ...rows.slice().reverse().map((d) =>
-      el("tr", {},
-        el("td", {}, shortDate(d.date)),
-        el("td", { class: "num" }, `${fmt(d.load_kwh)} kWh`),
-        ...tariffNames.map((n) => el("td", { class: "num" }, d.grid_kwh === null ? "—" : `${fmt(d.grid_by_tariff?.[n] ?? 0)} kWh`)),
-        el("td", { class: "num" }, money(d.paid)),
-        el("td", { class: "num" }, money(d.without_system)),
-        el("td", { class: "num" }, money(d.pv_saved)),
-        el("td", { class: "num" }, money(d.battery_saved)),
-        el("td", { class: d.total_saved < 0 ? "num saved loss" : "num saved" }, d.total_saved === null ? "—" : `${money(d.total_saved)} (${fmt(d.saved_percent, 0)} %)`),
-        el("td", { class: "num" }, `${d.ai_control_share} %`),
-      )),
+    ...rows.slice().reverse().map((d) => line(d, shortDate(d.date))),
+    line({ ...t }, "Total", "total-row"),
   );
 }
 $("economyRange").addEventListener("change", refreshEconomy);

@@ -904,6 +904,8 @@ async def economy(request: web.Request) -> web.Response:
     report["currency"] = app.opts.tariff_currency
     report["has_grid_sensor"] = bool(app.opts.grid_import_sensor)
     report["has_pv_power_sensor"] = bool(app.opts.pv_power_sensor)
+    report["has_pv_energy_sensor"] = bool(app.opts.pv_energy_sensor)
+    report["has_battery_sensor"] = bool(app.opts.battery_discharge_sensor)
     return web.json_response(report)
 
 

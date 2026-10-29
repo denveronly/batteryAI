@@ -33,6 +33,7 @@ SENSOR_KEYS = (
     "outage_duration_sensor",
     "emergency_outage_sensor",
     "grid_status_sensor",
+    "battery_discharge_sensor",
 )
 # Settings saved by 0.1/0.2 used "today_load_sensor" for what is a load power sensor.
 LEGACY_KEYS = {"load_power_sensor": "today_load_sensor"}
@@ -128,6 +129,9 @@ class Options:
     weather_entity: str = ""
     appliances: list[Appliance] = field(default_factory=list)
     pv_energy_sensor: str = ""
+    # Battery energy discharged today (kWh counter, e.g. Deye "Daily battery discharge"),
+    # for the Economy tab.
+    battery_discharge_sensor: str = ""
     pv_power_sensor: str = ""
     grid_import_sensor: str = ""
     # Energy meter for the monthly bill (e.g. a Shelly EM total energy, kWh); empty = grid_import_sensor.
@@ -218,6 +222,7 @@ class Options:
             "pv_today": self.pv_energy_sensor,
             "pv_power": self.pv_power_sensor,
             "grid_import_today": self.grid_import_sensor,
+            "battery_discharge_today": self.battery_discharge_sensor,
         }
 
     @property
