@@ -88,7 +88,10 @@ async def resolve_service(ha: HomeAssistant, service: str) -> str:
 def _num(value: Any, digits: int = 1) -> str:
     if value is None:
         return "?"
-    text = f"{float(value):.{digits}f}"
+    try:
+        text = f"{float(value):.{digits}f}"
+    except (TypeError, ValueError):
+        return str(value)
     return text.rstrip("0").rstrip(".") if "." in text else text
 
 
@@ -105,8 +108,9 @@ def _program_lines(
     for action in actions:
         if action.get("status") != "set" or not action.get("slot"):
             continue
-        if action.get("kind") == "grid_charge":
-            was.setdefault(action["slot"], []).append(f"grid charge {action.get('from') or '?'}")
+        if action.get("kind") in ("grid_charge", "gen_charge"):
+            label = "grid charge" if action["kind"] == "grid_charge" else "generator charge"
+            was.setdefault(action["slot"], []).append(f"{label} {action.get('from') or '?'}")
         else:
             was.setdefault(action["slot"], []).insert(0, f"{_num(action.get('from'), 0)}%")
     programs = [
@@ -132,8 +136,9 @@ def _change_lines(actions: list[dict[str, Any]]) -> list[str]:
     for action in actions:
         prefix = f"P{action['slot']} " if action.get("slot") else ""
         if action.get("status") == "set":
-            if action.get("kind") == "grid_charge":
-                lines.append(f"{prefix}grid charge {action.get('from') or '?'} → {action.get('to')}")
+            if action.get("kind") in ("grid_charge", "gen_charge"):
+                label = "grid charge" if action["kind"] == "grid_charge" else "generator charge"
+                lines.append(f"{prefix}{label} {action.get('from') or '?'} → {action.get('to')}")
             else:
                 lines.append(f"{prefix}SOC {_num(action.get('from'), 0)}% → {_num(action.get('to'), 0)}%")
         elif action.get("status") == "error":

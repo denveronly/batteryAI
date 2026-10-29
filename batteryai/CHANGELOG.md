@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.43
+
+- Fix: switching **Gen charge** on the dashboard failed with HTTP 500 after the inverter had
+  already changed – the phone notification could not format a generator change. Notifications
+  now show it ("P3 generator charge Both → Grid"), and an unexpected value can no longer
+  break a request.
+
 ## 0.4.42
 
 - **Economy tab, new layout** per day and in total for the period:
