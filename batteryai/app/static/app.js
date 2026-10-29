@@ -550,11 +550,14 @@ const MODE_TEXT = {
 
 function renderControl() {
   const c = status.control;
-  $("modeBadge").textContent = MODE_TEXT[c.mode];
+  // A pre-outage / emergency charge uses the charge-all mode for a while and then hands back
+  // to the previous mode: show it as that, not as a manual "Charge all".
+  const pre = c.mode === "charge_all" && c.precharge ? c.precharge : null;
+  $("modeBadge").textContent = pre ? (pre.emergency ? "Emergency charge" : "Pre-outage charge") : MODE_TEXT[c.mode];
   $("modeBadge").className = `badge ${c.mode}`;
-  $("autoToggle").checked = c.mode === "auto";
+  $("autoToggle").checked = pre ? pre.previous_mode === "auto" : c.mode === "auto";
   $("autoToggle").disabled = !c.can_write;
-  $("chargeAll").textContent = c.mode === "charge_all" ? `Charging all to ${c.charge_all_soc}% — set again` : `Charge all to ${c.charge_all_soc}%`;
+  $("chargeAll").textContent = c.mode === "charge_all" && !pre ? `Charging all to ${c.charge_all_soc}% — set again` : `Charge all to ${c.charge_all_soc}%`;
   $("chargeAll").disabled = !c.can_write;
   const o = status.outage_minutes || {};
   $("prechargeToggle").checked = c.precharge_enabled;
@@ -590,7 +593,7 @@ function renderControl() {
       : o.minutes === null || o.minutes === undefined
         ? "No outage scheduled."
         : o.minutes <= 0 ? "Outage now." : `Next outage ${outageInText(o).replace(/^next /, "")}${o.duration ? ` for ${fmtDuration(o.duration)}` : ""}.`
-          + (o.emergency && c.precharge_smart
+          + (o.emergency && c.emergency_enabled && c.precharge_smart
             ? ` 🚨 Emergency outages: tariffs ignored, charging to ${c.precharge_soc}% before the outage.`
             : c.precharge_smart && c.outage_plan ? ` ${c.outage_plan.charge ? "⚡ Will charge: " : "✓ "}${c.outage_plan.reason}` : "");
   const b = c.balance || {};
@@ -612,6 +615,8 @@ function renderControl() {
     ? "Configure the Deye program SOC entities in Settings to control the inverter."
     : c.mode === "auto"
       ? `Every prediction's SOC and grid charge are written to the inverter${since}.`
+      : pre
+        ? `${pre.emergency ? "Emergency charge" : `Pre-outage charge for the outage at ${new Date(pre.outage_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}${since}: all programs at ${pre.soc}% with grid charge on. ${pre.previous_mode === "auto" ? "AI auto-control resumes by itself afterwards" : `Back to ${MODE_TEXT[pre.previous_mode] || pre.previous_mode} afterwards`}; untick “Charge before scheduled outages” to stop it now.`
       : c.mode === "charge_all"
         ? `All programs are held at ${c.charge_all_soc}%${since}. Turn on AI auto-control to hand control back to the predictions.`
         : "Predictions only advise; nothing is written to the inverter. Use Apply on a prediction to write it once.";

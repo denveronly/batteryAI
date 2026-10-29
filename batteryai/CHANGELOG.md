@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.37
+
+- **Pre-outage charge shown as such**: while *Charge before scheduled outages* (or the
+  emergency charge) holds the programs, the badge says *Pre-outage charge* / *Emergency
+  charge*, AI auto-control stays ticked when it will resume by itself, and the note says when
+  and to what it hands back – it no longer looks like a manual *Charge all*.
+- *Charge on emergency outages* unticked now also means the pre-outage charge stays
+  tariff-aware during emergency outages (before, an emergency sensor that was on made it
+  charge to the full pre-outage SOC at any price), and the dashboard no longer says
+  "tariffs ignored" then.
+
 ## 0.4.36
 
 - *Leave room for PV*: a program that ends before the sun (e.g. 03:00–08:00) now leaves room

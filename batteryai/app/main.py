@@ -219,7 +219,7 @@ class BatteryAI:
         soc = self.opts.outage_precharge_soc_percent
         reason = f"An outage is expected in {minutes:.0f} minutes; all programs are set to {soc}% with grid charge on."
         decision = await self.tariff_aware_plan(now, outage_at)
-        if self.emergency:
+        if self.emergency_charge:
             reason = f"Emergency outages are on: tariffs are ignored and all programs are set to {soc}% with grid charge on (outage in {minutes:.0f} minutes)."
         if decision is not None:
             if not decision["charge"]:
@@ -300,14 +300,19 @@ class BatteryAI:
         self.outage_duration = outage_plan.duration_minutes(state)
         return self.outage_duration
 
+    @property
+    def emergency_charge(self) -> bool:
+        """Emergency outages count only with "Charge on emergency outages" ticked."""
+        return self.emergency and bool(self.control.get("emergency_enabled", True))
+
     async def tariff_aware_plan(self, now: float, outage_at: float) -> dict[str, Any] | None:
         """The tariff-aware decision, or None when it does not apply (switched off, a single
         price, or no outage duration): then the battery is charged to the pre-outage SOC."""
         self.outage_plan = None
         if not self.control.get("precharge_smart", True) or self.opts.single_price:
             return None
-        if self.emergency:
-            return None  # emergency outages: ignore tariffs, charge to the pre-outage SOC
+        if self.emergency_charge:
+            return None  # emergency outages (charge on them ticked): ignore tariffs, charge to the pre-outage SOC
         duration = await self.read_outage_duration()
         if not duration:
             return None
