@@ -109,6 +109,34 @@ def _fmt_minutes(minutes: int) -> str:
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
+CHARGE_ON_WORDS = {"on", "true", "yes", "enabled", "enable", "1"}
+CHARGE_OFF_WORDS = ("disabled", "disable", "off", "no", "none", "false", "0")
+
+
+def charge_sources(text: Any) -> tuple[bool, bool] | None:
+    """(grid, generator) charging of a Deye charge-source option, or None if unknown.
+    Disabled / Grid / Gen(erator) / Both / Grid & Gen, and on/off switch states."""
+    t = str(text or "").strip().lower()
+    if t in ("both", "all") or ("grid" in t and "gen" in t):
+        return True, True
+    if "grid" in t:
+        return True, False
+    if "gen" in t:
+        return False, True
+    if t in CHARGE_ON_WORDS:
+        return True, False
+    if t in CHARGE_OFF_WORDS:
+        return False, False
+    return None
+
+
+def charge_is_on(state: Any) -> bool:
+    """Grid charge on: a switch that is on, or a select on an option with grid charging
+    (Deye "Grid", "Both", "Grid & Gen", "Enabled"). "Gen"/"Generator" alone is off."""
+    sources = charge_sources(state)
+    return bool(sources and sources[0])
+
+
 def program_ranges(programs: list[dict[str, Any]], time_is_end: bool) -> dict[int, tuple[int, int]]:
     """slot -> (start, end) minutes of the period each program covers, wrapping past midnight.
 
@@ -330,10 +358,10 @@ async def collect(ha: HomeAssistant, opts: Options, tz: tzinfo) -> dict[str, Any
         entry: dict[str, Any] = {"slot": program.slot, "time": time_value, "soc": soc_value}
         if program.charge_entity:
             # "on"/"off" for a switch or a select (Deye: Disabled / Grid / …); the raw state too.
-            text = (charge_value or "").lower()
-            entry["grid_charge"] = None if charge_value is None else (
-                "on" if text in ("on", "true", "yes", "enabled", "enable", "1") or "grid" in text else "off"
-            )
+            entry["grid_charge"] = None if charge_value is None else ("on" if charge_is_on(charge_value) else "off")
+            if program.charge_entity.split(".", 1)[0] in ("select", "input_select") and charge_value is not None:
+                sources = charge_sources(charge_value)
+                entry["gen_charge"] = "on" if sources and sources[1] else "off"
             entry["grid_charge_state"] = charge_value
         programs.append(entry)
     snapshot["deye_programs"] = programs

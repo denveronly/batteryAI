@@ -8,7 +8,7 @@ import os
 import time
 from typing import Any
 
-from collector import to_float
+from collector import charge_is_on, charge_sources as _sources, to_float
 from config import DATA_DIR, Options
 from ha import HAError, HomeAssistant
 
@@ -75,36 +75,19 @@ ON_WORDS = {"on", "true", "yes", "enabled", "enable", "1"}
 OFF_WORDS = ("disabled", "disable", "off", "no", "none", "false", "0")
 
 
-def charge_is_on(state: Any) -> bool:
-    """Grid charge on: a switch that is on, or a select on an option with grid charging
-    (Deye "Grid", "Grid & Gen", "Enabled")."""
-    text = str(state or "").strip().lower()
-    return text in ON_WORDS or "grid" in text
-
-
 def _charge_option(options: list[str], on: bool, current: str | None = None) -> str | None:
-    """The select option for grid charge on/off. Generator charging ("Gen") is kept: with Gen
-    selected now, on means "Grid & Gen" and off means "Gen" – only the grid part changes."""
-    lowered = [(o, o.strip().lower()) for o in options]
-    if current is not None and "gen" in current.strip().lower():
-        both = next((o for o, t in lowered if "grid" in t and "gen" in t), None)
-        gen_only = next((o for o, t in lowered if "gen" in t and "grid" not in t), None)
-        if on and both:
-            return both
-        if not on and gen_only:
-            return gen_only
-    if on:
-        for test in (
-            lambda t: t == "grid",
-            lambda t: "grid" in t and "gen" not in t,
-            lambda t: "grid" in t,
-            lambda t: t in ON_WORDS,
-        ):
-            match = next((o for o, t in lowered if test(t)), None)
-            if match:
-                return match
-        return None
-    return next((o for word in OFF_WORDS for o, t in lowered if t == word), None)
+    """The select option for grid charge on/off. Only the grid part changes: generator
+    charging stays as it is (Generator + on = Both, Both + off = Generator)."""
+    gen = bool((_sources(current) or (False, False))[1])
+    wanted = (on, gen)
+    for o in options:
+        if _sources(o) == wanted:
+            return o
+    for o in options:  # no exact match (e.g. no generator option): the grid part decides
+        sources = _sources(o)
+        if sources and sources[0] == on:
+            return o
+    return None
 
 
 async def set_switch(ha: HomeAssistant, entity_id: str, on: bool, option: str | None = None) -> dict[str, Any]:

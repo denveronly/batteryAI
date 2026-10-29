@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.40
+
+- Charge-source selects with **Disabled / Grid / Generator / Both** (Solarman "Program N
+  Charging") are understood: *Both* counts as grid charge on, *Generator* as off. Switching
+  grid charge keeps the generator part (Generator + on = Both, Both + off = Generator). One
+  shared reading for the dashboard and the control logic (the dashboard showed *Both* as off).
+- Deye programs table: a read-only **Gen charge** column for programs with a charge-source
+  select. BatteryAI never changes generator charging – set it on the inverter or in Home
+  Assistant.
+
 ## 0.4.39
 
 - **Generator charging is kept**: with a Deye charge-source select (Disabled / Grid / Gen /

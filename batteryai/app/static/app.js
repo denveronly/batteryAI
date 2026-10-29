@@ -630,12 +630,14 @@ function renderPrograms(programs) {
   const spans = programSpans(programs);
   const configured = status.programs_configured || {};
   const hasCharge = Object.values(configured).some((p) => p.charge) || programs.some((p) => p.grid_charge !== undefined);
+  const hasGen = programs.some((p) => p.gen_charge !== undefined && p.gen_charge !== null);
   if (!programs.length) {
     table.replaceChildren(el("tr", {}, el("td", { class: "empty" }, "No Deye program data yet. Configure the programs in Settings.")));
     return;
   }
   table.replaceChildren(
-    el("tr", {}, el("th", {}, "Program"), el("th", {}, "Time range"), el("th", {}, "SOC"), hasCharge ? el("th", {}, "Grid charge") : null),
+    el("tr", {}, el("th", {}, "Program"), el("th", {}, "Time range"), el("th", {}, "SOC"), hasCharge ? el("th", {}, "Grid charge") : null,
+      hasGen ? el("th", {}, "Gen charge") : null),
     ...programs.map((p) => {
       const conf = configured[p.slot] || {};
       const input = el("input", { type: "number", min: "0", max: "100", step: "1", "aria-label": `Program ${p.slot} SOC` });
@@ -667,11 +669,19 @@ function renderPrograms(programs) {
           chargeCell = el("td", { class: "muted" }, "—");
         }
       }
+      let genCell = null;
+      if (hasGen) {
+        // Read-only: generator charging is set on the inverter / in Home Assistant, not here.
+        genCell = p.gen_charge === undefined || p.gen_charge === null
+          ? el("td", { class: "muted" }, "—")
+          : el("td", { class: p.gen_charge === "on" ? "" : "muted", title: `Charge source: ${p.grid_charge_state} (change it on the inverter or in Home Assistant)` },
+            p.gen_charge === "on" ? "⚡ on" : "off");
+      }
       return el("tr", { class: p.slot === status.active_program_slot ? "active" : "" },
         el("td", {}, `#${p.slot}`),
         el("td", { class: "nowrap" }, rangeText(spans[p.slot])),
         el("td", {}, el("span", { class: "soc-cell" }, input, "%", setButton)),
-        chargeCell);
+        chargeCell, genCell);
     }),
   );
 }

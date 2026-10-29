@@ -807,7 +807,8 @@ async def status(request: web.Request) -> web.Response:
             "active_program_slot": app.last_snapshot["active_program_slot"] if app.last_snapshot else None,
             "program_time_marks": opts.program_time_marks,
             "programs_configured": {
-                p.slot: {"soc": bool(p.soc_entity), "charge": bool(p.charge_entity)} for p in opts.deye_programs
+                p.slot: {"soc": bool(p.soc_entity), "charge": bool(p.charge_entity),
+                         "gen": p.charge_entity.split(".", 1)[0] in ("select", "input_select")} for p in opts.deye_programs
             },
             "sensors": opts.sensor_map(),
             "tariff": {
@@ -1096,7 +1097,7 @@ async def set_program(request: web.Request) -> web.Response:
                 still.append(a)
                 continue
             if a.get("kind") == "grid_charge":
-                done = control.charge_is_on(state) == control.charge_is_on(a.get("to"))
+                done = str(state) == str(a.get("to")) or control.charge_is_on(state) == control.charge_is_on(a.get("to"))
             else:
                 value = to_float(state)
                 done = value is not None and abs(value - float(a.get("to") or 0)) < 0.5
