@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.41
+
+- Deye programs table: a program whose charge entity is a **switch** has a Grid charge
+  toggle only. With a **charge-source select** (Disabled / Grid / Generator / Both) it gets
+  **Grid** and **Gen** toggles; each changes only its own part (e.g. Generator + Grid on =
+  Both, Both + Gen off = Grid). Predictions, the pre-outage charge and Cell Balance still only
+  change the grid part – generator charging changes only from its toggle.
+
 ## 0.4.40
 
 - Charge-source selects with **Disabled / Grid / Generator / Both** (Solarman "Program N

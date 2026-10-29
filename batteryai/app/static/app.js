@@ -630,7 +630,9 @@ function renderPrograms(programs) {
   const spans = programSpans(programs);
   const configured = status.programs_configured || {};
   const hasCharge = Object.values(configured).some((p) => p.charge) || programs.some((p) => p.grid_charge !== undefined);
-  const hasGen = programs.some((p) => p.gen_charge !== undefined && p.gen_charge !== null);
+  // A charge-source select (Disabled / Grid / Generator / Both) gets a Gen toggle too; a plain
+  // switch is grid charge only.
+  const hasGen = Object.values(configured).some((p) => p.gen);
   if (!programs.length) {
     table.replaceChildren(el("tr", {}, el("td", { class: "empty" }, "No Deye program data yet. Configure the programs in Settings.")));
     return;
@@ -671,11 +673,14 @@ function renderPrograms(programs) {
       }
       let genCell = null;
       if (hasGen) {
-        // Read-only: generator charging is set on the inverter / in Home Assistant, not here.
-        genCell = p.gen_charge === undefined || p.gen_charge === null
-          ? el("td", { class: "muted" }, "—")
-          : el("td", { class: p.gen_charge === "on" ? "" : "muted", title: `Charge source: ${p.grid_charge_state} (change it on the inverter or in Home Assistant)` },
-            p.gen_charge === "on" ? "⚡ on" : "off");
+        if (conf.gen && p.gen_charge !== undefined && p.gen_charge !== null) {
+          const box = el("input", { type: "checkbox", "aria-label": `Program ${p.slot} generator charge` });
+          box.checked = p.gen_charge === "on";
+          box.addEventListener("change", () => setProgram(p.slot, { gen_charge: box.checked }, [box]));
+          genCell = el("td", {}, el("label", { class: "toggle", title: `Charge from the generator (now: ${p.grid_charge_state})` }, box, el("span")));
+        } else {
+          genCell = el("td", { class: "muted" }, "—");
+        }
       }
       return el("tr", { class: p.slot === status.active_program_slot ? "active" : "" },
         el("td", {}, `#${p.slot}`),
@@ -696,7 +701,7 @@ function actionsList(actions) {
   return el("ul", { class: "actions-list" }, ...actions.map((a) =>
     el("li", { class: a.status === "error" || a.warning ? "error" : "" },
       a.slot ? `Program ${a.slot}: ` : "",
-      a.kind === "grid_charge" ? "grid charge " : "",
+      a.kind === "grid_charge" ? "grid charge " : a.kind === "gen_charge" ? "generator charge " : "",
       a.status === "set" ? `${a.entity_id} ${a.from ?? ""} → ${a.to}` :
         a.status === "unchanged" ? (a.kind === "grid_charge" ? `${a.entity_id} already ${a.value}` : `${a.entity_id} kept at ${fmt(a.value, 0)} (suggested ${fmt(a.suggested, 0)}, below threshold)`) :
           `${a.entity_id}: ${a.error}`,

@@ -90,6 +90,23 @@ def _charge_option(options: list[str], on: bool, current: str | None = None) -> 
     return None
 
 
+async def set_gen(ha: HomeAssistant, entity_id: str, on: bool) -> dict[str, Any]:
+    """Generator charging on/off on a charge-source select (Disabled / Grid / Generator /
+    Both); the grid part stays as it is. Only from the dashboard toggle – the automatic
+    logic never changes generator charging."""
+    domain = entity_id.split(".", 1)[0]
+    if domain not in SELECT_DOMAINS:
+        raise HAError("unsupported", f"{entity_id}: generator charging needs a charge-source select (Disabled / Grid / Generator / Both)")
+    state = await ha.fetch_state(entity_id)
+    options = [str(o) for o in (state.get("attributes") or {}).get("options") or []]
+    grid = charge_is_on(state.get("state"))
+    choice = next((o for o in options if _sources(o) == (grid, on)), None)
+    if choice is None:
+        raise HAError("unsupported", f"{entity_id}: no option for grid {'on' if grid else 'off'} + generator {'on' if on else 'off'} in {options}")
+    await ha.call_service(domain, "select_option", {"entity_id": entity_id, "option": choice})
+    return {"entity_id": entity_id, "from": state.get("state"), "to": choice}
+
+
 async def set_switch(ha: HomeAssistant, entity_id: str, on: bool, option: str | None = None) -> dict[str, Any]:
     """Turns grid charge of a program on/off: a switch / input_boolean, or a select whose
     options name it (Deye: Disabled / Grid / …). option restores an exact select option."""

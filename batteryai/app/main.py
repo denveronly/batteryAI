@@ -1081,6 +1081,15 @@ async def set_program(request: web.Request) -> web.Response:
         except HAError as err:
             action.update(status="error", error=str(err))
         actions.append(action)
+    if "gen_charge" in body:
+        if not program.charge_entity:
+            return web.json_response({"error": f"Program {slot} has no charge entity in Settings."}, status=400)
+        action = {"slot": slot, "entity_id": program.charge_entity, "kind": "gen_charge", "time": time.time(), "manual": True}
+        try:
+            action.update(status="set", **await control.set_gen(app.ha, program.charge_entity, bool(body["gen_charge"])))
+        except HAError as err:
+            action.update(status="error", error=str(err))
+        actions.append(action)
     _LOGGER.info("Manual program change: %s", actions)
     await app.notify_actions(actions, "program changed manually")
     # Inverter integrations (Solarman, Modbus) report the new value only after their next poll:
@@ -1096,7 +1105,9 @@ async def set_program(request: web.Request) -> web.Response:
             except HAError:
                 still.append(a)
                 continue
-            if a.get("kind") == "grid_charge":
+            if a.get("kind") == "gen_charge":
+                done = str(state) == str(a.get("to"))
+            elif a.get("kind") == "grid_charge":
                 done = str(state) == str(a.get("to")) or control.charge_is_on(state) == control.charge_is_on(a.get("to"))
             else:
                 value = to_float(state)
