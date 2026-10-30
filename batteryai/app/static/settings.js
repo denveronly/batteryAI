@@ -87,7 +87,7 @@ async function refreshLlmStatus() {
     showResult($("llmStatus"), d.error ? "error" : "warn", d.error ? `✕ Download failed: ${d.error}` : `⚠ Model not downloaded yet (about 2 GB, stored in the add-on's /data, excluded from backups).`);
   }
 }
-const CHECKBOXES = ["notify_predictions", "notify_soc_changes", "notify_errors"];
+const CHECKBOXES = ["notify_predictions", "notify_soc_changes", "notify_errors", "notify_bms_alarms"];
 const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 const PROGRAMS = 6;
 
@@ -153,6 +153,89 @@ function renumberAppliances() {
   $("addAppliance").disabled = rows.length >= MAX_APPLIANCES;
   if (!rows.length) $("applianceRows").replaceChildren();
 }
+
+// Batteries (BMS) for the Battery health tab: a name and the entity prefix (bms0, bms1, …).
+const MAX_BATTERIES = 20;
+
+function batteryRow(battery = {}) {
+  const row = el("div", { class: "appliance-row" });
+  const name = el("input", { type: "text", placeholder: "Name, e.g. Battery 1", maxlength: "40", "data-role": "name" });
+  name.value = battery.name || "";
+  const prefix = el("input", { type: "text", placeholder: "bms0", maxlength: "40", autocomplete: "off", spellcheck: "false", "data-role": "prefix" });
+  prefix.value = battery.prefix || "";
+  const result = el("div", { class: "result" });
+  const test = el("button", { type: "button", class: "secondary" }, "Test");
+  const remove = el("button", { type: "button", class: "secondary remove", title: "Remove this battery", "aria-label": "Remove battery" }, "−");
+  const check = async () => {
+    const value = prefix.value.trim();
+    if (!value) return result.replaceChildren();
+    result.className = "result";
+    result.textContent = "Looking for its entities…";
+    const r = await api(`api/batteries?prefix=${encodeURIComponent(value)}`).catch((err) => ({ error: err.message }));
+    if (r.error) {
+      result.className = "result error";
+      result.textContent = `✕ ${r.error}`;
+    } else if (!r.found) {
+      result.className = "result error";
+      result.textContent = `✕ Nothing found for sensor.${r.prefix}_… / binary_sensor.${r.prefix}_…`;
+    } else {
+      result.className = "result ok";
+      result.textContent = `✓ ${[r.main.join(", "), `${r.cells} cells`, `${r.alarms} alarms`, r.temperatures ? `${r.temperatures} temperatures` : ""].filter(Boolean).join(" · ")}`;
+    }
+  };
+  test.addEventListener("click", check);
+  prefix.addEventListener("change", check);
+  remove.addEventListener("click", () => {
+    row.remove();
+    renumberBatteries();
+  });
+  row.append(
+    el("div", { class: "appliance-fields" },
+      el("label", {}, "Name", name),
+      el("label", { title: "The part between sensor. and _battery_voltage, e.g. bms0" }, "Entity prefix", prefix),
+      el("span", { class: "appliance-buttons" }, test, remove)),
+    result,
+  );
+  if (battery.prefix) check();
+  return row;
+}
+
+function renumberBatteries() {
+  const rows = [...$("batteryRows").children];
+  rows.forEach((row, i) => {
+    row.querySelector('[data-role="name"]').name = `batteries.${i}.name`;
+    row.querySelector('[data-role="prefix"]').name = `batteries.${i}.prefix`;
+  });
+  $("addBattery").disabled = rows.length >= MAX_BATTERIES;
+}
+
+function fillBatteries(list) {
+  $("batteryRows").replaceChildren(...list.map((b) => batteryRow(b)));
+  renumberBatteries();
+}
+
+function readBatteries() {
+  return [...$("batteryRows").children].map((row) => ({
+    name: row.querySelector('[data-role="name"]').value.trim(),
+    prefix: row.querySelector('[data-role="prefix"]').value.trim(),
+  }));
+}
+
+// "+ Add battery" continues from the previous battery: bms0 → bms1 → bms2 (every sensor of the
+// new battery is the previous one's with the number + 1), "Battery 1" → "Battery 2".
+const nextNumbered = (text, fallback) => {
+  const match = /^(.*?)(\d+)(\D*)$/.exec(text || "");
+  return match ? `${match[1]}${String(Number(match[2]) + 1).padStart(match[2].length, "0")}${match[3]}` : fallback;
+};
+
+$("addBattery").addEventListener("click", () => {
+  const rows = [...$("batteryRows").children];
+  const last = rows.length ? readBatteries()[rows.length - 1] : null;
+  const prefix = last ? nextNumbered(last.prefix, "") : "bms0";
+  const name = last ? nextNumbered(last.name, `Battery ${rows.length + 1}`) : "Battery 1";
+  $("batteryRows").append(batteryRow({ name, prefix }));
+  renumberBatteries();
+});
 
 // Suggestions for the appliance emoji field.
 const APPLIANCE_ICONS = ["🚗", "🔌", "♨️", "🔥", "🌡️", "❄️", "💧", "🚿", "🛁", "🧺", "🍳", "💡", "🖥️", "⚡", "🏠", "🏭", "🌀", "🐟", "🏊", "🚜"];
@@ -325,6 +408,7 @@ function fillForm(s) {
   for (const key of [...TEXT_FIELDS, ...NUMBER_FIELDS, ...PRICE_FIELDS, ...SENSORS.map((x) => x.key)]) field(key).value = s[key] ?? "";
   fillTariffs(s.tariffs || []);
   fillAppliances(s.appliances || []);
+  fillBatteries(s.batteries || []);
   field("analysis_times_list").value = (s.analysis_times_list || []).join(", ");
   field("notify_services").value = (s.notify_services || []).join(", ");
   for (const key of CHECKBOXES) field(key).checked = !!s[key];
@@ -358,6 +442,7 @@ function readForm() {
     notify_services: value("notify_services"),
     tariffs: readTariffs(),
     appliances: readAppliances(),
+    batteries: readBatteries(),
     deye_programs: [],
   };
   for (const key of TEXT_FIELDS) data[key] = value(key);

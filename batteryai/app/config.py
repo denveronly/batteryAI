@@ -61,6 +61,16 @@ class Appliance:
 
 
 @dataclass
+class BatteryBms:
+    """A battery pack watched on the Battery health tab: its BMS entities are found in Home
+    Assistant by their prefix (sensor.<prefix>_battery_voltage, sensor.<prefix>_cell_voltage_01,
+    binary_sensor.<prefix>_alarm_*, …)."""
+
+    name: str
+    prefix: str
+
+
+@dataclass
 class Tariff:
     """A grid price that applies in its time windows; the default one applies at all other times."""
 
@@ -86,6 +96,8 @@ def _in_window(minute: int, start: int, end: int) -> bool:
 
 
 MAX_APPLIANCES = 12
+MAX_BATTERIES = 20
+BMS_PREFIX_RE = re.compile(r"^[a-z0-9_]{1,40}$")
 # Up to 0.4.0 there were three fixed appliance settings; they become the first entries.
 LEGACY_APPLIANCES = (
     ("heat_pump", "Heat pump", "heat_pump_power_sensor", True),
@@ -127,6 +139,7 @@ class Options:
     today_consumption_sensor: str = ""
     weather_entity: str = ""
     appliances: list[Appliance] = field(default_factory=list)
+    batteries: list[BatteryBms] = field(default_factory=list)  # Battery health tab
     pv_energy_sensor: str = ""
     # Battery energy discharged today (kWh counter, e.g. Deye "Daily battery discharge"),
     # for the Economy tab.
@@ -205,6 +218,7 @@ class Options:
     notify_predictions: bool = True
     notify_soc_changes: bool = True
     notify_errors: bool = True
+    notify_bms_alarms: bool = True  # Battery health: BMS alarms on/cleared and BMS offline
 
     @property
     def notification_prefix(self) -> str:
@@ -504,6 +518,21 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
             energy_entity=energy_id, icon=str(item.get("icon") or "").strip()[:8],
         ))
 
+    packs = raw.get("batteries")
+    if packs is None:
+        packs = [asdict(b) for b in base.batteries]
+    opts.batteries = []
+    for index, item in enumerate(packs[:MAX_BATTERIES] if isinstance(packs, list) else []):
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()[:40]
+        prefix = str(item.get("prefix") or "").strip().lower().removeprefix("sensor.").rstrip("_")
+        if not name and not prefix:
+            continue  # an empty row
+        if not BMS_PREFIX_RE.match(prefix):
+            errors[f"batteries.{index}.prefix"] = "the entity prefix, e.g. bms0 (letters, digits, _)"
+        opts.batteries.append(BatteryBms(name=name or prefix, prefix=prefix))
+
     services = raw.get("notify_services", base.notify_services) or []
     if isinstance(services, str):
         services = services.split(",")
@@ -515,7 +544,7 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         if not re.match(r"^[a-z0-9_]+$", service):
             errors["notify_services"] = f"'{service}' is not a notify service name"
         opts.notify_services.append(service)
-    for key in ("notify_predictions", "notify_soc_changes", "notify_errors"):
+    for key in ("notify_predictions", "notify_soc_changes", "notify_errors", "notify_bms_alarms"):
         value = raw.get(key, getattr(base, key))
         setattr(opts, key, value if isinstance(value, bool) else str(value).lower() in ("1", "true", "on", "yes"))
 

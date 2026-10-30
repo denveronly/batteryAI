@@ -418,3 +418,31 @@ h1 .version:empty { display: none; }
 #billTable .month-prices label { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 13px; padding: 1px 6px; border-radius: 6px; width: 11em; }
 #billTable .month-prices label > span:first-child { min-width: 4.5em; }
 #billTable .month-prices .price-input { width: 5.5em; }
+
+/* Battery health */
+.chip.bms-ok { color: var(--ok); }
+.chip.bms-bad { color: var(--error); font-weight: 650; }
+.chip.bms-on { color: var(--accent); }
+.bms-cells { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); margin-bottom: 12px; }
+.bms-cell { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; font-variant-numeric: tabular-nums; }
+.bms-cell.low { border-color: #4a90e2; box-shadow: inset 0 0 0 1px #4a90e2; }
+.bms-cell.high { border-color: var(--error); box-shadow: inset 0 0 0 1px var(--error); }
+.bms-cell-n { color: var(--muted); font-size: 11px; }
+.bms-cell-v { font-weight: 650; font-size: 15px; }
+.bms-cell-r { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.bms-bar { height: 4px; background: var(--chip); border-radius: 2px; margin-top: 4px; overflow: hidden; }
+.bms-bar span { display: block; height: 100%; background: var(--accent); }
+.bms-cell.low .bms-bar span { background: #4a90e2; }
+.bms-cell.high .bms-bar span { background: var(--error); }
+.bms-alarms { display: grid; gap: 6px; }
+.bms-alarm { font-size: 13px; color: var(--muted); }
+.bms-alarm.on { color: var(--error); font-weight: 650; background: var(--eco-peak-bg); border-radius: 8px; padding: 6px 10px; }
+.bms-alarm.na { opacity: 0.6; }
+.bms-alarm-list { display: grid; gap: 4px 16px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); margin-top: 8px; }
+.bms-alarms summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+#bmsPacks { display: grid; gap: 16px; }
+.bms-alarm.warn { color: var(--warn); font-weight: 600; background: var(--eco-sun-bg); border-radius: 8px; padding: 6px 10px; margin-bottom: 8px; }
+.bms-log tr.bms-alarm td { color: var(--error); }
+.bms-log tr.bms-warning td { color: var(--warn); }
+.bms-log tr.bms-ok td { color: var(--ok); }
+.bms-log td.muted { color: var(--muted) !important; font-size: 12px; }

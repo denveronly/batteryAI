@@ -88,6 +88,16 @@ CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT
 );
+CREATE TABLE IF NOT EXISTS bms_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    prefix TEXT NOT NULL,
+    battery TEXT,
+    level TEXT NOT NULL,      -- alarm, warning, ok
+    code TEXT,
+    message TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_bms_events_ts ON bms_events (ts);
 """
 
 # Columns added after 0.2.0 (today_load is kept only for old rows; see _migrate).
@@ -519,6 +529,23 @@ class Database:
         return out
 
     # Monthly bill -------------------------------------------------------
+
+    # Battery health log ---------------------------------------------------
+
+    def add_bms_events(self, events: list[dict[str, Any]]) -> None:
+        if not events:
+            return
+        with self._lock:
+            self._conn.executemany(
+                "INSERT INTO bms_events (ts, prefix, battery, level, code, message) VALUES (?, ?, ?, ?, ?, ?)",
+                [(e["ts"], e["prefix"], e.get("battery"), e["level"], e.get("code"), e["message"]) for e in events],
+            )
+            # Keep the log small: the last year.
+            self._conn.execute("DELETE FROM bms_events WHERE ts < ?", (time.time() - 366 * 86400,))
+            self._conn.commit()
+
+    def bms_events(self, limit: int = 200) -> list[dict[str, Any]]:
+        return self._query("SELECT ts, prefix, battery, level, code, message FROM bms_events ORDER BY ts DESC, id DESC LIMIT ?", (limit,))
 
     def meta_get(self, key: str) -> Any:
         rows = self._query("SELECT value FROM meta WHERE key = ?", (key,))

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.49
+
+- New **Battery health** tab (after Economy), for 1–20 battery packs (Settings →
+  **Batteries**: a name and the BMS entity prefix; *+ Add battery* continues the numbering,
+  bms0 → bms1 → bms2). The entities are found by the prefix – no need to enter them one by one:
+  - SOC (`_battery_capacity_state_of_charge`), voltage, current, power, cell delta, error
+    bitmask, charging cycles, cell count (`_cell_count_real`), BMS active alarms;
+  - every cell's voltage and resistance (`_cell_voltage_NN`, `_cell_resistance_NN`), with the
+    lowest cell outlined blue and the highest red;
+  - temperatures (`_temperature_powertube`, `_temperature_sensor_N`, …);
+  - `binary_sensor.<prefix>_status_online` and other `_status_*`, and every
+    `binary_sensor.<prefix>_alarm_*` with readable names (active ones on top).
+  Refreshed every 10 s.
+- **Battery log** on the tab: alarms on / cleared, BMS offline / back online, error bitmask,
+  a changed cell count, and abnormal data – a cell below 2.90 V or above 3.62 V, cell delta
+  above 50 mV, a cell's resistance above 2× the pack's median, temperatures above 50 °C (power
+  tube 70 °C) or below 0 °C, BMS values unavailable – each when it starts and when it ends.
+- **Phone notifications** for battery alarms (Settings → Phone notifications → *battery
+  alarms*, on by default): the battery, the alarm and its code when an alarm turns on or
+  clears, the error bitmask changes, the cell count changes or a BMS goes offline. Abnormal
+  data is logged only.
+
 ## 0.4.48
 
 - Monthly bill: the bill and the appliances tables share one layout – Month · Source ·

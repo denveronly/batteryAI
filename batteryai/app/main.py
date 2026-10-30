@@ -25,6 +25,7 @@ from aiohttp import web
 
 from analyzer import AnalysisError, analyze, build_input
 import balance
+import bms
 import control
 import local_fast
 import local_llm
@@ -350,7 +351,35 @@ class BatteryAI:
                 await self.check_balance()
             except Exception:
                 _LOGGER.exception("%s failed", balance.NAME)
+            try:
+                await self.check_bms()
+            except Exception:
+                _LOGGER.exception("Checking the battery BMS alarms failed")
             await asyncio.sleep(60)
+
+    async def check_bms(self) -> None:
+        """Battery health: notify when a BMS alarm turns on or clears, or a BMS goes offline."""
+        if not self.opts.batteries:
+            return
+        try:
+            states = await self.ha.states()
+        except HAError:
+            return
+        packs = bms.report(self.opts, states)
+        previous = self.control.get("bms_state") or {}
+        state, lines, events = bms.changes(previous, packs, time.time())
+        if events:
+            await asyncio.to_thread(self.db.add_bms_events, events)
+        if state != previous:
+            self.control["bms_state"] = state
+            control.save_state(self.control)
+        if lines:
+            _LOGGER.warning("Battery alarms: %s", " | ".join(lines))
+            alarm = any(line.startswith("⚠") for line in lines)
+            await self.notify(
+                f"🔋 BatteryAI: {'battery alarm' if alarm else 'battery alarm cleared'}", "\n".join(lines),
+                self.opts.notify_bms_alarms, "bms",
+            )
 
     async def check_balance(self) -> None:
         """Cell Balance to 100% in morning (fixed rule, no AI), see balance.py."""
@@ -1140,6 +1169,30 @@ async def set_program(request: web.Request) -> web.Response:
         _LOGGER.warning("Manual program change not confirmed yet: %s", [a["entity_id"] for a in pending])
     await app.record()
     return web.json_response({"actions": actions})
+
+
+@routes.get("/api/batteries")
+async def batteries(request: web.Request) -> web.Response:
+    """Battery health: the live BMS values of every configured battery. ?prefix=bms0 checks
+    one prefix (Settings → Batteries → Test)."""
+    app = _app(request)
+    try:
+        states = await app.ha.states()
+    except HAError as err:
+        return web.json_response({"error": str(err)}, status=502)
+    prefix = request.query.get("prefix")
+    if prefix is not None:
+        prefix = prefix.strip().lower().removeprefix("sensor.").rstrip("_")
+        found = bms.pack(prefix, states)
+        return web.json_response({
+            "prefix": prefix, "found": found["found"], "cells": found["summary"]["cells"],
+            "main": sorted(found["main"]), "alarms": len(found["alarms"]), "temperatures": len(found["temperatures"]),
+        })
+    packs = bms.report(app.opts, states)
+    for pack in packs:
+        pack["issues"] = bms.issues(pack)
+    events = await asyncio.to_thread(app.db.bms_events, 200)
+    return web.json_response({"batteries": packs, "events": events})
 
 
 @routes.get("/api/monthly")

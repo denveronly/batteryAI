@@ -50,6 +50,7 @@
     <nav class="tabs" role="tablist">
       <a href="#dashboard" role="tab" data-tab="dashboard">Dashboard</a>
       <a href="#economy" role="tab" data-tab="economy">Economy</a>
+      <a href="#batteries" role="tab" data-tab="batteries">Battery health</a>
       <a href="#settings" role="tab" data-tab="settings">Settings</a>
       <a href="#logs" role="tab" data-tab="logs">Logs</a>
     </nav>
@@ -240,6 +241,12 @@
       <p class="hint">Grid energy from the meter, split by tariff. Each month keeps its own price per kWh: it is taken from Settings when the month starts and can be edited here (the month's costs follow). Click a month to see its days; <b>Use current prices</b> sets a month to the prices in Settings.</p>
     </section>
     </div>
+  </main>
+
+  <main id="view-batteries" hidden>
+    <div id="bmsNotes"></div>
+    <div id="bmsPacks"></div>
+    <p class="hint">Live values from each battery's BMS in Home Assistant, refreshed every 10 seconds. Batteries and their entity prefixes are set in Settings → Batteries.</p>
   </main>
 
   <main id="view-logs" hidden>
@@ -506,6 +513,17 @@
 
       <section class="card">
         <div class="card-head">
+          <h2>Batteries</h2>
+          <span class="muted">BMS of each battery pack for the Battery health tab – the entities are found by their prefix: sensor.<b>bms0</b>_battery_voltage, sensor.<b>bms0</b>_cell_voltage_01, binary_sensor.<b>bms0</b>_alarm_…</span>
+        </div>
+        <div id="batteryRows"></div>
+        <div class="test-row">
+          <button type="button" class="secondary" id="addBattery">+ Add battery</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
           <h2>Appliances</h2>
           <span class="muted">Devices with their own power sensor (W or kW) – shown on the dashboard and used by the predictions</span>
         </div>
@@ -558,6 +576,7 @@
           <label><input type="checkbox" name="notify_predictions"> every prediction</label>
           <label><input type="checkbox" name="notify_soc_changes"> every SOC / grid-charge change</label>
           <label><input type="checkbox" name="notify_errors"> failed predictions</label>
+          <label><input type="checkbox" name="notify_bms_alarms"> battery alarms (BMS alarm on / cleared, BMS offline)</label>
         </fieldset>
         <div class="test-row">
           <button type="button" class="secondary" id="testNotify">Send test notification</button>

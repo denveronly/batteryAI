@@ -209,6 +209,23 @@ pricier-tariff program with grid charge off is never held high: a program's SOC 
 so the grid would cover its load at the higher price. With **Don't touch grid charge** (Battery
 control) predictions only set the SOC and never change the grid-charge switches.
 
+## Battery health
+
+Settings → **Batteries**: add each battery pack (up to 20) with a name and its BMS entity
+prefix – the part between `sensor.` and `_battery_voltage`, e.g. `bms0`. *Test* shows what
+was found; *+ Add battery* continues from the previous one (bms0 → bms1). The **Battery health**
+tab then shows, per pack and refreshed every 10 s: SOC, voltage, current, power, cell delta,
+error bitmask, charging cycles, cell count, the BMS's active alarm count, every cell's voltage
+and resistance (lowest cell blue, highest red), the temperatures, the online / status sensors
+and all `binary_sensor.<prefix>_alarm_*` alarms.
+
+The **Battery log** at the bottom records, every minute: alarms turning on and clearing, a BMS
+going offline or back online, a non-zero error bitmask, a cell count other than the first one
+seen (16), and abnormal data – a cell below 2.90 V or above 3.62 V, cell delta above 50 mV, a
+cell resistance above 2× the pack's median, a temperature above 50 °C (power tube 70 °C) or
+below 0 °C – when it starts and when it ends. Alarms, the error bitmask, the cell count and
+offline are also sent to the phone (Phone notifications → *battery alarms*).
+
 ## Leave room for PV
 
 A Deye program's SOC is both the floor the battery discharges to and the level the grid

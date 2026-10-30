@@ -1138,6 +1138,112 @@ function renderBillAppliances(data, money, kwh, monthLabel, tariffs) {
 }
 $("billYear").addEventListener("change", refreshBill);
 
+// Battery health tab ------------------------------------------------------------
+
+let bmsTimer = null;
+
+async function refreshBatteries() {
+  clearTimeout(bmsTimer);
+  if (location.hash !== "#batteries") return;
+  let data;
+  try {
+    data = await api("api/batteries");
+  } catch (err) {
+    $("bmsNotes").replaceChildren(el("div", { class: "banner" }, `Could not load data: ${err.message}`));
+    bmsTimer = setTimeout(refreshBatteries, 10000);
+    return;
+  }
+  const packs = data.batteries || [];
+  $("bmsNotes").replaceChildren(...(packs.length ? [] : [el("div", { class: "banner" }, "Add your batteries in Settings → Batteries (a name and the BMS entity prefix, e.g. bms0).")]));
+  $("bmsPacks").replaceChildren(...packs.map(bmsCard), ...(packs.length ? [bmsLog(data.events || [])] : []));
+  bmsTimer = setTimeout(refreshBatteries, 10000);
+}
+
+// The log: alarms, BMS offline and abnormal data (cell voltages, delta, resistance,
+// temperatures), each logged when it starts and when it ends.
+function bmsLog(events) {
+  const icon = { alarm: "⚠", warning: "△", ok: "✓" };
+  return el("section", { class: "card" },
+    el("div", { class: "card-head" }, el("h2", {}, "Battery log"), el("span", { class: "muted" }, "Alarms, BMS offline and abnormal data – when they start and end")),
+    events.length
+      ? el("div", { class: "table-scroll" }, el("table", { class: "programs bms-log" },
+        el("tr", {}, el("th", {}, "Time"), el("th", {}, "Battery"), el("th", {}, "Event"), el("th", {}, "Code")),
+        ...events.map((e) => el("tr", { class: `bms-${e.level}` },
+          el("td", { class: "nowrap" }, new Date(e.ts * 1000).toLocaleString([], { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })),
+          el("td", { class: "nowrap" }, `${e.battery || e.prefix}`),
+          el("td", {}, `${icon[e.level] || ""} ${e.message}`),
+          el("td", { class: "muted" }, e.code || "")))))
+      : el("p", { class: "muted" }, "Nothing logged yet – all batteries normal since monitoring started."));
+}
+
+// "3.312 V" for cells, mV for the delta when the sensor reports volts.
+const bmsNum = (v, digits) => (v?.value === null || v?.value === undefined ? "—" : fmt(v.value, digits));
+function bmsDelta(v) {
+  if (!v || v.value === null) return ["—", ""];
+  return v.unit === "V" && Math.abs(v.value) < 1 ? [fmt(v.value * 1000, 0), "mV"] : [fmt(v.value, 3), v.unit];
+}
+
+function bmsCard(b) {
+  const m = b.main || {};
+  const sum = b.summary || {};
+  const online = b.online === true ? el("span", { class: "chip bms-ok" }, "● Online")
+    : b.online === false ? el("span", { class: "chip bms-bad" }, "● Offline") : null;
+  const activeCount = Math.max(b.active_alarms || 0, Math.round(b.main?.alarms_total?.value || 0));
+  const alarmChip = activeCount
+    ? el("span", { class: "chip bms-bad" }, `⚠ ${activeCount} active alarm${activeCount > 1 ? "s" : ""}`)
+    : b.alarms.length || b.main?.alarms_total ? el("span", { class: "chip bms-ok" }, "✓ No alarms") : null;
+  const [delta, deltaUnit] = bmsDelta(m.delta);
+  const tiles = [
+    m.soc && tile("SOC", bmsNum(m.soc, 0), m.soc.unit || "%"),
+    m.voltage && tile("Voltage", bmsNum(m.voltage, 2), m.voltage.unit),
+    m.current && tile("Current", bmsNum(m.current, 1), m.current.unit),
+    m.power && tile("Power", bmsNum(m.power, 0), m.power.unit),
+    m.delta && tile("Cell delta", delta, deltaUnit),
+    m.errors && tinted(tile("Error bitmask", m.errors.value ? `0x${Math.round(m.errors.value).toString(16).toUpperCase().padStart(4, "0")}` : "0", m.errors.value ? "⚠" : "✓"), m.errors.value ? "eco-peak" : "eco-none"),
+    m.cycles && tile("Charging cycles", bmsNum(m.cycles, 0), ""),
+    m.alarms_total && tinted(tile("BMS active alarms", bmsNum(m.alarms_total, 0), ""), m.alarms_total.value ? "eco-peak" : "eco-none"),
+    m.cell_count && tile("Cells (BMS)", bmsNum(m.cell_count, 0), ""),
+    sum.min_v !== null && sum.min_v !== undefined && tile(`Lowest cell #${pad2(sum.min_cell)}`, fmt(sum.min_v, 3), "V"),
+    sum.max_v !== null && sum.max_v !== undefined && tile(`Highest cell #${pad2(sum.max_cell)}`, fmt(sum.max_v, 3), "V"),
+    ...(b.temperatures || []).map((t) => tile(t.name.replace(new RegExp(`^${b.prefix}\\s*`, "i"), ""), bmsNum(t, 1), t.unit)),
+  ].filter(Boolean);
+
+  // Cells: voltage with a bar between the lowest and highest cell, and the resistance.
+  const span = (sum.max_v ?? 0) - (sum.min_v ?? 0);
+  const cells = (b.cells || []).map((c) => {
+    const v = c.voltage?.value;
+    const cls = v === null || v === undefined ? "bms-cell" : v === sum.min_v && span > 0 ? "bms-cell low" : v === sum.max_v && span > 0 ? "bms-cell high" : "bms-cell";
+    const share = v === null || v === undefined || span <= 0 ? 50 : ((v - sum.min_v) / span) * 100;
+    return el("div", { class: cls, title: [c.voltage?.entity_id, c.resistance?.entity_id].filter(Boolean).join("\n") },
+      el("div", { class: "bms-cell-n" }, `#${pad2(c.n)}`),
+      el("div", { class: "bms-cell-v" }, v === null || v === undefined ? "—" : `${fmt(v, 3)} ${c.voltage.unit || "V"}`),
+      el("div", { class: "bms-bar" }, el("span", { style: `width:${Math.max(4, share)}%` })),
+      c.resistance ? el("div", { class: "bms-cell-r" }, `${bmsNum(c.resistance, 3)} ${c.resistance.unit}`) : null);
+  });
+
+  const active = b.alarms.filter((a) => a.active);
+  const quiet = b.alarms.filter((a) => !a.active);
+  const alarmName = (a) => a.name.replace(new RegExp(`^${b.prefix}\\s*(alarm\\s*)?`, "i"), "");
+  const alarms = b.alarms.length ? el("div", { class: "bms-alarms" },
+    ...active.map((a) => el("div", { class: "bms-alarm on", title: a.entity_id }, `⚠ ${alarmName(a)}`)),
+    el("details", {},
+      el("summary", {}, `${quiet.length} alarm${quiet.length === 1 ? "" : "s"} clear${active.length ? "" : " – all OK"}`),
+      el("div", { class: "bms-alarm-list" }, ...quiet.map((a) => el("div", { class: a.available ? "bms-alarm" : "bms-alarm na", title: a.entity_id }, `${a.available ? "✓" : "?"} ${alarmName(a)}`))))) : null;
+
+  return el("section", { class: "card" },
+    el("div", { class: "card-head" }, el("h2", {}, b.name), el("span", { class: "muted" }, b.prefix), online, alarmChip,
+      ...(b.statuses || []).map((st) => el("span", { class: `chip ${st.on ? "bms-on" : ""}`, title: st.entity_id }, `${st.on ? "●" : "○"} ${st.name.replace(new RegExp(`^${b.prefix}\\s*(status\\s*)?`, "i"), "")}`))),
+    b.found ? null : el("div", { class: "banner" }, `Nothing found for sensor.${b.prefix}_… in Home Assistant – check the prefix in Settings → Batteries.`),
+    Object.keys(b.issues || {}).length
+      ? el("div", { class: "bms-alarms" }, ...Object.entries(b.issues).map(([code, text]) => el("div", { class: "bms-alarm warn", title: code }, `△ ${text}`)))
+      : null,
+    tiles.length ? el("section", { class: "tiles" }, ...tiles) : null,
+    cells.length ? el("h3", { class: "group-title" }, `Cells (${cells.length})`) : null,
+    cells.length ? el("div", { class: "bms-cells" }, ...cells) : null,
+    alarms ? el("h3", { class: "group-title" }, "Alarms") : null,
+    alarms);
+}
+
 // Logs tab ----------------------------------------------------------------------
 
 let logTimer = null;
@@ -1482,7 +1588,7 @@ applyTheme(currentTheme());
 
 // Tabs ---------------------------------------------------------------------------
 
-const OTHER_TABS = ["#settings", "#economy", "#economy-bill", "#logs"];
+const OTHER_TABS = ["#settings", "#economy", "#economy-bill", "#batteries", "#logs"];
 
 function showTab() {
   const tab = OTHER_TABS.includes(location.hash) ? location.hash.slice(1).split("-")[0] : "dashboard";
@@ -1491,6 +1597,7 @@ function showTab() {
   $("view-economy").hidden = tab !== "economy";
   $("view-settings").hidden = tab !== "settings";
   $("view-logs").hidden = tab !== "logs";
+  $("view-batteries").hidden = tab !== "batteries";
   $("dashActions").hidden = tab !== "dashboard";
   document.querySelectorAll(".tabs a[data-tab]").forEach((a) => {
     a.classList.toggle("active", a.dataset.tab === tab);
@@ -1513,6 +1620,7 @@ function showTab() {
     refreshStorage();
     refreshLogs(true);
   }
+  if (tab === "batteries") refreshBatteries();
   window.dispatchEvent(new CustomEvent("batteryai:tab", { detail: tab }));
 }
 window.addEventListener("hashchange", () => {
