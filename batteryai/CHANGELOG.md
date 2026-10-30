@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.59
+
+- Battery lines: the power value (e.g. "−844 W discharging") is centred under the zero line;
+  on the Dashboard the voltage sits on the right, SOC on the left.
+
 ## 0.4.58
 
 - Battery log, new checks (each logged when it starts and ends):

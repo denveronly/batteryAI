@@ -561,3 +561,8 @@ label { align-content: start; }
 .bms-col.high .bms-col-track { box-shadow: inset 0 0 0 2px var(--error); background: color-mix(in srgb, var(--error) 18%, var(--chip)); }
 .bms-col-n { margin-top: 4px; font-size: 11px; font-weight: 650; color: var(--muted); background: var(--chip); border-radius: 5px; padding: 0 5px; }
 .bms-col.low .bms-col-n { color: #4a90e2; } .bms-col.high .bms-col-n { color: var(--error); }
+
+/* Power value centred under the zero line; on the Dashboard the voltage sits on the right */
+.bms-pval { text-align: center; margin-top: 6px; }
+#dashBatteryLines .bms-line-values { grid-template-columns: 1fr auto; }
+#dashBatteryLines .bms-line-values > .bms-big:nth-child(2) { text-align: right; }

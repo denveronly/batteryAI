@@ -1330,8 +1330,8 @@ function bmsPowerBar(b) {
   const level = idle ? "idle" : powerLevel(Math.abs(watts));
   const fill = el("span", { class: `bms-pbar-fill ${level}`, style: watts >= 0 ? `left:50%;width:${share}%` : `right:50%;width:${share}%` });
   return el("div", { class: "bms-power", title: `${fmt(watts, 0)} ${m.power.unit || "W"} (bar scale ±${scale / 1000} kW)` },
-    el("div", { class: "bms-pbar" }, fill, el("span", { class: "bms-pbar-zero" }, el("i", {}, "0"))),
-    el("div", { class: `bms-pval ${level}` }, idle ? "idle" : `${watts > 0 ? "+" : "−"}${fmt(Math.abs(watts), 0)} ${m.power.unit || "W"} ${watts > 0 ? "charging" : "discharging"}`));
+    el("div", { class: "bms-pbar" }, fill, el("span", { class: "bms-pbar-zero" })),
+    el("div", { class: `bms-pval ${level}` }, idle ? "0 W · idle" : `${watts > 0 ? "+" : "−"}${fmt(Math.abs(watts), 0)} ${m.power.unit || "W"} ${watts > 0 ? "charging" : "discharging"}`));
 }
 
 // Column chart for the cells (voltages, resistances): one column per cell, its number at the
