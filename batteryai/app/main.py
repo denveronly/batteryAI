@@ -864,6 +864,7 @@ async def status(request: web.Request) -> web.Response:
                 for a in opts.appliances
                 if a.entity
             ],
+            "batteries_count": len(opts.batteries),
             "weather": app.last_snapshot.get("weather") if app.last_snapshot else None,
             "control": {
                 "mode": app.control["mode"],

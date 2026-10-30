@@ -860,7 +860,7 @@ async function refreshEconomy() {
   const days = $("economyRange").value;
   let report;
   try {
-    [report, status] = await Promise.all([api(`api/economy?days=${days}`), status ? Promise.resolve(status) : api("api/status")]);
+    [report, status] = await Promise.all([api(`api/economy?days=${days}`), api("api/status")]);
   } catch (err) {
     $("economyNotes").replaceChildren(el("div", { class: "banner" }, `Could not load data: ${err.message}`));
     return;
@@ -1009,7 +1009,7 @@ async function refreshBill() {
   let data;
   try {
     // The status holds the tariffs' prices, which decide the Peak/Off-peak colours.
-    [data, status] = await Promise.all([api(`api/bill${year ? `?year=${year}` : ""}`), status ? Promise.resolve(status) : api("api/status")]);
+    [data, status] = await Promise.all([api(`api/bill${year ? `?year=${year}` : ""}`), api("api/status")]);
   } catch (err) {
     $("billNotes").replaceChildren(el("div", { class: "banner" }, `Could not load data: ${err.message}`));
     return;
@@ -1291,19 +1291,69 @@ function bmsDelta(v) {
   return v.unit === "V" && Math.abs(v.value) < 1 ? [fmt(v.value * 1000, 0), "mV"] : [fmt(v.value, 3), v.unit];
 }
 
+// Status sensors with their icon; green when on.
+const BMS_STATUS = {
+  balancing: ["⚖️", "Balancing"], charging: ["🔌", "Charging"], discharging: ["🔋", "Discharging"],
+  precharging: ["⏳", "Precharging"], heating: ["🔥", "Heating"],
+};
+
+// Which dropdowns of which battery are open survives the 10-second refresh and reloads.
+let bmsOpen = new Set();
+try { bmsOpen = new Set(JSON.parse(localStorage.getItem("batteryai-bms-open") || "[]")); } catch (e) {}
+function bmsDetails(key, summary, ...content) {
+  const d = el("details", bmsOpen.has(key) ? { class: "bms-drop", open: "" } : { class: "bms-drop" }, el("summary", {}, ...summary), ...content);
+  d.addEventListener("toggle", () => {
+    if (d.open) bmsOpen.add(key);
+    else bmsOpen.delete(key);
+    try { localStorage.setItem("batteryai-bms-open", JSON.stringify([...bmsOpen])); } catch (e) {}
+  });
+  return d;
+}
+
+// Power bar: 0 in the middle, discharging to the left (amber, red when high), charging to the right (green).
+function bmsPowerBar(b) {
+  const m = b.main || {};
+  const p = m.power?.value;
+  if (p === null || p === undefined) return null;
+  const sign = m.current?.value ?? p;
+  const watts = Math.abs(p) * (sign < 0 ? -1 : 1);
+  const scale = Math.max(5000, Math.ceil(Math.abs(watts) / 1000) * 1000);
+  const share = Math.min(50, (Math.abs(watts) / scale) * 50);
+  const idle = Math.abs(watts) < 20;
+  const cls = idle ? "idle" : watts > 0 ? "charge" : Math.abs(watts) > scale * 0.5 ? "discharge high" : "discharge";
+  const fill = el("span", { class: `bms-pbar-fill ${cls}`, style: watts >= 0 ? `left:50%;width:${share}%` : `right:50%;width:${share}%` });
+  return el("div", { class: "bms-power", title: `${fmt(watts, 0)} ${m.power.unit || "W"} (bar scale ±${scale / 1000} kW)` },
+    el("div", { class: "bms-pbar" }, el("span", { class: "bms-pbar-zero" }), fill),
+    el("div", { class: `bms-pval ${cls}` }, idle ? "idle" : `${watts > 0 ? "+" : "−"}${fmt(Math.abs(watts), 0)} ${m.power.unit || "W"} ${watts > 0 ? "charging" : "discharging"}`));
+}
+
+// One line per battery: name, online, alarms, statuses, SOC, voltage and the power bar.
+function bmsLine(b, compact = false) {
+  const m = b.main || {};
+  const online = b.online === true ? el("span", { class: "chip bms-ok", title: "BMS online" }, "● Online")
+    : b.online === false ? el("span", { class: "chip bms-bad" }, "● Offline") : null;
+  const activeCount = Math.max(b.active_alarms || 0, Math.round(m.alarms_total?.value || 0));
+  const alarmChip = activeCount
+    ? el("span", { class: "chip bms-bad" }, `⚠ ${activeCount} alarm${activeCount > 1 ? "s" : ""}`)
+    : b.alarms.length || m.alarms_total ? el("span", { class: "chip bms-ok" }, "✓ No alarms") : null;
+  const statuses = (b.statuses || []).map((st) => {
+    const [icon, label] = BMS_STATUS[st.key] || ["•", st.name];
+    return el("span", { class: `chip bms-status ${st.on ? "on" : ""}`, title: `${label}: ${st.on ? "on" : "off"}` }, `${icon} ${label}`);
+  });
+  return el("div", { class: `bms-line${compact ? " compact" : ""}` },
+    el("div", { class: "bms-line-head" },
+      el(compact ? "b" : "h2", {}, b.name), compact ? null : el("span", { class: "muted" }, b.prefix), online, alarmChip, ...statuses),
+    el("div", { class: "bms-line-values" },
+      m.soc ? el("div", { class: "bms-big" }, el("span", { class: "label" }, "SOC"), el("b", {}, bmsNum(m.soc, 0)), el("small", {}, m.soc.unit || "%")) : null,
+      m.voltage ? el("div", { class: "bms-big" }, el("span", { class: "label" }, "Voltage"), el("b", {}, bmsNum(m.voltage, 2)), el("small", {}, m.voltage.unit || "V")) : null,
+      bmsPowerBar(b)));
+}
+
 function bmsCard(b) {
   const m = b.main || {};
   const sum = b.summary || {};
-  const online = b.online === true ? el("span", { class: "chip bms-ok" }, "● Online")
-    : b.online === false ? el("span", { class: "chip bms-bad" }, "● Offline") : null;
-  const activeCount = Math.max(b.active_alarms || 0, Math.round(b.main?.alarms_total?.value || 0));
-  const alarmChip = activeCount
-    ? el("span", { class: "chip bms-bad" }, `⚠ ${activeCount} active alarm${activeCount > 1 ? "s" : ""}`)
-    : b.alarms.length || b.main?.alarms_total ? el("span", { class: "chip bms-ok" }, "✓ No alarms") : null;
   const [delta, deltaUnit] = bmsDelta(m.delta);
-  const tiles = [
-    m.soc && tile("SOC", bmsNum(m.soc, 0), m.soc.unit || "%"),
-    m.voltage && tile("Voltage", bmsNum(m.voltage, 2), m.voltage.unit),
+  const more = [
     m.current && tile("Current", bmsNum(m.current, 1), m.current.unit),
     m.power && tile("Power", bmsNum(m.power, 0), m.power.unit),
     m.delta && tile("Cell delta", delta, deltaUnit),
@@ -1311,9 +1361,6 @@ function bmsCard(b) {
     m.cycles && tile("Charging cycles", bmsNum(m.cycles, 0), ""),
     m.alarms_total && tinted(tile("BMS active alarms", bmsNum(m.alarms_total, 0), ""), m.alarms_total.value ? "eco-peak" : "eco-none"),
     m.cell_count && tile("Cells (BMS)", bmsNum(m.cell_count, 0), ""),
-    sum.min_v !== null && sum.min_v !== undefined && tile(`Lowest cell #${pad2(sum.min_cell)}`, fmt(sum.min_v, 3), "V"),
-    sum.max_v !== null && sum.max_v !== undefined && tile(`Highest cell #${pad2(sum.max_cell)}`, fmt(sum.max_v, 3), "V"),
-    ...(b.temperatures || []).map((t) => tile(t.name.replace(new RegExp(`^${b.prefix}\\s*`, "i"), ""), bmsNum(t, 1), t.unit)),
   ].filter(Boolean);
 
   // Cells: voltage with a bar between the lowest and highest cell, and the resistance.
@@ -1328,28 +1375,48 @@ function bmsCard(b) {
       el("div", { class: "bms-bar" }, el("span", { style: `width:${Math.max(4, share)}%` })),
       c.resistance ? el("div", { class: "bms-cell-r" }, `${bmsNum(c.resistance, 3)} ${c.resistance.unit}`) : null);
   });
+  const temps = (b.temperatures || []).filter((t) => t.available);
+  const hottest = temps.reduce((a, t) => (t.value !== null && (a === null || t.value > a.value) ? t : a), null);
 
   const active = b.alarms.filter((a) => a.active);
   const quiet = b.alarms.filter((a) => !a.active);
-  const alarmName = (a) => a.name.replace(new RegExp(`^${b.prefix}\\s*(alarm\\s*)?`, "i"), "");
-  const alarms = b.alarms.length ? el("div", { class: "bms-alarms" },
-    ...active.map((a) => el("div", { class: "bms-alarm on", title: a.entity_id }, `⚠ ${alarmName(a)}`)),
-    el("details", {},
-      el("summary", {}, `${quiet.length} alarm${quiet.length === 1 ? "" : "s"} clear${active.length ? "" : " – all OK"}`),
-      el("div", { class: "bms-alarm-list" }, ...quiet.map((a) => el("div", { class: a.available ? "bms-alarm" : "bms-alarm na", title: a.entity_id }, `${a.available ? "✓" : "?"} ${alarmName(a)}`))))) : null;
+  const key = (part) => `${b.prefix}:${part}`;
 
   return el("section", { class: "card" },
-    el("div", { class: "card-head" }, el("h2", {}, b.name), el("span", { class: "muted" }, b.prefix), online, alarmChip,
-      ...(b.statuses || []).map((st) => el("span", { class: `chip ${st.on ? "bms-on" : ""}`, title: st.entity_id }, `${st.on ? "●" : "○"} ${st.name.replace(new RegExp(`^${b.prefix}\\s*(status\\s*)?`, "i"), "")}`))),
+    bmsLine(b),
     b.found ? null : el("div", { class: "banner" }, `Nothing found for sensor.${b.prefix}_… in Home Assistant – check the prefix in Settings → Batteries.`),
-    Object.keys(b.issues || {}).length
-      ? el("div", { class: "bms-alarms" }, ...Object.entries(b.issues).map(([code, text]) => el("div", { class: "bms-alarm warn", title: code }, `△ ${text}`)))
-      : null,
-    tiles.length ? el("section", { class: "tiles" }, ...tiles) : null,
-    cells.length ? el("h3", { class: "group-title" }, `Cells (${cells.length})`) : null,
-    cells.length ? el("div", { class: "bms-cells" }, ...cells) : null,
-    alarms ? el("h3", { class: "group-title" }, "Alarms") : null,
-    alarms);
+    ...active.map((a) => el("div", { class: "bms-alarm on", title: a.entity_id }, `⚠ ${a.name}`)),
+    ...Object.entries(b.issues || {}).map(([code, text]) => el("div", { class: "bms-alarm warn", title: code }, `△ ${text}`)),
+    cells.length ? bmsDetails(key("cells"), [`Cell voltages (${cells.length})`, el("span", { class: "muted" },
+      ` · Δ ${delta} ${deltaUnit} · lowest #${pad2(sum.min_cell)} ${fmt(sum.min_v, 3)} V · highest #${pad2(sum.max_cell)} ${fmt(sum.max_v, 3)} V`)],
+      el("div", { class: "bms-cells" }, ...cells)) : null,
+    temps.length ? bmsDetails(key("temps"), [`Temperatures (${temps.length})`, hottest ? el("span", { class: "muted" }, ` · highest ${hottest.name} ${fmt(hottest.value, 1)} ${hottest.unit}`) : ""],
+      el("section", { class: "tiles" }, ...temps.map((t) => tile(t.name, bmsNum(t, 1), t.unit)))) : null,
+    more.length ? bmsDetails(key("more"), ["Other sensors", el("span", { class: "muted" }, " · current, power, delta, errors, cycles")],
+      el("section", { class: "tiles" }, ...more)) : null,
+    b.alarms.length ? bmsDetails(key("alarms"), [`Alarms (${b.alarms.length})`, el("span", { class: active.length ? "bms-bad-text" : "muted" }, active.length ? ` · ${active.length} active` : " · all clear")],
+      el("div", { class: "bms-alarm-list" }, ...quiet.map((a) => el("div", { class: a.available ? "bms-alarm" : "bms-alarm na", title: a.entity_id }, `${a.available ? "✓" : "?"} ${a.name}`)))) : null);
+}
+
+// Main dashboard: one compact line per battery (SOC, voltage, power bar), every 15 s.
+let dashBmsTimer = null;
+async function refreshDashBatteries() {
+  clearTimeout(dashBmsTimer);
+  const box = $("dashBatteries");
+  if (!status?.batteries_count) {
+    box.hidden = true;
+    return;
+  }
+  if (OTHER_TABS.includes(location.hash)) return;
+  try {
+    const data = await api("api/batteries");
+    const packs = data.batteries || [];
+    box.hidden = !packs.length;
+    $("dashBatteryLines").replaceChildren(...packs.map((b) => bmsLine(b, true)));
+  } catch (err) {
+    /* the next refresh tries again */
+  }
+  dashBmsTimer = setTimeout(refreshDashBatteries, 15000);
 }
 
 // Logs tab ----------------------------------------------------------------------
@@ -1573,6 +1640,7 @@ async function refresh() {
     api(`api/grid?hours=${hours}`).then((g) => renderGrid(g, Number(hours))).catch(() => {});
     status = s;
     renderStatus();
+    refreshDashBatteries();
     renderBattery(rows);
     renderPower(rows, predicted);
     renderDaily(days);

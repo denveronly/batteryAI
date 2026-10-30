@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.52
+
+- **Battery line** on the Battery health tab and, new, on the **Dashboard** (Batteries card,
+  every 15 s): name, Online, alarms, status chips with icons – ⚖️ Balancing, 🔌 Charging,
+  🔋 Discharging, ⏳ Precharging, 🔥 Heating, green when on – SOC, voltage and a **power bar**
+  with 0 in the middle: discharging to the left (amber, red when high), charging to the right
+  (green).
+- Battery health: cell voltages, temperatures, other sensors and the alarm list are dropdowns
+  (they stay open across refreshes); active alarms and abnormal data stay visible on top.
+- Status and temperature names no longer carry the bridge's device name ("Esp-Jk-Bridge-Rs485
+  bms0 …"); the power tube *protection* settings exposed as sensors are no longer shown as
+  temperatures.
+- Economy: appliance emojis show without reloading the page after changing them.
+- Settings: inputs sit right under their titles and line up across a row; number boxes are
+  compact.
+
 ## 0.4.51
 
 - Monthly bill tiles: PV before the Power bill.

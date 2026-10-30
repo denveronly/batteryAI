@@ -98,7 +98,7 @@ def pack(prefix: str, states: list[dict[str, Any]]) -> dict[str, Any]:
             else:
                 statuses.append({
                     "entity_id": entity, "key": key, "on": raw == "on", "available": raw not in UNAVAILABLE,
-                    "name": (state.get("attributes") or {}).get("friendly_name") or _title(key),
+                    "name": _title(key),
                 })
             continue
         if entity.startswith(alarm_start):
@@ -122,11 +122,12 @@ def pack(prefix: str, states: list[dict[str, Any]]) -> dict[str, Any]:
         if match:
             cells.setdefault(int(match[2]), {"n": int(match[2])})[match[1]] = _value(state)
             continue
-        if "temperature" in rest or rest.startswith("temp"):
+        if ("temperature" in rest or rest.startswith("temp")) and "protection" not in rest and "recovery" not in rest:
+            # Names from the entity id (friendly names carry the bridge's long device name).
             nice = {"temperature_powertube": "Power tube (MOS)", "mos_temperature": "MOS"}.get(rest)
             if nice is None and rest.startswith("temperature_sensor_"):
-                nice = f"Temperature {rest.rsplit('_', 1)[-1]}"
-            temps.append({**_value(state), "name": nice or (state.get("attributes") or {}).get("friendly_name") or _title(rest)})
+                nice = f"Sensor {rest.rsplit('_', 1)[-1]}"
+            temps.append({**_value(state), "name": nice or _title(rest)})
     cell_list = [cells[n] for n in sorted(cells)]
     volts = [c["voltage"]["value"] for c in cell_list if c.get("voltage") and c["voltage"]["value"] is not None]
     summary = {

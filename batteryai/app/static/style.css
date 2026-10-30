@@ -453,3 +453,41 @@ h1 .version:empty { display: none; }
 .bms-settings th:nth-child(2) { width: 15%; }
 .bms-settings th:nth-child(3) { width: 30%; }
 .bms-log tr.bms-info td { color: var(--accent); }
+
+/* Battery line: name, statuses, SOC, voltage, power bar */
+.bms-line { display: grid; gap: 10px; margin-bottom: 8px; }
+.bms-line.compact { padding: 10px 0; border-top: 1px solid var(--border); margin: 0; }
+.bms-line.compact:first-child { border-top: 0; padding-top: 0; }
+.bms-line-head { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
+.bms-line-head h2 { margin-right: 4px; }
+.bms-line-values { display: grid; grid-template-columns: auto auto 1fr; gap: 12px 24px; align-items: center; }
+@media (max-width: 640px) { .bms-line-values { grid-template-columns: auto auto; } .bms-power { grid-column: 1 / -1; } }
+.bms-big .label { display: block; color: var(--muted); font-size: 12px; }
+.bms-big b { font-size: 24px; font-weight: 650; }
+.bms-big small { color: var(--muted); margin-left: 3px; }
+.chip.bms-status { color: var(--muted); }
+.chip.bms-status.on { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, var(--chip)); font-weight: 600; }
+.bms-power { min-width: 220px; }
+.bms-pbar { position: relative; height: 12px; border-radius: 6px; background: var(--chip); overflow: hidden; }
+.bms-pbar-zero { position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--muted); opacity: 0.6; }
+.bms-pbar-fill { position: absolute; top: 0; bottom: 0; border-radius: 6px; }
+.bms-pbar-fill.charge { background: var(--ok); }
+.bms-pbar-fill.discharge { background: #e8a33d; }
+.bms-pbar-fill.discharge.high { background: var(--error); }
+.bms-pval { font-size: 13px; margin-top: 4px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.bms-pval.charge { color: var(--ok); }
+.bms-pval.discharge { color: #e8a33d; }
+.bms-pval.discharge.high { color: var(--error); }
+details.bms-drop { border-top: 1px solid var(--border); padding: 8px 0; }
+details.bms-drop > summary { cursor: pointer; font-weight: 600; }
+details.bms-drop[open] > summary { margin-bottom: 10px; }
+.bms-bad-text { color: var(--error); font-weight: 600; }
+
+/* Settings: inputs right under their titles (no stretching to the tallest neighbour), compact number boxes */
+.form-grid { align-items: start; gap: 14px 20px; }
+label { align-content: start; }
+.form-grid > label > input:not([type="checkbox"]):not([type="radio"]),
+.form-grid > label > select { height: 36px; }
+.form-grid label input[type="number"]:not(.price-input), .form-grid label input[type="time"] { max-width: 160px; }
+.form-grid label select { max-width: 260px; }
+.form-grid .hint { line-height: 1.35; }
