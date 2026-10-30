@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.62
+
+- Dashboard batteries, lower: one row "71 % · −587 W DCHG · 52.65 V" over the bar, smaller
+  header chips on one line.
+
 ## 0.4.61
 
 - Battery lines: no heating chip; on the Dashboard the power value is above its bar.

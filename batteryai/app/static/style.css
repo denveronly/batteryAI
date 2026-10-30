@@ -570,3 +570,16 @@ label { align-content: start; }
 /* Dashboard: the power value above its bar */
 #dashBatteryLines .bms-power { display: flex; flex-direction: column-reverse; }
 #dashBatteryLines .bms-pval { margin: 0 0 4px; }
+
+/* Dashboard battery: one row SOC · power · voltage, smaller chips */
+#dashBatteryLines .bms-line { gap: 6px; }
+#dashBatteryLines .bms-line-head { flex-wrap: nowrap; gap: 4px; }
+#dashBatteryLines .chip { padding: 2px 6px; font-size: 11px; }
+.bms-row { display: grid; grid-template-columns: 1fr auto 1fr; column-gap: 10px; align-items: baseline; font-variant-numeric: tabular-nums; }
+.bms-row > span { font-size: 20px; font-weight: 650; white-space: nowrap; }
+.bms-row small { font-size: 11px; font-weight: 600; color: var(--muted); margin-left: 3px; }
+.bms-row-power { text-align: center; }
+.bms-row-power small { color: inherit; opacity: 0.85; }
+.bms-row-volt { text-align: right; }
+.bms-row-power.p1 { color: #4caf50; } .bms-row-power.p2 { color: #e0c341; } .bms-row-power.p3 { color: #c08a55; } .bms-row-power.p4 { color: #e2615a; } .bms-row-power.idle { color: var(--muted); }
+#dashBatteryLines .bms-pbar { height: 10px; }

@@ -1317,12 +1317,18 @@ function bmsDetails(key, summary, ...content) {
 // Power bar: 0 in the middle (thick line, small "0"), discharging to the left, charging to the
 // right. Colour by power in both directions: ≤1 kW green, ≤2 kW yellow, ≤3 kW brown, more red.
 const powerLevel = (w) => (w <= 1000 ? "p1" : w <= 2000 ? "p2" : w <= 3000 ? "p3" : "p4");
-function bmsPowerBar(b) {
+// Signed battery power: + charging, − discharging (by the current's sign when there is one).
+function bmsWatts(b) {
   const m = b.main || {};
   const p = m.power?.value;
   if (p === null || p === undefined) return null;
-  const sign = m.current?.value ?? p;
-  const watts = Math.abs(p) * (sign < 0 ? -1 : 1);
+  return Math.abs(p) * ((m.current?.value ?? p) < 0 ? -1 : 1);
+}
+
+function bmsPowerBar(b, withLabel = true) {
+  const m = b.main || {};
+  const watts = bmsWatts(b);
+  if (watts === null) return null;
   const scale = Math.max(5000, Math.ceil(Math.abs(watts) / 1000) * 1000);
   const share = Math.min(50, (Math.abs(watts) / scale) * 50);
   const idle = Math.abs(watts) < 20;
@@ -1330,7 +1336,7 @@ function bmsPowerBar(b) {
   const fill = el("span", { class: `bms-pbar-fill ${level}`, style: watts >= 0 ? `left:50%;width:${share}%` : `right:50%;width:${share}%` });
   return el("div", { class: "bms-power", title: `${fmt(watts, 0)} ${m.power.unit || "W"} (bar scale ±${scale / 1000} kW)` },
     el("div", { class: "bms-pbar" }, fill, el("span", { class: "bms-pbar-zero" })),
-    el("div", { class: `bms-pval ${level}` }, idle ? "0 W · idle" : `${watts > 0 ? "+" : "−"}${fmt(Math.abs(watts), 0)} ${m.power.unit || "W"} ${watts > 0 ? "charging" : "discharging"}`));
+    withLabel ? el("div", { class: `bms-pval ${level}` }, idle ? "0 W · idle" : `${watts > 0 ? "+" : "−"}${fmt(Math.abs(watts), 0)} ${m.power.unit || "W"} ${watts > 0 ? "charging" : "discharging"}`) : null);
 }
 
 // Column chart for the cells (voltages, resistances): one column per cell, its number at the
@@ -1377,9 +1383,23 @@ function bmsLine(b, compact = false) {
       const state = st.on ? "on" : look.offRed ? "off-red" : "off";
       return el("span", { class: `chip bms-status ${state}${look.icon ? " icon" : ""}`, title: `${look.title}: ${st.on ? "on" : "off"}` }, look.text);
     });
-  return el("div", { class: `bms-line${compact ? " compact" : ""}` },
+  if (compact) {
+    // Dashboard: one line – SOC · power with CHG/DCHG · voltage – and the bar under it.
+    const watts = bmsWatts(b);
+    const idle = watts === null || Math.abs(watts) < 20;
+    const level = watts === null ? "" : idle ? "idle" : powerLevel(Math.abs(watts));
+    return el("div", { class: "bms-line compact" },
+      el("div", { class: "bms-line-head" }, el("b", { class: "bms-name", title: b.prefix }, dot, b.name), alarmChip, ...statuses),
+      el("div", { class: "bms-row" },
+        el("span", { class: "bms-row-soc", title: "SOC" }, m.soc ? bmsNum(m.soc, 0) : "—", el("small", {}, m.soc?.unit || "%")),
+        el("span", { class: `bms-row-power ${level}`, title: "Battery power" }, watts === null ? "" : idle ? "0 W" : `${watts > 0 ? "+" : "−"}${fmt(Math.abs(watts), 0)} W`,
+          watts === null || idle ? "" : el("small", {}, watts > 0 ? "CHG" : "DCHG")),
+        el("span", { class: "bms-row-volt", title: "Voltage" }, m.voltage ? bmsNum(m.voltage, 2) : "—", el("small", {}, m.voltage?.unit || "V"))),
+      bmsPowerBar(b, false));
+  }
+  return el("div", { class: "bms-line" },
     el("div", { class: "bms-line-head" },
-      el(compact ? "b" : "h2", { class: "bms-name", title: b.prefix }, dot, b.name), alarmChip, ...statuses),
+      el("h2", { class: "bms-name", title: b.prefix }, dot, b.name), alarmChip, ...statuses),
     el("div", { class: "bms-line-values" },
       m.soc ? el("div", { class: "bms-big" }, el("span", { class: "label" }, "SOC"), el("b", {}, bmsNum(m.soc, 0)), el("small", {}, m.soc.unit || "%")) : null,
       m.voltage ? el("div", { class: "bms-big" }, el("span", { class: "label" }, "Voltage"), el("b", {}, bmsNum(m.voltage, 2)), el("small", {}, m.voltage.unit || "V")) : null,
