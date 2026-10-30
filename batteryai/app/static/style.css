@@ -390,3 +390,12 @@ h1 .version:empty { display: none; }
 
 /* Economy: the period total under the days */
 .total-row td { font-weight: 650; border-top: 2px solid var(--border); }
+
+/* Economy days table: column blocks */
+:root { --eco-peak-bg: rgba(220, 60, 60, 0.08); --eco-cheap-bg: rgba(140, 90, 220, 0.09); --eco-sun-bg: rgba(230, 180, 20, 0.10); --eco-grid-fg: #c03838; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --eco-peak-bg: rgba(240, 90, 90, 0.10); --eco-cheap-bg: rgba(160, 120, 255, 0.11); --eco-sun-bg: rgba(250, 200, 40, 0.09); --eco-grid-fg: #ff7b7b; } }
+:root[data-theme="dark"] { --eco-peak-bg: rgba(240, 90, 90, 0.10); --eco-cheap-bg: rgba(160, 120, 255, 0.11); --eco-sun-bg: rgba(250, 200, 40, 0.09); --eco-grid-fg: #ff7b7b; }
+#economyTable .eco-peak { background: var(--eco-peak-bg); }
+#economyTable .eco-cheap { background: var(--eco-cheap-bg); }
+#economyTable .eco-sun { background: var(--eco-sun-bg); }
+#economyTable td.eco-grid { color: var(--eco-grid-fg); font-weight: 600; }

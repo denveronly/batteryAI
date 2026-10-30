@@ -897,32 +897,34 @@ async function refreshEconomy() {
     plugins: [weekendShading],
   }, NO_READINGS);
 
+  // Column blocks: the most expensive tariff red, cheaper ones purple, PV and battery yellow.
+  const block = (i) => (i === 0 ? "eco-peak" : "eco-cheap");
   const header = [
-    "Day",
-    ...tariffs.flatMap((x) => [`${x.name} kWh`, `${x.name} price`, `${x.name} money`]),
-    "Grid total",
-    "PV kWh", "PV price", "PV money",
-    "Battery kWh", "Battery price", "Battery money",
-    "Inverter savings",
+    ["Day", ""],
+    ...tariffs.flatMap((x, i) => [[`${x.name} kWh`, block(i)], [`${x.name} price`, block(i)], [`${x.name} money`, block(i)]]),
+    ["Grid total", "eco-grid"],
+    ["PV kWh", "eco-sun"], ["PV price", "eco-sun"], ["PV money", "eco-sun"],
+    ["Battery kWh", "eco-sun"], ["Battery price", "eco-sun"], ["Battery money", "eco-sun"],
+    ["Inverter savings", ""],
   ];
   const line = (d, label, cls) => el("tr", { class: cls || "" },
     el("td", { class: "nowrap" }, label),
-    ...tariffs.flatMap((x) => [
-      el("td", { class: "num" }, d.grid_kwh === null ? "—" : kwh(d.grid_by_tariff?.[x.name] ?? 0)),
-      el("td", { class: "num muted" }, rate(paidRate(d, x))),
-      el("td", { class: "num" }, d.grid_kwh === null ? "—" : money(d.grid_cost_by_tariff?.[x.name] ?? 0)),
+    ...tariffs.flatMap((x, i) => [
+      el("td", { class: `num ${block(i)}` }, d.grid_kwh === null ? "—" : kwh(d.grid_by_tariff?.[x.name] ?? 0)),
+      el("td", { class: `num muted ${block(i)}` }, rate(paidRate(d, x))),
+      el("td", { class: `num ${block(i)}` }, d.grid_kwh === null ? "—" : money(d.grid_cost_by_tariff?.[x.name] ?? 0)),
     ]),
-    el("td", { class: "num" }, money(d.paid)),
-    el("td", { class: "num" }, kwh(d.pv_kwh)),
-    el("td", { class: "num muted" }, rate(t.peak_price)),
-    el("td", { class: "num" }, money(d.pv_money)),
-    el("td", { class: "num" }, kwh(d.battery_kwh)),
-    el("td", { class: "num muted" }, rate(t.cheap_price)),
-    el("td", { class: "num" }, money(d.battery_money)),
+    el("td", { class: "num eco-grid" }, money(d.paid)),
+    el("td", { class: "num eco-sun" }, kwh(d.pv_kwh)),
+    el("td", { class: "num muted eco-sun" }, rate(t.peak_price)),
+    el("td", { class: "num eco-sun" }, money(d.pv_money)),
+    el("td", { class: "num eco-sun" }, kwh(d.battery_kwh)),
+    el("td", { class: "num muted eco-sun" }, rate(t.cheap_price)),
+    el("td", { class: "num eco-sun" }, money(d.battery_money)),
     el("td", { class: "num saved" }, money(d.inverter_saved)),
   );
   $("economyTable").replaceChildren(
-    el("tr", {}, ...header.map((h, i) => el("th", { class: i ? "num" : "" }, h))),
+    el("tr", {}, ...header.map(([h, cls], i) => el("th", { class: `${i ? "num" : ""} ${cls}` }, h))),
     ...rows.slice().reverse().map((d) => line(d, shortDate(d.date))),
     line({ ...t }, "Total", "total-row"),
   );

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.45
+
+- Economy days table: tinted column blocks – Peak light red, Off-peak light purple, PV and
+  battery light yellow – and Grid total in red.
+
 ## 0.4.44
 
 - **Strict above** is a number again (1–24 hours).
