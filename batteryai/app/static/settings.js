@@ -39,7 +39,7 @@ const SENSORS = SENSOR_GROUPS.flatMap((g) => g.rows);
 const NUMBER_FIELDS = ["record_interval_minutes", "history_days", "detail_days", "local_llm_threads", "prediction_margin_percent", "min_soc_percent",
   "max_soc_percent", "apply_threshold_percent", "charge_all_soc_percent",
   "outage_precharge_minutes", "outage_precharge_soc_percent", "solar_forecast_percent", "night_reserve_soc_percent",
-  "outage_shift_hours", "strict_outage_hours", "strict_min_soc_percent", "balance_soc_above", "pv_room_percent"];
+  "outage_shift_hours", "strict_outage_hours", "strict_min_soc_percent", "balance_soc_above", "pv_room_percent", "prediction_strictness"];
 const TEXT_FIELDS = ["battery_name", "notify_prefix", "claude_effort", "response_language", "extra_instructions", "tariff_currency", "program_time_marks", "prediction_engine", "openai_effort", "balance_time"];
 const PRICE_FIELDS = ["battery_capacity_kwh"];
 
@@ -426,6 +426,7 @@ function fillForm(s) {
   fillTariffs(s.tariffs || []);
   fillAppliances(s.appliances || []);
   fillBatteries(s.batteries || []);
+  strictnessText();
   field("analysis_times_list").value = (s.analysis_times_list || []).join(", ");
   field("notify_services").value = (s.notify_services || []).join(", ");
   for (const key of CHECKBOXES) field(key).checked = !!s[key];
@@ -730,6 +731,20 @@ window.addEventListener("batteryai:tab", (event) => {
   if (event.detail === "settings") openSettings();
 });
 if (location.hash === "#settings") openSettings();
+
+// Prediction strictness: what the slider position does, next to it.
+function strictnessText() {
+  const k = Number(field("prediction_strictness").value || 0);
+  $("strictnessValue").textContent = k > 0 ? `+${k}` : String(k);
+  const reserve = Math.round((1 + 0.05 * k) * 100);
+  const room = Math.round((k > 0 ? 1 - k / 10 : 1 + -k / 10) * 100);
+  $("strictnessHint").textContent = k === 0
+    ? "0 = the rules as they are. Lower: smaller reserves, the battery is used more and leaves more room for PV. Higher: bigger reserves, higher SOCs, less room for PV. The AI predictions are told the same."
+    : k < 0
+      ? `Relaxed ${k}: outage reserves ${reserve} %, room for PV ${room} % of the setting – the battery is used more and charged less.`
+      : `Strict +${k}: outage reserves ${reserve} %, room for PV ${room} % of the setting, every program at least the minimum SOC + ${3 * k} %.`;
+}
+field("prediction_strictness").addEventListener("input", strictnessText);
 
 // Foldable cards ---------------------------------------------------------------
 // Every card in Settings folds by clicking its title row (not its buttons); folded cards

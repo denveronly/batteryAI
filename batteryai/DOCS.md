@@ -232,6 +232,15 @@ changes* is ticked; each change asks for confirmation, must be within the entity
 recorded in the Battery log. These are cell protection settings – change them only when you know
 the right values for your cells.
 
+## Prediction strictness
+
+Settings → Prediction tuning → **Prediction strictness**, from −10 (relaxed) to +10 (strict);
+0 = the rules as described here. One step changes, in every engine: the energy kept for outages
+by 5 % (×0.5 at −10, ×1.5 at +10 – the outage cap, expected outages, local fast and the
+tariff-aware pre-outage charge), the room left for PV by 10 % (twice the room at −10, none at
++10) and, for positive values, the floor of every program by 3 % (+10: the minimum SOC + 30 %).
+The AI predictions are told the strictness as well.
+
 ## Leave room for PV
 
 A Deye program's SOC is both the floor the battery discharges to and the level the grid

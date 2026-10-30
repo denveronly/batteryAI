@@ -179,6 +179,9 @@ class Options:
     # Leave room for PV: programs before sunny hours are capped below the maximum SOC by the
     # PV surplus still expected, at most this many % of the battery. 0 = off.
     pv_room_percent: int = 20
+    # Prediction strictness, -10 (relaxed: use the battery, smaller reserves) … +10 (strict:
+    # bigger reserves, every program higher). 0 = the rules as they are.
+    prediction_strictness: int = 0
     balance_time: str = "06:30"
     balance_soc_above: int = 95
     battery_name: str = ""  # shown in the panel header
@@ -283,6 +286,23 @@ class Options:
         """One price at all times (one tariff, or all at the same price): no point in shifting."""
         return len({t.price for t in self.tariffs}) <= 1
 
+    @property
+    def reserve_factor(self) -> float:
+        """Outage reserves × this: 0.5 at strictness -10, 1 at 0, 1.5 at +10."""
+        return 1 + 0.05 * self.prediction_strictness
+
+    @property
+    def room_factor(self) -> float:
+        """Room for PV × this: 2 at strictness -10, 1 at 0, 0 at +10."""
+        k = self.prediction_strictness
+        return 1 - k / 10 if k > 0 else 1 + (-k) / 10
+
+    @property
+    def strictness_floor(self) -> int | None:
+        """Positive strictness: every program at least the minimum SOC + 3 % per step."""
+        k = self.prediction_strictness
+        return min(self.max_soc_percent, self.min_soc_percent + 3 * k) if k > 0 else None
+
     def is_cheap(self, minute_of_day: int) -> bool:
         """True in the cheapest tariff's hours: the best time to charge from the grid."""
         return self.tariff_at(minute_of_day)[0] <= self.cheapest_price + 1e-9
@@ -369,6 +389,7 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         strict_outage_hours=integer("strict_outage_hours", 1, 24),
         strict_min_soc_percent=integer("strict_min_soc_percent", 0, 100),
         pv_room_percent=integer("pv_room_percent", 0, 50),
+        prediction_strictness=integer("prediction_strictness", -10, 10),
         balance_time=text("balance_time") or "06:30",
         balance_soc_above=integer("balance_soc_above", 50, 99),
         battery_name=text("battery_name")[:40],

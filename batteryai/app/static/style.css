@@ -491,3 +491,9 @@ label { align-content: start; }
 .form-grid label input[type="number"]:not(.price-input), .form-grid label input[type="time"] { max-width: 160px; }
 .form-grid label select { max-width: 260px; }
 .form-grid .hint { line-height: 1.35; }
+
+/* Prediction strictness slider: a full row */
+.form-grid > label.strictness { grid-column: 1 / -1; }
+.strictness-row { display: flex; align-items: center; gap: 10px; max-width: 640px; }
+.strictness-row input[type="range"] { flex: 1; accent-color: var(--accent); max-width: none !important; height: auto !important; }
+.strictness-row output { min-width: 2.5em; text-align: center; font-weight: 700; font-size: 16px; color: var(--text, inherit); background: var(--chip); border-radius: 8px; padding: 2px 8px; }

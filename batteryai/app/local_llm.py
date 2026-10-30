@@ -165,6 +165,7 @@ def build_prompt(opts: Options, snapshot: dict[str, Any], baseline: dict[str, An
         "min_soc": opts.min_soc_percent,
         "max_soc": opts.max_soc_percent,
         "safety_margin_percent": opts.prediction_margin_percent,
+        "strictness": opts.prediction_strictness,  # -10 relaxed … +10 cautious
         "tariff": opts.tariff_dict(),
         "tariff_by_hour": [opts.tariff_at(h * 60 + 30)[1] for h in range(24)],
         "outages_state": snapshot.get("outages_state"),

@@ -184,7 +184,7 @@ def survives_until_cheap(
     loads, pv = _profile_w(profile, "load_power"), _profile_w(profile, "pv_power")
     day_pv = sum(_avg_w(pv, datetime(2026, 1, 5, h), opts, 0.0) for h in range(24)) / 1000  # a weekday
     pv_scale = (solar_forecast_kwh / day_pv) if solar_forecast_kwh and day_pv > 0.5 else 1.0
-    margin = 1 + opts.prediction_margin_percent / 100
+    margin = (1 + opts.prediction_margin_percent / 100) * opts.reserve_factor
     capacity = opts.battery_capacity_kwh
     headroom = (opts.max_soc_percent - opts.min_soc_percent) / 100 * capacity
     stored = max(0.0, ((soc if soc is not None else opts.min_soc_percent) - opts.min_soc_percent) / 100 * capacity)
@@ -392,7 +392,7 @@ def apply_outage_cap(
     ]
     ranges = program_ranges(programs, opts.program_time_marks == "end")
     loads = load_profile(profile)
-    margin = 1 + opts.prediction_margin_percent / 100
+    margin = (1 + opts.prediction_margin_percent / 100) * opts.reserve_factor
     windows = sorted(w for w in windows if w[1] > now_ts)
 
     occurrences: dict[int, tuple[float, float, bool]] = {}  # slot -> (start, end, charges from the grid)
@@ -518,7 +518,7 @@ def apply_pv_room(
     from outage_plan import energy_kwh, load_profile  # outage_plan imports collector, like this module
 
     outage_loads = load_profile(profile)
-    lowest = max(opts.min_soc_percent, opts.max_soc_percent - opts.pv_room_percent)
+    lowest = max(opts.min_soc_percent, round(opts.max_soc_percent - opts.pv_room_percent * opts.room_factor))
     changed = []
     for program in result.get("deye_programs") or []:
         span = ranges.get(program.get("slot"))
@@ -550,12 +550,12 @@ def apply_pv_room(
                 elif ts >= occ_end:
                     drain -= delta  # the load empties the battery anyway before the sun comes
             ts += 900
-        room = max(0.0, surplus * (1 - margin) - drain)
+        room = max(0.0, surplus * (1 - margin) - drain) * opts.room_factor
         target = max(lowest, int(opts.max_soc_percent - room / capacity * 100))
         # Outages in the program or within two hours after it keep what they need.
         for w_start, w_end in windows:
             if w_end > occ_start and w_start < occ_end + 7200:
-                need = energy_kwh(outage_loads, opts, tz, max(w_start, occ_start), w_end) * (1 + margin)
+                need = energy_kwh(outage_loads, opts, tz, max(w_start, occ_start), w_end) * (1 + margin) * opts.reserve_factor
                 target = max(target, min(opts.max_soc_percent, round(opts.min_soc_percent + need / capacity * 100)))
         if target < program["soc_percent"]:
             program["reason"] = (
@@ -609,7 +609,7 @@ def apply_expected_outages(
     ]
     ranges = program_ranges(programs, opts.program_time_marks == "end")
     by_slot = {p.get("slot"): p for p in result.get("deye_programs") or []}
-    margin = 1 + opts.prediction_margin_percent / 100
+    margin = (1 + opts.prediction_margin_percent / 100) * opts.reserve_factor
     now_ts = float(snapshot.get("ts") or 0)
     changed = []
     for window in windows:
@@ -663,4 +663,22 @@ def apply_strict(result: dict[str, Any], opts: Options, strict: str | None) -> l
             changed.append(program.get("slot"))
     if changed:
         result["summary"] = f"{result.get('summary') or ''} Strict mode ({strict}): every program at least {floor}%.".strip()
+    return changed
+
+
+def apply_strictness(result: dict[str, Any], opts: Options) -> list[int]:
+    """Positive prediction strictness: every program at least the minimum SOC + 3 % per step."""
+    floor = opts.strictness_floor
+    if floor is None:
+        return []
+    changed = []
+    for program in result.get("deye_programs") or []:
+        if program.get("soc_percent") is not None and program["soc_percent"] < floor:
+            program["soc_percent"] = floor
+            program["reason"] = f"{program.get('reason') or ''} Strictness +{opts.prediction_strictness}: at least {floor}%.".strip()
+            changed.append(program.get("slot"))
+    if changed:
+        result["summary"] = (
+            f"{result.get('summary') or ''} Strictness +{opts.prediction_strictness}: every program at least {floor}%."
+        ).strip()
     return changed

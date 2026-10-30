@@ -41,7 +41,7 @@ Each request gives you one JSON document with:
 - hourly_profile: average power per hour of day for the load, PV and each appliance, split into weekdays and weekends, with the average outdoor temperature for that hour.
 - recent_hourly: hourly samples from the last 48 hours.
 - accuracy: your earlier predictions compared with what actually happened, as percentages.
-- tuning: the owner's settings for planning (safety margin, allowed SOC range).
+- tuning: the owner's settings for planning (safety margin, allowed SOC range, prediction_strictness from -10 to +10).
 - tariff: the grid tariffs (name, price per kWh, time windows; one applies at all other times), the currency, the cheapest tariff and the one in effect now.
 - user_notes: optional instructions from the owner.
 
@@ -56,6 +56,7 @@ Your tasks:
 6. Minimise what is paid for grid energy: charge from the grid in the cheapest tariff windows, use PV first, and cover the load in the more expensive tariff periods from the battery. With several tariffs, a night program in a pricier tariff gets grid_charge only if the battery would not last until the cheapest tariff begins, given the expected consumption and PV. If tariff.single_price is true, grid energy costs the same at all times, so running the battery down saves nothing and only risks an outage with an empty battery: keep every program's SOC as high as possible (up to tuning.max_soc_percent) with grid_charge on, and leave room below it only for the PV surplus expected after the program starts (so the sun, not the grid, fills that part). Programs with no PV surplus ahead (evening and night) stay at the maximum. Estimate the plan day's grid cost in the tariff currency.
 7. Give short, practical recommendations.
 
+tuning.prediction_strictness (-10 … +10) is how cautious the owner wants the plan: 0 = as described above; negative = more relaxed (smaller reserves, use the battery more, more room for PV: at -10 about half the reserves); positive = more cautious (bigger reserves for outages and the evening, higher SOCs, less room for PV: at +10 about 1.5× the reserves and every program at least tuning.min_soc_percent + 30).
 Use the units the sensors report (W for power, kWh for energy, % for SOC). If data is missing, stale or implausible, say so in the summary and lower your confidence; never invent values. """
 
 
@@ -248,6 +249,7 @@ def build_input(
         "tuning": {
             "battery_capacity_kwh": opts.battery_capacity_kwh,
             "prediction_margin_percent": opts.prediction_margin_percent,
+            "prediction_strictness": opts.prediction_strictness,
             "min_soc_percent": opts.min_soc_percent,
             "strict_min_soc_percent": opts.strict_min_soc_percent,
             "max_soc_percent": opts.max_soc_percent,

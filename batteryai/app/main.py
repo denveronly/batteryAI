@@ -618,6 +618,8 @@ class BatteryAI:
                 _LOGGER.info("Charge before expected outages: programs %s", covered)
             if planning.apply_strict(result, self.opts, strict):
                 _LOGGER.info("Strict mode: %s", strict)
+        if planning.apply_strictness(result, self.opts):
+            _LOGGER.info("Prediction strictness %+d applied", self.opts.prediction_strictness)
         return outcome, data
 
     async def scheduled_outage_hours(self) -> float | None:

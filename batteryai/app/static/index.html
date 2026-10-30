@@ -494,6 +494,16 @@
           <label>Strict minimum SOC (%)
             <input type="number" name="strict_min_soc_percent" min="0" max="100" step="1">
           </label>
+          <label class="strictness">Prediction strictness
+            <div class="strictness-row">
+              <span class="muted">−10 relaxed</span>
+              <input type="range" name="prediction_strictness" min="-10" max="10" step="1" list="strictnessTicks">
+              <span class="muted">+10 strict</span>
+              <output id="strictnessValue">0</output>
+            </div>
+            <datalist id="strictnessTicks"><option value="-10"></option><option value="-5"></option><option value="0"></option><option value="5"></option><option value="10"></option></datalist>
+            <span class="hint" id="strictnessHint"></span>
+          </label>
           <label>Leave room for PV (up to % of the battery)
             <input type="number" name="pv_room_percent" min="0" max="50" step="1">
             <span class="hint">A program's SOC is also what the grid charges to. Before sunny hours each program is lowered below the maximum SOC by the PV surplus still expected (e.g. 98 → 90%), so the sun fills the battery instead of the grid – at most by this much, never below an outage's need. Not in strict mode. 0 = off.</span>

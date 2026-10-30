@@ -89,7 +89,7 @@ def plan(
 ) -> dict[str, Any]:
     """Whether to charge before this outage and to which SOC, with the reasoning."""
     end = outage_at + duration_min * 60
-    margin = 1 + opts.prediction_margin_percent / 100
+    margin = (1 + opts.prediction_margin_percent / 100) * opts.reserve_factor
     capacity = opts.battery_capacity_kwh
     cheap = opts.is_cheap(_minute(opts, tz, outage_at))
     tariff = opts.tariff_at(_minute(opts, tz, outage_at))[1]

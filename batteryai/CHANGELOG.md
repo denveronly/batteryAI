@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.53
+
+- **Prediction strictness** slider (Settings → Prediction tuning), −10 relaxed … 0 … +10
+  strict, applied to every engine and rule:
+  - outage reserves × 0.5 (−10) … × 1.5 (+10): the outage cap, expected outages, local fast
+    and the tariff-aware pre-outage charge;
+  - *Leave room for PV* × 2 (−10) … × 0 (+10);
+  - positive values: every program at least the minimum SOC + 3 % per step (+10: +30 %);
+  - Claude, ChatGPT and the local LLM are told the strictness too.
+  The note under the slider says what the current position does.
+
 ## 0.4.52
 
 - **Battery line** on the Battery health tab and, new, on the **Dashboard** (Batteries card,

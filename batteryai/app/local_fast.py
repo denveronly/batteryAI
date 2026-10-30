@@ -209,7 +209,7 @@ def _outage_expected(snapshot: dict[str, Any]) -> bool:
 
 def plan(opts: Options, snapshot: dict[str, Any], fc: dict[str, Any]) -> dict[str, Any]:
     capacity = max(1.0, opts.battery_capacity_kwh)
-    margin = 1 + opts.prediction_margin_percent / 100
+    margin = (1 + opts.prediction_margin_percent / 100) * opts.reserve_factor
     load = [e["load_w"] for e in fc["hourly"]]
     pv = fc["pv_hourly"]
     deficit = [max(0, load[h] - pv[h]) / 1000 for h in range(24)]  # kWh the grid/battery must cover
