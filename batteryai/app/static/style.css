@@ -399,3 +399,7 @@ h1 .version:empty { display: none; }
 #economyTable .eco-cheap { background: var(--eco-cheap-bg); }
 #economyTable .eco-sun { background: var(--eco-sun-bg); }
 #economyTable td.eco-grid { color: var(--eco-grid-fg); font-weight: 600; }
+
+/* Monthly bill tiles: amount and kWh on one line */
+#billTiles { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+#billTiles .value { white-space: nowrap; overflow-wrap: normal; }

@@ -1023,10 +1023,14 @@ async function refreshBill() {
   const single = data.tariffs.length === 1 ? data.tariffs[0] : null;
   const now = new Date();
   const current = data.months.find((m) => m.key === `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`);
+  // This month: each tariff, the whole power bill, and the PV (valued at the peak price).
+  const monthName = now.toLocaleDateString([], { month: "long" });
+  const pv = data.pv_month || {};
   $("billTiles").replaceChildren(
-    tile("This month", money(current?.cost ?? (data.year === now.getFullYear() ? 0 : null)), current ? `${fmt(current.kwh, 1)} kWh` : ""),
-    tile(`Year ${data.year}`, money(data.total.cost), `${fmt(data.total.kwh, 1)} kWh`),
-    ...names.map((n) => tile(`${n} ${data.year}`, money(data.total.by_tariff[n]?.cost ?? 0), `${fmt(data.total.by_tariff[n]?.kwh ?? 0, 1)} kWh`)),
+    ...names.map((n) => tile(`${n} · ${monthName}`, money(current?.by_tariff?.[n]?.cost ?? 0), `${fmt(current?.by_tariff?.[n]?.kwh ?? 0, 1)} kWh`)),
+    tile(`Power bill · ${monthName}`, money(current?.cost ?? 0), `${fmt(current?.kwh ?? 0, 1)} kWh`),
+    tile(`PV · ${monthName}`, pv.money === null || pv.money === undefined ? "—" : money(pv.money),
+      pv.kwh === null || pv.kwh === undefined ? "" : `${fmt(pv.kwh, 1)} kWh`),
   );
 
   // Each tariff: kWh, the month's price (editable on month rows) and cost; with several

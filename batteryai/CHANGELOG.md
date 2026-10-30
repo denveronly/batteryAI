@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.46
+
+- Monthly bill tiles are this month only: each tariff (Peak, Off-peak), the **Power bill**
+  and **PV** (production × peak price), amount and kWh on one line. The year tiles are gone
+  (the year total stays at the bottom of the table).
+
 ## 0.4.45
 
 - Economy days table: tinted column blocks – Peak light red, Off-peak light purple, PV and

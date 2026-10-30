@@ -1156,6 +1156,9 @@ async def bill_view(request: web.Request) -> web.Response:
     year = _int_param(request, "year", today.year, 2000, 2100)
     report = await asyncio.to_thread(bill_report, app.db, year, today, app.opts)
     report["backfilling"] = app.bill.backfilling
+    # PV this month (production counter), valued at the peak price like on the Economy tab.
+    month = (await asyncio.to_thread(economy_report, app.db, today.day, today, app.opts.tariff_at))["totals"]
+    report["pv_month"] = {"kwh": month.get("pv_kwh"), "money": month.get("pv_money"), "price": month.get("peak_price")}
     return web.json_response(report)
 
 
