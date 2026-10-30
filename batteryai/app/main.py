@@ -1193,7 +1193,7 @@ async def batteries(request: web.Request) -> web.Response:
         })
     packs = bms.report(app.opts, states)
     for pack in packs:
-        pack["issues"] = bms.issues(pack)
+        pack["issues"] = bms.issues(pack, packs)
     events = await asyncio.to_thread(app.db.bms_events, 200)
     return web.json_response({"batteries": packs, "events": events})
 

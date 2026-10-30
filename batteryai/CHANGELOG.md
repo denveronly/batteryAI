@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.58
+
+- Battery log, new checks (each logged when it starts and ends):
+  - **Cell range**: highest − lowest cell of a pack above 200 mV – also sent to the phone;
+  - **Packs drifting apart**: a pack's SOC more than 15 % or its voltage more than 0.5 V away
+    from the median of the other packs;
+  - **Temperature spread**: a pack's battery sensors (not the power tube) more than 8 °C apart.
+  They also show on the battery's card while they last.
+
 ## 0.4.57
 
 - Power bar (Dashboard and Battery health): a thick zero line with a small "0"; colour by

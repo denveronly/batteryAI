@@ -166,6 +166,11 @@ RESISTANCE_FACTOR = 2.0  # a cell above 2× the pack's median resistance
 TEMP_HIGH = 50.0       # cells / battery
 TEMP_HIGH_MOS = 70.0   # power tube (MOS) runs hotter
 TEMP_LOW = 0.0
+CELL_RANGE_V = 0.200   # highest − lowest cell of a pack above this: serious (notified)
+TEMP_SPREAD = 8.0      # battery temperature sensors of one pack further apart than this
+SOC_DRIFT = 15.0       # a pack's SOC this far from the other packs' median
+VOLT_DRIFT = 0.5       # a pack's voltage this far from the other packs' median
+NOTIFY_ISSUES = ("cell_range",)  # abnormal data that also goes to the phone
 
 
 def _volts(v: dict[str, Any] | None) -> float | None:
@@ -174,9 +179,41 @@ def _volts(v: dict[str, Any] | None) -> float | None:
     return v["value"] / 1000 if str(v.get("unit")).lower() == "mv" else v["value"]
 
 
-def issues(b: dict[str, Any]) -> dict[str, str]:
-    """Abnormal readings now: {code: description}."""
+def _median(values: list[float]) -> float | None:
+    values = sorted(values)
+    if not values:
+        return None
+    mid = len(values) // 2
+    return values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2
+
+
+def issues(b: dict[str, Any], packs: list[dict[str, Any]] | None = None) -> dict[str, str]:
+    """Abnormal readings now: {code: description}. With all packs, also a pack whose SOC or
+    voltage drifts away from the others."""
     found: dict[str, str] = {}
+    volts = [_volts(c.get("voltage")) for c in b.get("cells") or []]
+    volts = [v for v in volts if v is not None]
+    if len(volts) >= 2 and max(volts) - min(volts) > CELL_RANGE_V:
+        found["cell_range"] = (f"Cells {min(volts):.3f}–{max(volts):.3f} V apart by {(max(volts) - min(volts)) * 1000:.0f} mV "
+                               f"(above {CELL_RANGE_V * 1000:.0f} mV)")
+    battery_temps = [t for t in b.get("temperatures") or [] if t.get("value") is not None
+                     and "powertube" not in str(t["entity_id"]) and "mos" not in str(t["entity_id"])]
+    if len(battery_temps) >= 2:
+        hot = max(battery_temps, key=lambda t: t["value"])
+        cold = min(battery_temps, key=lambda t: t["value"])
+        if hot["value"] - cold["value"] > TEMP_SPREAD:
+            found["temp_spread"] = (f"Temperatures {hot['value'] - cold['value']:.1f} °C apart ({cold['name']} {cold['value']:g}, "
+                                    f"{hot['name']} {hot['value']:g}; above {TEMP_SPREAD:g} °C)")
+    others = [o for o in packs or [] if o is not b and o.get("found")]
+    if others:
+        soc = ((b.get("main") or {}).get("soc") or {}).get("value")
+        median = _median([v for o in others if (v := ((o.get("main") or {}).get("soc") or {}).get("value")) is not None])
+        if soc is not None and median is not None and abs(soc - median) > SOC_DRIFT:
+            found["soc_drift"] = f"SOC {soc:g} % while the other batteries are at {median:g} % (more than {SOC_DRIFT:g} % apart)"
+        volt = ((b.get("main") or {}).get("voltage") or {}).get("value")
+        median_v = _median([v for o in others if (v := ((o.get("main") or {}).get("voltage") or {}).get("value")) is not None])
+        if volt is not None and median_v is not None and abs(volt - median_v) > VOLT_DRIFT:
+            found["voltage_drift"] = f"Voltage {volt:.2f} V while the other batteries are at {median_v:.2f} V (more than {VOLT_DRIFT:g} V apart)"
     main = b.get("main") or {}
     if b.get("found") and main and all(not v.get("available") for v in main.values()):
         found["unavailable"] = "BMS values unavailable in Home Assistant"
@@ -222,7 +259,7 @@ def changes(
             continue
         before = previous.get(b["prefix"])
         active = {a["key"]: a["name"] for a in b["alarms"] if a["active"]}
-        problems = issues(b)
+        problems = issues(b, packs)
         state[b["prefix"]] = {"alarms": sorted(active), "online": b.get("online"), "issues": problems}
         label = f"{b['name']} ({b['prefix']})"
 
@@ -276,9 +313,9 @@ def changes(
         if isinstance(old_issues, list):  # older state kept only the codes
             old_issues = {k: k.replace("_", " ") for k in old_issues}
         for key in sorted(set(problems) - set(old_issues)):
-            event("warning", key, problems[key], False)
+            event("warning", key, problems[key], key in NOTIFY_ISSUES)
         for key in sorted(set(old_issues) - set(problems)):
-            event("ok", key, f"Back to normal (was: {old_issues[key]})", False)
+            event("ok", key, f"Back to normal (was: {old_issues[key]})", key in NOTIFY_ISSUES)
     return state, lines, events
 
 

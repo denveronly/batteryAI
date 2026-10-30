@@ -223,7 +223,9 @@ The **Battery log** at the bottom records, every minute: alarms turning on and c
 going offline or back online, a non-zero error bitmask, a cell count other than the first one
 seen (16), and abnormal data – a cell below 2.90 V or above 3.62 V, cell delta above 50 mV, a
 cell resistance above 2× the pack's median, a temperature above 50 °C (power tube 70 °C) or
-below 0 °C – when it starts and when it ends. Alarms, the error bitmask, the cell count and
+below 0 °C, a cell range above 200 mV (also sent to the phone), a pack's SOC more than 15 % or
+its voltage more than 0.5 V away from the other packs, a pack's temperature sensors more than
+8 °C apart – when it starts and when it ends. Alarms, the error bitmask, the cell count and
 offline are also sent to the phone (Phone notifications → *battery alarms*).
 
 **Control** (Battery health → Control): choose a battery and change the BMS's own switches
