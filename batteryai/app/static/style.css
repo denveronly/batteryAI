@@ -497,3 +497,21 @@ label { align-content: start; }
 .strictness-row { display: flex; align-items: center; gap: 10px; max-width: 640px; }
 .strictness-row input[type="range"] { flex: 1; accent-color: var(--accent); max-width: none !important; height: auto !important; }
 .strictness-row output { min-width: 2.5em; text-align: center; font-weight: 700; font-size: 16px; color: var(--text, inherit); background: var(--chip); border-radius: 8px; padding: 2px 8px; }
+
+/* Battery header: online dot, compact status chips; two batteries per row */
+.bms-name { display: inline-flex; align-items: center; gap: 6px; }
+.bms-dot { color: var(--muted); font-size: 14px; line-height: 1; }
+.bms-dot.on { color: var(--ok); }
+.bms-dot.off { color: var(--error); }
+.chip.bms-status { font-weight: 650; letter-spacing: 0.02em; }
+.chip.bms-status.on { color: var(--ok); background: color-mix(in srgb, var(--ok) 16%, var(--chip)); }
+.chip.bms-status.off-red { color: var(--error); background: color-mix(in srgb, var(--error) 14%, var(--chip)); }
+.chip.bms-status.off { color: var(--muted); }
+.chip.bms-status.icon.off { filter: grayscale(1); opacity: 0.45; }
+.chip.bms-status.icon.on { filter: none; }
+#bmsPacks { grid-template-columns: repeat(auto-fit, minmax(min(100%, 560px), 1fr)); align-items: start; }
+#bmsPacks > section:last-child:has(.bms-log), #bmsPacks > section.bms-log-card { grid-column: 1 / -1; }
+#dashBatteryLines { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr)); gap: 0 24px; }
+#dashBatteryLines .bms-line.compact { border-top: 1px solid var(--border); padding-top: 10px; }
+#dashBatteryLines .bms-line.compact:nth-child(-n + 2) { border-top: 0; padding-top: 0; }
+.bms-line-values { grid-template-columns: auto auto minmax(160px, 1fr); }

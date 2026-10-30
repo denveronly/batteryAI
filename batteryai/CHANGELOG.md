@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.55
+
+- Battery header, compact: a dot before the name (green online, red offline), no prefix;
+  **CHG / DCHG** green when on, red when off; balancing a ♥ chip, green when on; heating 🔥 and
+  precharging ⏳ as icons only, grey when off.
+- Two batteries side by side on wide screens (Battery health and the Dashboard card).
+- Short dropdown titles: "Cells (16) · Δ 12 mV · V11 min 3.312 V · V10 max 3.323 V",
+  "Temperatures (6) · T2 max 25.1 °C".
+
 ## 0.4.54
 
 - Economy *Cost by day* chart: Grid paid in red, like the grid figures in the tables.

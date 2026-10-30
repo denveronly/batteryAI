@@ -1271,7 +1271,7 @@ $("bmsUnlock").addEventListener("change", () => refreshBmsControl());
 // temperatures), each logged when it starts and when it ends.
 function bmsLog(events) {
   const icon = { alarm: "⚠", warning: "△", ok: "✓", info: "⚙" };
-  return el("section", { class: "card" },
+  return el("section", { class: "card bms-log-card" },
     el("div", { class: "card-head" }, el("h2", {}, "Battery log"), el("span", { class: "muted" }, "Alarms, BMS offline and abnormal data – when they start and end")),
     events.length
       ? el("div", { class: "table-scroll" }, el("table", { class: "programs bms-log" },
@@ -1291,11 +1291,16 @@ function bmsDelta(v) {
   return v.unit === "V" && Math.abs(v.value) < 1 ? [fmt(v.value * 1000, 0), "mV"] : [fmt(v.value, 3), v.unit];
 }
 
-// Status sensors with their icon; green when on.
+// Status chips: CHG / DCHG green when on, red when off; balancing a heart and heating /
+// precharging just their icon, green when on, grey when off.
 const BMS_STATUS = {
-  balancing: ["⚖️", "Balancing"], charging: ["🔌", "Charging"], discharging: ["🔋", "Discharging"],
-  precharging: ["⏳", "Precharging"], heating: ["🔥", "Heating"],
+  charging: { text: "CHG", title: "Charging", offRed: true },
+  discharging: { text: "DCHG", title: "Discharging", offRed: true },
+  balancing: { text: "♥", title: "Balancing" },
+  heating: { text: "🔥", title: "Heating", icon: true },
+  precharging: { text: "⏳", title: "Precharging", icon: true },
 };
+const BMS_STATUS_ORDER = ["charging", "discharging", "balancing", "heating", "precharging"];
 
 // Which dropdowns of which battery are open survives the 10-second refresh and reloads.
 let bmsOpen = new Set();
@@ -1330,24 +1335,33 @@ function bmsPowerBar(b) {
 // One line per battery: name, online, alarms, statuses, SOC, voltage and the power bar.
 function bmsLine(b, compact = false) {
   const m = b.main || {};
-  const online = b.online === true ? el("span", { class: "chip bms-ok", title: "BMS online" }, "● Online")
-    : b.online === false ? el("span", { class: "chip bms-bad" }, "● Offline") : null;
+  const dot = el("span", { class: `bms-dot ${b.online === true ? "on" : b.online === false ? "off" : ""}`,
+    title: b.online === true ? "BMS online" : b.online === false ? "BMS offline" : "Online state unknown" }, "●");
   const activeCount = Math.max(b.active_alarms || 0, Math.round(m.alarms_total?.value || 0));
   const alarmChip = activeCount
     ? el("span", { class: "chip bms-bad" }, `⚠ ${activeCount} alarm${activeCount > 1 ? "s" : ""}`)
     : b.alarms.length || m.alarms_total ? el("span", { class: "chip bms-ok" }, "✓ No alarms") : null;
-  const statuses = (b.statuses || []).map((st) => {
-    const [icon, label] = BMS_STATUS[st.key] || ["•", st.name];
-    return el("span", { class: `chip bms-status ${st.on ? "on" : ""}`, title: `${label}: ${st.on ? "on" : "off"}` }, `${icon} ${label}`);
-  });
+  const statuses = (b.statuses || []).slice()
+    .sort((x, y) => (BMS_STATUS_ORDER.indexOf(x.key) + 1 || 99) - (BMS_STATUS_ORDER.indexOf(y.key) + 1 || 99))
+    .map((st) => {
+      const look = BMS_STATUS[st.key] || { text: st.name, title: st.name };
+      const state = st.on ? "on" : look.offRed ? "off-red" : "off";
+      return el("span", { class: `chip bms-status ${state}${look.icon ? " icon" : ""}`, title: `${look.title}: ${st.on ? "on" : "off"}` }, look.text);
+    });
   return el("div", { class: `bms-line${compact ? " compact" : ""}` },
     el("div", { class: "bms-line-head" },
-      el(compact ? "b" : "h2", {}, b.name), compact ? null : el("span", { class: "muted" }, b.prefix), online, alarmChip, ...statuses),
+      el(compact ? "b" : "h2", { class: "bms-name", title: b.prefix }, dot, b.name), alarmChip, ...statuses),
     el("div", { class: "bms-line-values" },
       m.soc ? el("div", { class: "bms-big" }, el("span", { class: "label" }, "SOC"), el("b", {}, bmsNum(m.soc, 0)), el("small", {}, m.soc.unit || "%")) : null,
       m.voltage ? el("div", { class: "bms-big" }, el("span", { class: "label" }, "Voltage"), el("b", {}, bmsNum(m.voltage, 2)), el("small", {}, m.voltage.unit || "V")) : null,
       bmsPowerBar(b)));
 }
+
+// "T2" for temperature sensor 2, "MOS" for the power tube.
+const tempIndex = (t) => {
+  const n = /(\d+)\s*$/.exec(t.name || "");
+  return n ? `T${n[1]}` : /mos|power tube/i.test(t.name) ? "MOS" : t.name;
+};
 
 function bmsCard(b) {
   const m = b.main || {};
@@ -1387,10 +1401,10 @@ function bmsCard(b) {
     b.found ? null : el("div", { class: "banner" }, `Nothing found for sensor.${b.prefix}_… in Home Assistant – check the prefix in Settings → Batteries.`),
     ...active.map((a) => el("div", { class: "bms-alarm on", title: a.entity_id }, `⚠ ${a.name}`)),
     ...Object.entries(b.issues || {}).map(([code, text]) => el("div", { class: "bms-alarm warn", title: code }, `△ ${text}`)),
-    cells.length ? bmsDetails(key("cells"), [`Cell voltages (${cells.length})`, el("span", { class: "muted" },
-      ` · Δ ${delta} ${deltaUnit} · lowest #${pad2(sum.min_cell)} ${fmt(sum.min_v, 3)} V · highest #${pad2(sum.max_cell)} ${fmt(sum.max_v, 3)} V`)],
+    cells.length ? bmsDetails(key("cells"), [`Cells (${cells.length})`, el("span", { class: "muted" },
+      ` · Δ ${delta} ${deltaUnit} · V${pad2(sum.min_cell)} min ${fmt(sum.min_v, 3)} V · V${pad2(sum.max_cell)} max ${fmt(sum.max_v, 3)} V`)],
       el("div", { class: "bms-cells" }, ...cells)) : null,
-    temps.length ? bmsDetails(key("temps"), [`Temperatures (${temps.length})`, hottest ? el("span", { class: "muted" }, ` · highest ${hottest.name} ${fmt(hottest.value, 1)} ${hottest.unit}`) : ""],
+    temps.length ? bmsDetails(key("temps"), [`Temperatures (${temps.length})`, hottest ? el("span", { class: "muted" }, ` · ${tempIndex(hottest)} max ${fmt(hottest.value, 1)} ${hottest.unit}`) : ""],
       el("section", { class: "tiles" }, ...temps.map((t) => tile(t.name, bmsNum(t, 1), t.unit)))) : null,
     more.length ? bmsDetails(key("more"), ["Other sensors", el("span", { class: "muted" }, " · current, power, delta, errors, cycles")],
       el("section", { class: "tiles" }, ...more)) : null,
