@@ -376,7 +376,7 @@ function renderGrid(g, hours) {
     options,
   }, "No grid data yet.");
   const h = g.hours_without_grid || {};
-  $("gridInfo").textContent = `${g.up === false ? "⚠ Outage now" : g.up ? "Grid on" : "Unknown"} · without grid: yesterday ${h.yesterday ?? 0} h, today ${h.today ?? 0} h · last 7 days: ${g.week.count} outages, ${dur(g.week.minutes)}`
+  $("gridInfo").textContent = `${g.up === false ? "⚠ Outage now" : g.up ? "Grid on" : "Unknown"} · without grid: yesterday ${h.yesterday ?? 0} h, today ${h.today ?? 0} h${g.scheduled_hours_today !== null && g.scheduled_hours_today !== undefined ? ` (scheduled ${g.scheduled_hours_today} h)` : ""} · last 7 days: ${g.week.count} outages, ${dur(g.week.minutes)}`
     + (g.strict ? ` · 🔒 strict: ${g.strict}` : "") + (g.backfilling ? " · reading history…" : "");
   const recent = g.outages.slice().reverse().slice(0, 10);
   $("gridOutages").replaceChildren(

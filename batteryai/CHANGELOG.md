@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.44
+
+- **Strict above** is a number again (1–24 hours).
+- New sensor **Outage hours today** (Settings → Sensors, e.g.
+  `sensor.dtek_..._outage_hours_today`): today's scheduled hours without power. Strict mode
+  compares the limit with yesterday's recorded hours (Grid status sensor) and today's –
+  recorded so far or scheduled, whichever is more. Works without the Grid status sensor too
+  (scheduled hours only). The Grid card shows the scheduled hours.
+- Economy: the battery discharge is the day's last reading of the counter, and values no
+  battery can discharge in a day (> 1000 kWh, e.g. a lifetime total entered by mistake) are
+  ignored – a wrong sensor no longer spoils the whole day.
+
 ## 0.4.43
 
 - Fix: switching **Gen charge** on the dashboard failed with HTTP 500 after the inverter had

@@ -127,6 +127,8 @@ READING_FIELDS = (
 HOURLY = 3600
 AVERAGED = ("battery_soc", "load_power", "outdoor_temp", "pv_power")
 
+# A daily battery discharge counter above this is not a daily counter (e.g. a lifetime total).
+MAX_DAILY_DISCHARGE_KWH = 1000.0
 # Daily energy counters may still show yesterday's total for a few minutes after midnight.
 DAILY_RESET_GRACE_MINUTES = 15
 # Longest gap between two readings that still counts as continuous when integrating power.
@@ -881,7 +883,11 @@ def economy_report(
         day["_auto"] += row["control_mode"] == "auto"
         if row["minute_of_day"] >= DAILY_RESET_GRACE_MINUTES:  # daily counters reset at midnight
             day["pv_kwh"] = _max(day["pv_kwh"], row["pv_today"])
-            day["battery_kwh"] = _max(day["battery_kwh"], row["battery_discharge_today"])
+            # The day's last reading (the counter only grows during a day); values no home
+            # battery can discharge in a day – a lifetime total entered by mistake – are skipped.
+            value = row["battery_discharge_today"]
+            if value is not None and 0 <= value <= MAX_DAILY_DISCHARGE_KWH:
+                day["battery_kwh"] = value
         if (
             day["_samples"] == 1
             and (row["resolution_s"] or 0) >= HOURLY

@@ -458,11 +458,8 @@
             <span class="hint">Yesterday's outages are expected today give or take this much: the battery is charged this much earlier and grid charge stays on this much longer around each expected window.</span>
           </label>
           <label>Strict above (hours without grid a day)
-            <select name="strict_outage_hours">
-              <option value="6">6 hours</option>
-              <option value="8">8 hours</option>
-            </select>
-            <span class="hint">Needs the Grid status sensor. More hours without grid than this yesterday or today: charge to the maximum before expected outages, keep every program at least at the strict minimum SOC and keep the night reserve. Below it the battery is used in the day and recharged at night.</span>
+            <input type="number" name="strict_outage_hours" min="1" max="24" step="1">
+            <span class="hint">Hours without grid yesterday (recorded by the Grid status sensor) or today (recorded so far, or scheduled by the “Outage hours today” sensor, whichever is more). More than this: charge to the maximum before expected outages, keep every program at least at the strict minimum SOC and keep the night reserve. Below it the battery is used in the day and recharged at night.</span>
           </label>
           <label>Strict minimum SOC (%)
             <input type="number" name="strict_min_soc_percent" min="0" max="100" step="1">

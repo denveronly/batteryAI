@@ -536,9 +536,11 @@ class BatteryAI:
         night reserve (strict mode or emergency charge only), expected outages and strict mode."""
         snapshot = {**snapshot, "plan_day": planning.plan_day(snapshot, self.opts, self.tz)}
         outage_days = await asyncio.to_thread(planning.recent_outage_days, self.db, int(snapshot["ts"]))
+        scheduled = await self.scheduled_outage_hours()
         if self.opts.grid_status_sensor:
             snapshot["grid"] = await asyncio.to_thread(
                 grid.summary, self.db, self.tz, float(snapshot["ts"]), self.opts.outage_shift_hours, self.opts.strict_outage_hours,
+                scheduled,
             )
             grid_days = {o["start"][:10] for o in snapshot["grid"]["outages_last_7_days"]}
             outage_days = sorted(set(outage_days) | grid_days)
@@ -551,7 +553,12 @@ class BatteryAI:
         fixed = planning.dedupe_programs(result, snapshot)
         if fixed:
             _LOGGER.warning("Prediction programs fixed: %s", " ".join(fixed))
-        strict = snapshot["grid"]["strict"] if self.opts.grid_status_sensor else None
+        if self.opts.grid_status_sensor:
+            strict = snapshot["grid"]["strict"]
+        elif scheduled is not None:  # no grid status sensor: today's scheduled hours alone
+            strict = grid.strict_reason(self.db, self.tz, float(snapshot["ts"]), self.opts.strict_outage_hours, scheduled)
+        else:
+            strict = None
         profile = await asyncio.to_thread(self.db.hourly_profile, int(snapshot["ts"]) - 14 * 86400)
         reason = planning.reserve_reason(snapshot, strict, snapshot["emergency_charge"])
         if reason is None:  # not strict, no emergency charge: use the battery, charge it cheaply
@@ -583,6 +590,13 @@ class BatteryAI:
             if planning.apply_strict(result, self.opts, strict):
                 _LOGGER.info("Strict mode: %s", strict)
         return outcome, data
+
+    async def scheduled_outage_hours(self) -> float | None:
+        """Today's scheduled hours without power from the outage-hours sensor (7.0 = 7 h)."""
+        if not self.opts.outage_hours_today_sensor:
+            return None
+        minutes = outage_plan.duration_minutes(await self.ha.state(self.opts.outage_hours_today_sensor))
+        return None if minutes is None else round(minutes / 60, 2)
 
     async def _run_engine(self, snapshot: dict[str, Any], trigger: str) -> tuple[dict[str, Any], dict[str, Any]]:
         """Runs the selected engine; returns (outcome, input data stored with the analysis)."""
@@ -1263,6 +1277,8 @@ async def grid_view(request: web.Request) -> web.Response:
     hours = _int_param(request, "hours", 48, 1, 24 * 400)
     now = time.time()
 
+    scheduled = await app.scheduled_outage_hours()
+
     def collect() -> dict[str, Any]:
         recent = grid.outages(app.db, app.tz, now - hours * 3600, now)
         week = grid.outages(app.db, app.tz, now - 7 * 86400, now)
@@ -1271,7 +1287,8 @@ async def grid_view(request: web.Request) -> web.Response:
             "backfilling": app.grid.backfilling, "outages": recent,
             "expected": grid.expected(app.db, app.tz, now, app.opts.outage_shift_hours),
             "hours_without_grid": grid.outage_hours(app.db, app.tz, now),
-            "strict": grid.strict_reason(app.db, app.tz, now, app.opts.strict_outage_hours),
+            "scheduled_hours_today": scheduled,
+            "strict": grid.strict_reason(app.db, app.tz, now, app.opts.strict_outage_hours, scheduled),
             "week": {"count": len(week), "minutes": sum(o["minutes"] for o in week)},
         }
 

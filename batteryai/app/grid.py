@@ -195,16 +195,26 @@ def outage_hours(db: Database, tz: tzinfo, now_ts: float) -> dict[str, float]:
     return hours
 
 
-def strict_reason(db: Database, tz: tzinfo, now_ts: float, limit_hours: int) -> str | None:
-    """Why the plan should be strict (more than limit_hours without grid yesterday or today)."""
+def strict_reason(
+    db: Database, tz: tzinfo, now_ts: float, limit_hours: int, scheduled_today: float | None = None,
+) -> str | None:
+    """Why the plan should be strict: more than limit_hours without grid yesterday (recorded by
+    the grid status sensor) or today (recorded so far, or scheduled by the outage-hours sensor,
+    whichever is more)."""
     hours = outage_hours(db, tz, now_ts)
+    labels = {"yesterday": "yesterday", "today": "today"}
+    if scheduled_today is not None and scheduled_today > hours.get("today", 0):
+        hours["today"], labels["today"] = round(scheduled_today, 1), "scheduled today"
     worst = max(hours, key=lambda k: hours[k])
     if hours[worst] > limit_hours:
-        return f"{hours[worst]:g} h without grid {worst} (more than {limit_hours} h)"
+        return f"{hours[worst]:g} h without grid {labels[worst]} (more than {limit_hours} h)"
     return None
 
 
-def summary(db: Database, tz: tzinfo, now_ts: float, shift_hours: int = 2, limit_hours: int = 4) -> dict[str, Any]:
+def summary(
+    db: Database, tz: tzinfo, now_ts: float, shift_hours: int = 2, limit_hours: int = 4,
+    scheduled_today: float | None = None,
+) -> dict[str, Any]:
     """For the predictions: the last week's outages, the expected windows and strictness."""
     week = outages(db, tz, now_ts - 7 * 86400, now_ts)
     return {
@@ -218,5 +228,6 @@ def summary(db: Database, tz: tzinfo, now_ts: float, shift_hours: int = 2, limit
             for k, v in expected(db, tz, now_ts, shift_hours).items()
         },
         "hours_without_grid": outage_hours(db, tz, now_ts),
-        "strict": strict_reason(db, tz, now_ts, limit_hours),
+        "scheduled_hours_today": scheduled_today,
+        "strict": strict_reason(db, tz, now_ts, limit_hours, scheduled_today),
     }
