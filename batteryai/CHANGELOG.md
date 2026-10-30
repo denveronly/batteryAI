@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.51
+
+- Monthly bill tiles: PV before the Power bill.
+
 ## 0.4.50
 
 - Battery health → **Control**: pick a battery from the list and see the BMS's own switches

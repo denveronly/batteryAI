@@ -1045,9 +1045,9 @@ async function refreshBill() {
   const pv = data.pv_month || {};
   $("billTiles").replaceChildren(
     ...names.map((n) => tile(`${n} · ${monthName}`, money(current?.by_tariff?.[n]?.cost ?? 0), `${fmt(current?.by_tariff?.[n]?.kwh ?? 0, 1)} kWh`)),
-    tinted(tile(`Power bill · ${monthName}`, money(current?.cost ?? 0), `${fmt(current?.kwh ?? 0, 1)} kWh`), "eco-peak"),
     tinted(tile(`PV · ${monthName}`, pv.money === null || pv.money === undefined ? "—" : money(pv.money),
       pv.kwh === null || pv.kwh === undefined ? "" : `${fmt(pv.kwh, 1)} kWh`), "eco-sun"),
+    tinted(tile(`Power bill · ${monthName}`, money(current?.cost ?? 0), `${fmt(current?.kwh ?? 0, 1)} kWh`), "eco-peak"),
   );
 
   // The bill and the appliances share one column layout:
