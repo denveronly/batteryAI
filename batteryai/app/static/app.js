@@ -906,7 +906,7 @@ async function refreshEconomy() {
     data: {
       labels: rows.map((d) => shortDate(d.date)),
       datasets: [
-        bar("Grid paid", css("--series-load"), col("paid"), { stack: "cost" }),
+        bar("Grid paid", css("--eco-grid-fg"), col("paid"), { stack: "cost" }),
         bar("PV", css("--series-pv"), col("pv_money"), { stack: "cost" }),
         bar("Battery discharged", css("--series-soc"), col("battery_money"), { stack: "cost" }),
       ],

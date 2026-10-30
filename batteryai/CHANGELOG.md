@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.54
+
+- Economy *Cost by day* chart: Grid paid in red, like the grid figures in the tables.
+
 ## 0.4.53
 
 - **Prediction strictness** slider (Settings → Prediction tuning), −10 relaxed … 0 … +10
