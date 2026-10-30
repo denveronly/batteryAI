@@ -515,3 +515,11 @@ label { align-content: start; }
 #dashBatteryLines .bms-line.compact { border-top: 1px solid var(--border); padding-top: 10px; }
 #dashBatteryLines .bms-line.compact:nth-child(-n + 2) { border-top: 0; padding-top: 0; }
 .bms-line-values { grid-template-columns: auto auto minmax(160px, 1fr); }
+
+/* Alarm chip: a siren, green when all is well, red and flashing with the alarm's name */
+.chip.bms-siren { color: var(--ok); background: color-mix(in srgb, var(--ok) 16%, var(--chip)); font-weight: 650; }
+.chip.bms-siren:not(.on) .siren { filter: hue-rotate(115deg) saturate(1.2); }
+.chip.bms-siren.on { color: #fff; background: var(--error); animation: bms-flash 1.2s ease-in-out infinite; }
+.chip.bms-siren .siren { display: inline-block; }
+@keyframes bms-flash { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--error) 70%, transparent); } 50% { box-shadow: 0 0 0 6px transparent; opacity: 0.85; } }
+@media (prefers-reduced-motion: reduce) { .chip.bms-siren.on { animation: none; } }

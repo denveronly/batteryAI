@@ -1337,10 +1337,14 @@ function bmsLine(b, compact = false) {
   const m = b.main || {};
   const dot = el("span", { class: `bms-dot ${b.online === true ? "on" : b.online === false ? "off" : ""}`,
     title: b.online === true ? "BMS online" : b.online === false ? "BMS offline" : "Online state unknown" }, "●");
-  const activeCount = Math.max(b.active_alarms || 0, Math.round(m.alarms_total?.value || 0));
+  const activeNames = (b.alarms || []).filter((a) => a.active).map((a) => a.name);
+  const activeCount = Math.max(activeNames.length, Math.round(m.alarms_total?.value || 0));
+  const alarmText = activeNames.length
+    ? activeNames.slice(0, 2).join(", ") + (activeNames.length > 2 ? ` +${activeNames.length - 2}` : "")
+    : `${activeCount} alarm${activeCount > 1 ? "s" : ""}`;
   const alarmChip = activeCount
-    ? el("span", { class: "chip bms-bad" }, `⚠ ${activeCount} alarm${activeCount > 1 ? "s" : ""}`)
-    : b.alarms.length || m.alarms_total ? el("span", { class: "chip bms-ok" }, "✓ No alarms") : null;
+    ? el("span", { class: "chip bms-siren on", title: activeNames.join("\n") || "BMS active alarms" }, el("span", { class: "siren" }, "🚨"), ` ${alarmText}`)
+    : b.alarms.length || m.alarms_total ? el("span", { class: "chip bms-siren", title: "No alarms" }, el("span", { class: "siren" }, "🚨")) : null;
   const statuses = (b.statuses || []).slice()
     .sort((x, y) => (BMS_STATUS_ORDER.indexOf(x.key) + 1 || 99) - (BMS_STATUS_ORDER.indexOf(y.key) + 1 || 99))
     .map((st) => {
@@ -1386,9 +1390,18 @@ function bmsCard(b) {
     return el("div", { class: cls, title: [c.voltage?.entity_id, c.resistance?.entity_id].filter(Boolean).join("\n") },
       el("div", { class: "bms-cell-n" }, `#${pad2(c.n)}`),
       el("div", { class: "bms-cell-v" }, v === null || v === undefined ? "—" : `${fmt(v, 3)} ${c.voltage.unit || "V"}`),
-      el("div", { class: "bms-bar" }, el("span", { style: `width:${Math.max(4, share)}%` })),
-      c.resistance ? el("div", { class: "bms-cell-r" }, `${bmsNum(c.resistance, 3)} ${c.resistance.unit}`) : null);
+      el("div", { class: "bms-bar" }, el("span", { style: `width:${Math.max(4, share)}%` })));
   });
+  // Resistances: the BMS's cell resistance (JK: the balance wire to that cell) and, when it
+  // reports one separately, the wire resistance; the highest outlined red.
+  const resOf = (c) => c.wire?.value ?? c.resistance?.value;
+  const withRes = (b.cells || []).filter((c) => resOf(c) !== null && resOf(c) !== undefined);
+  const maxRes = withRes.reduce((a, c) => (a === null || resOf(c) > resOf(a) ? c : a), null);
+  const resUnit = maxRes ? (maxRes.wire || maxRes.resistance).unit : "";
+  const resistances = withRes.map((c) => el("div", { class: c === maxRes && withRes.length > 1 ? "bms-cell high" : "bms-cell", title: [c.resistance?.entity_id, c.wire?.entity_id].filter(Boolean).join("\n") },
+    el("div", { class: "bms-cell-n" }, `R${pad2(c.n)}`),
+    c.resistance ? el("div", { class: "bms-cell-v" }, `${bmsNum(c.resistance, 3)} ${c.resistance.unit}`) : null,
+    c.wire ? el("div", { class: c.resistance ? "bms-cell-r" : "bms-cell-v" }, `${c.resistance ? "wire " : ""}${bmsNum(c.wire, 3)} ${c.wire.unit}`) : null));
   const temps = (b.temperatures || []).filter((t) => t.available);
   const hottest = temps.reduce((a, t) => (t.value !== null && (a === null || t.value > a.value) ? t : a), null);
 
@@ -1399,17 +1412,20 @@ function bmsCard(b) {
   return el("section", { class: "card" },
     bmsLine(b),
     b.found ? null : el("div", { class: "banner" }, `Nothing found for sensor.${b.prefix}_… in Home Assistant – check the prefix in Settings → Batteries.`),
-    ...active.map((a) => el("div", { class: "bms-alarm on", title: a.entity_id }, `⚠ ${a.name}`)),
     ...Object.entries(b.issues || {}).map(([code, text]) => el("div", { class: "bms-alarm warn", title: code }, `△ ${text}`)),
     cells.length ? bmsDetails(key("cells"), [`Cells (${cells.length})`, el("span", { class: "muted" },
       ` · Δ ${delta} ${deltaUnit} · V${pad2(sum.min_cell)} min ${fmt(sum.min_v, 3)} V · V${pad2(sum.max_cell)} max ${fmt(sum.max_v, 3)} V`)],
       el("div", { class: "bms-cells" }, ...cells)) : null,
+    resistances.length ? bmsDetails(key("res"), [`Wire resistances (${resistances.length})`, el("span", { class: "muted" }, ` · R${pad2(maxRes.n)} max ${fmt(resOf(maxRes), 3)} ${resUnit}`)],
+      el("div", { class: "bms-cells" }, ...resistances)) : null,
     temps.length ? bmsDetails(key("temps"), [`Temperatures (${temps.length})`, hottest ? el("span", { class: "muted" }, ` · ${tempIndex(hottest)} max ${fmt(hottest.value, 1)} ${hottest.unit}`) : ""],
       el("section", { class: "tiles" }, ...temps.map((t) => tile(t.name, bmsNum(t, 1), t.unit)))) : null,
     more.length ? bmsDetails(key("more"), ["Other sensors", el("span", { class: "muted" }, " · current, power, delta, errors, cycles")],
       el("section", { class: "tiles" }, ...more)) : null,
     b.alarms.length ? bmsDetails(key("alarms"), [`Alarms (${b.alarms.length})`, el("span", { class: active.length ? "bms-bad-text" : "muted" }, active.length ? ` · ${active.length} active` : " · all clear")],
-      el("div", { class: "bms-alarm-list" }, ...quiet.map((a) => el("div", { class: a.available ? "bms-alarm" : "bms-alarm na", title: a.entity_id }, `${a.available ? "✓" : "?"} ${a.name}`)))) : null);
+      el("div", { class: "bms-alarm-list" },
+        ...active.map((a) => el("div", { class: "bms-alarm on", title: a.entity_id }, `🚨 ${a.name}`)),
+        ...quiet.map((a) => el("div", { class: a.available ? "bms-alarm" : "bms-alarm na", title: a.entity_id }, `${a.available ? "✓" : "?"} ${a.name}`)))) : null);
 }
 
 // Main dashboard: one compact line per battery (SOC, voltage, power bar), every 15 s.

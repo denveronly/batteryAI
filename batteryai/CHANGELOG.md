@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.56
+
+- Battery alarms as one **🚨 chip** in the header: green when all is well; red and flashing
+  with the alarm(s) that occurred (e.g. "🚨 Cell under-voltage, Charge over-temperature").
+  The alarm list (dropdown) shows active ones first.
+- **Wire resistances** dropdown per battery: R01…R16 with the highest outlined red and in the
+  title ("R05 max 0.244 mΩ"). A separate `…_wire_resistance_NN` sensor is shown too when the
+  BMS has one; cell boxes now show the voltage only.
+
 ## 0.4.55
 
 - Battery header, compact: a dot before the name (green online, red offline), no prefix;

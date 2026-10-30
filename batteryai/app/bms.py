@@ -60,6 +60,7 @@ def alarm_name(key: str, friendly: str | None) -> str:
     return friendly or _title(key)
 
 
+WIRE_RE = re.compile(r"^(?:cell_)?(?:balanc\w*_)?wire_resistance_(\d{1,3})$")
 CELL_RE = re.compile(r"^cell_(voltage|resistance)_(\d{1,3})$")
 
 
@@ -121,6 +122,10 @@ def pack(prefix: str, states: list[dict[str, Any]]) -> dict[str, Any]:
         match = CELL_RE.match(rest)
         if match:
             cells.setdefault(int(match[2]), {"n": int(match[2])})[match[1]] = _value(state)
+            continue
+        match = WIRE_RE.match(rest)
+        if match:  # a separate balance-wire resistance per cell, when the BMS reports one
+            cells.setdefault(int(match[1]), {"n": int(match[1])})["wire"] = _value(state)
             continue
         if ("temperature" in rest or rest.startswith("temp")) and "protection" not in rest and "recovery" not in rest:
             # Names from the entity id (friendly names carry the bridge's long device name).
