@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.47
+
+- **Appliance emoji** (Settings → Appliances): pick one from the list or paste any; it is
+  shown before the appliance's name in the tiles, charts, predictions and the bill.
+- Monthly bill: the *Power bill* tile light red and the *PV* tile light yellow; in the bill
+  and appliance tables Peak columns light red, Off-peak light purple and the grid cost in red
+  – the same colours as the Economy tab.
+
 ## 0.4.46
 
 - Monthly bill tiles are this month only: each tariff (Peak, Off-peak), the **Power bill**

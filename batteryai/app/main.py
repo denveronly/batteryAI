@@ -831,7 +831,7 @@ async def status(request: web.Request) -> web.Response:
                 "now_price": opts.tariff_at(datetime.now(app.tz).hour * 60 + datetime.now(app.tz).minute)[0],
             },
             "appliances": [
-                {"id": a.id, "name": a.name, "temperature_dependent": a.temperature_dependent}
+                {"id": a.id, "name": a.name, "icon": a.icon, "temperature_dependent": a.temperature_dependent}
                 for a in opts.appliances
                 if a.entity
             ],

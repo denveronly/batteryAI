@@ -238,7 +238,7 @@ function renderPower(rows, predicted = []) {
   const pv = pts("pv_power");
   if (pv.some((p) => p.y !== null)) datasets.push(line("PV", css("--series-pv"), pv, { fill: "origin", backgroundColor: css("--series-pv") + "22" }));
   appliancesList().forEach((a, i) =>
-    datasets.push(line(a.name, applianceColor(i), rows.map((r) => ({ x: r.ts * 1000, y: r.appliances?.[a.id] ?? null })))));
+    datasets.push(line(applianceLabel(a), applianceColor(i), rows.map((r) => ({ x: r.ts * 1000, y: r.appliances?.[a.id] ?? null })))));
   const temps = pts("outdoor_temp");
   const hasTemp = temps.some((p) => p.y !== null);
   if (hasTemp) datasets.push(line("Outdoor temp", css("--series-temp"), temps, { yAxisID: "y2", borderDash: [4, 4], borderWidth: 1.5, backgroundColor: "transparent" }));
@@ -288,7 +288,7 @@ function renderDaily(days) {
   const col = (key) => days.map((d) => d[key]);
   const datasets = [bar("Consumption", css("--series-consumption"), col("consumption_kwh"))];
   appliancesList().forEach((a, i) =>
-    datasets.push(bar(a.name, applianceColor(i), days.map((d) => d.appliances?.[a.id]?.kwh ?? null))));
+    datasets.push(bar(applianceLabel(a), applianceColor(i), days.map((d) => d.appliances?.[a.id]?.kwh ?? null))));
   if (col("pv_kwh").some((v) => v !== null)) datasets.push(bar("PV", css("--series-pv"), col("pv_kwh")));
   datasets.push({ type: "line", label: "Solar forecast", data: col("solar_forecast_kwh"), borderColor: css("--series-forecast"), backgroundColor: css("--series-forecast"), borderDash: [5, 4], pointRadius: 3, borderWidth: 1.5 });
   const hasTemp = col("temp_avg").some((v) => v !== null);
@@ -394,6 +394,19 @@ function renderGrid(g, hours) {
 
 // Status, tiles, programs, control ---------------------------------------------
 
+// Colour block of a grid tariff: the most expensive red (eco-peak), cheaper ones purple.
+function tariffBlock(name) {
+  const order = (status?.tariff?.tariffs || []).slice().sort((a, b) => b.price_per_kwh - a.price_per_kwh).map((t) => t.name);
+  const index = order.indexOf(name);
+  return index === 0 ? "eco-peak" : index > 0 ? "eco-cheap" : "";
+}
+
+// A tile with one of the Economy colour blocks (eco-peak red, eco-cheap purple, eco-sun yellow).
+function tinted(node, cls) {
+  node.classList.add(cls);
+  return node;
+}
+
 function tile(label, value, suffix) {
   return el("div", { class: "tile" }, el("div", { class: "label" }, label), el("div", { class: "value" }, value, suffix ? el("small", {}, " ", suffix) : null));
 }
@@ -453,7 +466,7 @@ function renderStatus() {
     tile("Solar tomorrow", fmt(latest.tomorrow_forecast), solarSuffix("tomorrow_forecast")),
   ];
   if (latest.pv_today !== null && latest.pv_today !== undefined) tiles.push(tile("PV today", fmt(latest.pv_today), "kWh"));
-  for (const a of appliancesList()) tiles.push(tile(a.name, fmt(latest.appliances?.[a.id], 0), "W"));
+  for (const a of appliancesList()) tiles.push(tile(applianceLabel(a), fmt(latest.appliances?.[a.id], 0), "W"));
   if (latest.outdoor_temp !== null && latest.outdoor_temp !== undefined) tiles.push(tile("Outside", fmt(latest.outdoor_temp), status.weather?.unit || "°"));
   const tomorrowWeather = weatherText(status.weather);
   if (tomorrowWeather) tiles.push(tile("Tomorrow", tomorrowWeather, status.weather.tomorrow.condition || ""));
@@ -743,7 +756,12 @@ const LEGACY_APPLIANCE_NAMES = { heat_pump: "Heat pump", boiler: "Boiler", ev: "
 const APPLIANCE_COLORS = ["--series-heatpump", "--series-boiler", "--series-ev", "--series-app4", "--series-app5", "--series-app6"];
 const appliancesList = () => (Array.isArray(status?.appliances) ? status.appliances : []);
 const applianceColor = (i) => css(APPLIANCE_COLORS[i % APPLIANCE_COLORS.length]);
-const applianceName = (id) => appliancesList().find((a) => a.id === id)?.name || LEGACY_APPLIANCE_NAMES[id] || id;
+// "🚗 EV charger": the appliance's emoji (Settings → Appliances) before its name.
+const applianceLabel = (a) => (a?.icon ? `${a.icon} ${a.name}` : a?.name || "");
+const applianceName = (id, fallback) => {
+  const a = appliancesList().find((x) => x.id === id);
+  return a ? applianceLabel(a) : fallback || LEGACY_APPLIANCE_NAMES[id] || id;
+};
 
 function predictionChips(r) {
   return el(
@@ -793,7 +811,7 @@ function renderPrediction(analysis) {
     const hours = r.hourly_forecast_tomorrow.slice().sort((a, b) => a.hour - b.hour);
     const series = [["Load", "load_w", "--series-load"]];
     appliancesList().forEach((a, i) => {
-      if (hours.some((h) => h[`${a.id}_w`] !== undefined)) series.push([a.name, `${a.id}_w`, APPLIANCE_COLORS[i % APPLIANCE_COLORS.length]]);
+      if (hours.some((h) => h[`${a.id}_w`] !== undefined)) series.push([applianceLabel(a), `${a.id}_w`, APPLIANCE_COLORS[i % APPLIANCE_COLORS.length]]);
     });
     const text = css("--muted");
     charts.forecastChart = typeof Chart === "undefined" ? undefined : new Chart($("forecastChart"), {
@@ -990,7 +1008,8 @@ async function refreshBill() {
   const year = $("billYear").value;
   let data;
   try {
-    data = await api(`api/bill${year ? `?year=${year}` : ""}`);
+    // The status holds the tariffs' prices, which decide the Peak/Off-peak colours.
+    [data, status] = await Promise.all([api(`api/bill${year ? `?year=${year}` : ""}`), status ? Promise.resolve(status) : api("api/status")]);
   } catch (err) {
     $("billNotes").replaceChildren(el("div", { class: "banner" }, `Could not load data: ${err.message}`));
     return;
@@ -1028,9 +1047,9 @@ async function refreshBill() {
   const pv = data.pv_month || {};
   $("billTiles").replaceChildren(
     ...names.map((n) => tile(`${n} · ${monthName}`, money(current?.by_tariff?.[n]?.cost ?? 0), `${fmt(current?.by_tariff?.[n]?.kwh ?? 0, 1)} kWh`)),
-    tile(`Power bill · ${monthName}`, money(current?.cost ?? 0), `${fmt(current?.kwh ?? 0, 1)} kWh`),
-    tile(`PV · ${monthName}`, pv.money === null || pv.money === undefined ? "—" : money(pv.money),
-      pv.kwh === null || pv.kwh === undefined ? "" : `${fmt(pv.kwh, 1)} kWh`),
+    tinted(tile(`Power bill · ${monthName}`, money(current?.cost ?? 0), `${fmt(current?.kwh ?? 0, 1)} kWh`), "eco-peak"),
+    tinted(tile(`PV · ${monthName}`, pv.money === null || pv.money === undefined ? "—" : money(pv.money),
+      pv.kwh === null || pv.kwh === undefined ? "" : `${fmt(pv.kwh, 1)} kWh`), "eco-sun"),
   );
 
   // Each tariff: kWh, the month's price (editable on month rows) and cost; with several
@@ -1051,15 +1070,21 @@ async function refreshBill() {
   const cells = (item, month = null) => [
     ...priced.flatMap((n) => {
       const part = item.by_tariff[n];
+      const b = single ? "" : tariffBlock(n);
       return [
-        el("td", { class: "num" }, part ? kwh(part.kwh) : "—"),
-        el("td", { class: "num" }, month && part ? priceInput(month, n) : ""),
-        el("td", { class: "num" }, part ? money(part.cost) : "—"),
+        el("td", { class: `num ${b}` }, part ? kwh(part.kwh) : "—"),
+        el("td", { class: `num ${b}` }, month && part ? priceInput(month, n) : ""),
+        el("td", { class: `num ${b}` }, part ? money(part.cost) : "—"),
       ];
     }),
-    ...(single ? [] : [el("td", { class: "num" }, kwh(item.kwh)), el("td", { class: "num" }, money(item.cost))]),
+    ...(single ? [] : [el("td", { class: "num" }, kwh(item.kwh)), el("td", { class: "num eco-grid" }, money(item.cost))]),
   ];
-  const header = ["Month", ...priced.flatMap((n) => [`${n} kWh`, `${n} price, ${cur}/kWh`, `${n} cost`]), ...(single ? [] : ["Overall kWh", "Overall grid cost"]), ""];
+  const header = [
+    ["Month", ""],
+    ...priced.flatMap((n) => [[`${n} kWh`, single ? "" : tariffBlock(n)], [`${n} price, ${cur}/kWh`, single ? "" : tariffBlock(n)], [`${n} cost`, single ? "" : tariffBlock(n)]]),
+    ...(single ? [] : [["Overall kWh", ""], ["Overall grid cost", ""]]),
+    ["", ""],
+  ];
   const rows = [];
   for (const m of data.months) {
     const open = openBillMonths.has(m.key);
@@ -1082,7 +1107,7 @@ async function refreshBill() {
     if (open) rows.push(...m.days.map((d) => el("tr", { class: "day" }, el("td", { class: "nowrap" }, shortDate(d.key)), ...cells(d), el("td"))));
   }
   $("billTable").replaceChildren(
-    el("tr", {}, ...header.map((h, i) => el("th", { class: i ? "num" : "" }, h))),
+    el("tr", {}, ...header.map(([h, cls], i) => el("th", { class: `${i ? "num" : ""} ${cls}` }, h))),
     ...(rows.length ? rows : [el("tr", {}, el("td", { class: "empty", colspan: header.length }, "Nothing recorded for this year yet."))]),
     el("tr", { class: "total" }, el("td", {}, `Year ${data.year} total`), ...cells(data.total), el("td")),
   );
@@ -1104,20 +1129,22 @@ function renderBillAppliances(data, money, kwh, monthLabel) {
   const row = (label, a, total, cls = "") =>
     el("tr", cls ? { class: cls } : {},
       el("td", { class: "nowrap" }, label),
-      el("td", {}, a.name, a.removed ? el("span", { class: "hint" }, " (removed)") : ""),
+      el("td", {}, applianceName(a.id, a.name), a.removed ? el("span", { class: "hint" }, " (removed)") : ""),
       ...tariffs.flatMap((t) => {
         const part = a.by_tariff[t];
-        return [el("td", { class: "num" }, part ? kwh(part.kwh) : "—"), el("td", { class: "num" }, part ? money(part.cost) : "—")];
+        const b = tariffBlock(t);
+        return [el("td", { class: `num ${b}` }, part ? kwh(part.kwh) : "—"), el("td", { class: `num ${b}` }, part ? money(part.cost) : "—")];
       }),
       el("td", { class: "num" }, kwh(a.kwh)),
-      el("td", { class: "num" }, money(a.cost)),
+      el("td", { class: "num eco-grid" }, money(a.cost)),
       el("td", { class: "num" }, share(a.cost, total)),
     );
-  const header = ["Month", "Appliance", ...tariffs.flatMap((t) => [`${t} kWh`, `${t} cost`]), "kWh", "Cost", "Share of bill"];
+  const header = [["Month", ""], ["Appliance", ""], ...tariffs.flatMap((t) => [[`${t} kWh`, tariffBlock(t)], [`${t} cost`, tariffBlock(t)]]),
+    ["kWh", ""], ["Cost", ""], ["Share of bill", ""]];
   const rows = months.flatMap((m) => m.appliances.map((a, i) => row(i ? "" : monthLabel(m.key), a, monthCost[m.key], i ? "" : "group-start")));
   const totals = (data.appliance_total || []).map((a, i) => row(i ? "" : `Year ${data.year}`, a, data.total.cost, i ? "total-more" : "total"));
   $("billAppliances").replaceChildren(
-    el("tr", {}, ...header.map((h, i) => el("th", { class: i > 1 ? "num" : "" }, h))),
+    el("tr", {}, ...header.map(([h, cls], i) => el("th", { class: `${i > 1 ? "num" : ""} ${cls}` }, h))),
     ...rows,
     ...totals,
   );

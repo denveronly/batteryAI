@@ -104,6 +104,9 @@ function applianceRow(appliance = {}) {
   row.dataset.id = appliance.id || "";
   const name = el("input", { type: "text", placeholder: "Name, e.g. Heat pump", maxlength: "40", "data-role": "name" });
   name.value = appliance.name || "";
+  // Emoji before the name everywhere on the dashboard: pick one from the list or type/paste any.
+  const icon = el("input", { type: "text", list: "applianceIcons", maxlength: "8", placeholder: "🔌", class: "icon-input", "data-role": "icon", title: "Emoji shown before the name – pick from the list or paste any" });
+  icon.value = appliance.icon || "";
   const entityInput = el("input", { type: "text", list: "entityList", placeholder: "sensor.example_power", autocomplete: "off", spellcheck: "false", "data-role": "entity" });
   entityInput.value = appliance.entity || "";
   const energyInput = el("input", { type: "text", list: "entityList", placeholder: "optional: sensor.example_energy", autocomplete: "off", spellcheck: "false", "data-role": "energy" });
@@ -125,6 +128,7 @@ function applianceRow(appliance = {}) {
   });
   row.append(
     el("div", { class: "appliance-fields" },
+      el("label", {}, "Emoji", icon),
       el("label", {}, "Name", name),
       el("label", {}, "Power sensor", entityInput),
       el("label", { title: "kWh counter for the monthly bill (total, daily or monthly – resets are handled). Without it the bill integrates the power sensor." }, "Energy sensor (kWh)", energyInput),
@@ -150,6 +154,12 @@ function renumberAppliances() {
   if (!rows.length) $("applianceRows").replaceChildren();
 }
 
+// Suggestions for the appliance emoji field.
+const APPLIANCE_ICONS = ["🚗", "🔌", "♨️", "🔥", "🌡️", "❄️", "💧", "🚿", "🛁", "🧺", "🍳", "💡", "🖥️", "⚡", "🏠", "🏭", "🌀", "🐟", "🏊", "🚜"];
+if (!document.getElementById("applianceIcons")) {
+  document.body.append(el("datalist", { id: "applianceIcons" }, ...APPLIANCE_ICONS.map((i) => el("option", { value: i }))));
+}
+
 function fillAppliances(list) {
   $("applianceRows").replaceChildren(...list.map((a) => applianceRow(a)));
   renumberAppliances();
@@ -162,6 +172,7 @@ function readAppliances() {
     entity: row.querySelector('[data-role="entity"]').value.trim(),
     energy_entity: row.querySelector('[data-role="energy"]').value.trim(),
     temperature_dependent: row.querySelector('[data-role="temp"]').checked,
+    icon: row.querySelector('[data-role="icon"]').value.trim(),
   }));
 }
 

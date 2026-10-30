@@ -57,6 +57,7 @@ class Appliance:
     entity: str = ""
     temperature_dependent: bool = False  # heats or cools: energy follows outdoor temperature
     energy_entity: str = ""  # optional kWh counter for the monthly bill (total, daily or monthly)
+    icon: str = ""  # optional emoji shown before the name, e.g. 🚗
 
 
 @dataclass
@@ -500,7 +501,7 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         taken.add(app_id)
         opts.appliances.append(Appliance(
             id=app_id, name=name, entity=entity_id, temperature_dependent=bool(item.get("temperature_dependent")),
-            energy_entity=energy_id,
+            energy_entity=energy_id, icon=str(item.get("icon") or "").strip()[:8],
         ))
 
     services = raw.get("notify_services", base.notify_services) or []
