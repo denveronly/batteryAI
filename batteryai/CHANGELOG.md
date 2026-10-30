@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.60
+
+- Faster updates: the add-on version is set at the end of the Dockerfile, so the Python
+  packages and the llama.cpp build stay cached between versions instead of being rebuilt on
+  every update. (This update itself still rebuilds everything once.)
+
 ## 0.4.59
 
 - Battery lines: the power value (e.g. "−844 W discharging") is centred under the zero line;

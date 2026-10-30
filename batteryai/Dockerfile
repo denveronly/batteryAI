@@ -1,10 +1,6 @@
 ARG BUILD_FROM
 FROM ${BUILD_FROM}
 
-# The Supervisor passes the add-on version from config.yaml; shown in the panel header.
-ARG BUILD_VERSION=dev
-ENV BATTERYAI_VERSION=${BUILD_VERSION}
-
 WORKDIR /app
 
 COPY requirements.txt /app/requirements.txt
@@ -22,8 +18,16 @@ RUN apk add --no-cache libstdc++ libgomp \
          || echo "WARNING: llama-cpp-python could not be built; the local LLM engine will be unavailable" ) \
     && apk del .llama-build
 
+# Everything above is cached between updates (Python packages, the llama.cpp build); only the
+# app's own files and the version below change from one version to the next, so an update does
+# not recompile llama.cpp. Keep the version ARG here: an ARG used earlier would invalidate the
+# cache of every later step on each new version.
 COPY app/ /app/
 # The version is also read from here if the build did not pass BUILD_VERSION.
 COPY config.yaml /app/addon_config.yaml
+
+# The Supervisor passes the add-on version from config.yaml; shown in the panel header.
+ARG BUILD_VERSION=dev
+ENV BATTERYAI_VERSION=${BUILD_VERSION}
 
 CMD ["python3", "-u", "/app/main.py"]
