@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.57
+
+- Power bar (Dashboard and Battery health): a thick zero line with a small "0"; colour by
+  power in both directions – up to 1 kW green, 2 kW yellow, 3 kW brown, above red.
+- Dashboard **Batteries** card: 4 batteries per row, foldable by its title (remembered); folded
+  it shows one line – number of batteries, average SOC, total power, alarms.
+- Battery health: **column charts** for the cell voltages (LiFePO4 scale, delta / average /
+  min / max on top) and the wire resistances (spread / average / max on top, coloured green →
+  red); the lowest column outlined blue, the highest red, values on hover.
+- The Battery health tab is hidden until a battery is added in Settings → Batteries.
+
 ## 0.4.56
 
 - Battery alarms as one **🚨 chip** in the header: green when all is well; red and flashing

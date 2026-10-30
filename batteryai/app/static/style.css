@@ -523,3 +523,41 @@ label { align-content: start; }
 .chip.bms-siren .siren { display: inline-block; }
 @keyframes bms-flash { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--error) 70%, transparent); } 50% { box-shadow: 0 0 0 6px transparent; opacity: 0.85; } }
 @media (prefers-reduced-motion: reduce) { .chip.bms-siren.on { animation: none; } }
+
+/* Power bar: thicker zero line with a small 0; colour by power (both directions) */
+.bms-pbar { height: 14px; overflow: visible; }
+.bms-pbar-zero { width: 4px; margin-left: -2px; background: var(--text, #e6e6e6); opacity: 0.85; border-radius: 2px; top: -3px; bottom: -3px; z-index: 1; }
+.bms-pbar-zero i { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 2px; font-size: 10px; font-style: normal; color: var(--muted); }
+.bms-pbar-fill.p1 { background: #4caf50; }
+.bms-pbar-fill.p2 { background: #e0c341; }
+.bms-pbar-fill.p3 { background: #a8703c; }
+.bms-pbar-fill.p4 { background: #d9493e; }
+.bms-pval { margin-top: 14px; }
+.bms-pval.p1 { color: #4caf50; } .bms-pval.p2 { color: #e0c341; } .bms-pval.p3 { color: #c08a55; } .bms-pval.p4 { color: #e2615a; }
+
+/* Dashboard Batteries card: 4 per row, values stacked; foldable */
+#dashBatteryLines { grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 0 20px; }
+#dashBatteryLines .bms-line.compact:nth-child(-n + 4) { border-top: 0; padding-top: 0; }
+#dashBatteryLines .bms-line.compact:nth-child(n + 5) { border-top: 1px solid var(--border); padding-top: 10px; }
+#dashBatteryLines .bms-line.compact:nth-child(-n + 2) { border-top: 0; }
+#dashBatteryLines .bms-line-values { grid-template-columns: auto auto; }
+#dashBatteryLines .bms-power { grid-column: 1 / -1; min-width: 0; }
+#dashBatteryLines .bms-big b { font-size: 20px; }
+#dashBatteriesHead { cursor: pointer; user-select: none; }
+#dashBatteriesHead h2::before { content: "▾ "; color: var(--muted); }
+#dashBatteries.folded #dashBatteriesHead h2::before { content: "▸ "; }
+#dashBatteries.folded #dashBatteryLines { display: none; }
+#dashBatteries.folded .card-head { margin-bottom: 0; }
+
+/* Cell column charts */
+.bms-stats { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 4px 0 12px; }
+.bms-stat span { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.bms-stat b { font-size: 17px; font-variant-numeric: tabular-nums; }
+.bms-cols { display: flex; gap: 6px; height: 220px; align-items: stretch; padding-bottom: 4px; }
+.bms-col { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 0; }
+.bms-col-track { flex: 1; width: 100%; max-width: 30px; position: relative; border-radius: 6px; background: var(--chip); overflow: hidden; }
+.bms-col-fill { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 6px 6px 0 0; opacity: 0.85; }
+.bms-col.low .bms-col-track { box-shadow: inset 0 0 0 2px #4a90e2; background: color-mix(in srgb, #4a90e2 18%, var(--chip)); }
+.bms-col.high .bms-col-track { box-shadow: inset 0 0 0 2px var(--error); background: color-mix(in srgb, var(--error) 18%, var(--chip)); }
+.bms-col-n { margin-top: 4px; font-size: 11px; font-weight: 650; color: var(--muted); background: var(--chip); border-radius: 5px; padding: 0 5px; }
+.bms-col.low .bms-col-n { color: #4a90e2; } .bms-col.high .bms-col-n { color: var(--error); }

@@ -1315,7 +1315,9 @@ function bmsDetails(key, summary, ...content) {
   return d;
 }
 
-// Power bar: 0 in the middle, discharging to the left (amber, red when high), charging to the right (green).
+// Power bar: 0 in the middle (thick line, small "0"), discharging to the left, charging to the
+// right. Colour by power in both directions: ≤1 kW green, ≤2 kW yellow, ≤3 kW brown, more red.
+const powerLevel = (w) => (w <= 1000 ? "p1" : w <= 2000 ? "p2" : w <= 3000 ? "p3" : "p4");
 function bmsPowerBar(b) {
   const m = b.main || {};
   const p = m.power?.value;
@@ -1325,11 +1327,35 @@ function bmsPowerBar(b) {
   const scale = Math.max(5000, Math.ceil(Math.abs(watts) / 1000) * 1000);
   const share = Math.min(50, (Math.abs(watts) / scale) * 50);
   const idle = Math.abs(watts) < 20;
-  const cls = idle ? "idle" : watts > 0 ? "charge" : Math.abs(watts) > scale * 0.5 ? "discharge high" : "discharge";
-  const fill = el("span", { class: `bms-pbar-fill ${cls}`, style: watts >= 0 ? `left:50%;width:${share}%` : `right:50%;width:${share}%` });
+  const level = idle ? "idle" : powerLevel(Math.abs(watts));
+  const fill = el("span", { class: `bms-pbar-fill ${level}`, style: watts >= 0 ? `left:50%;width:${share}%` : `right:50%;width:${share}%` });
   return el("div", { class: "bms-power", title: `${fmt(watts, 0)} ${m.power.unit || "W"} (bar scale ±${scale / 1000} kW)` },
-    el("div", { class: "bms-pbar" }, el("span", { class: "bms-pbar-zero" }), fill),
-    el("div", { class: `bms-pval ${cls}` }, idle ? "idle" : `${watts > 0 ? "+" : "−"}${fmt(Math.abs(watts), 0)} ${m.power.unit || "W"} ${watts > 0 ? "charging" : "discharging"}`));
+    el("div", { class: "bms-pbar" }, fill, el("span", { class: "bms-pbar-zero" }, el("i", {}, "0"))),
+    el("div", { class: `bms-pval ${level}` }, idle ? "idle" : `${watts > 0 ? "+" : "−"}${fmt(Math.abs(watts), 0)} ${m.power.unit || "W"} ${watts > 0 ? "charging" : "discharging"}`));
+}
+
+// Column chart for the cells (voltages, resistances): one column per cell, its number at the
+// bottom, the lowest outlined blue and the highest red; the value on hover.
+function bmsColumns(items, { low, high, height, colour, label }) {
+  const values = items.map((i) => i.value).filter((v) => v !== null && v !== undefined);
+  const min = Math.min(...values), max = Math.max(...values);
+  return el("div", { class: "bms-cols" }, ...items.map((i) => {
+    const v = i.value;
+    const mark = v === null || v === undefined || max === min ? "" : v === min ? " low" : v === max ? " high" : "";
+    const h = v === null || v === undefined ? 0 : Math.max(3, Math.min(100, height(v)));
+    return el("div", { class: `bms-col${mark}`, title: `${label(i)}: ${v === null || v === undefined ? "—" : i.text}` },
+      el("div", { class: "bms-col-track" }, el("span", { class: "bms-col-fill", style: `height:${h}%;background:${colour(v, min, max)}` })),
+      el("span", { class: "bms-col-n" }, i.n));
+  }));
+}
+
+// green → yellow → brown → red along t (0 … 1)
+function heatColour(t) {
+  const stops = [[76, 175, 80], [205, 180, 60], [170, 110, 60], [205, 70, 60]];
+  const x = Math.max(0, Math.min(1, t)) * (stops.length - 1);
+  const i = Math.min(stops.length - 2, Math.floor(x)), f = x - i;
+  const c = stops[i].map((a, k) => Math.round(a + (stops[i + 1][k] - a) * f));
+  return `rgb(${c.join(",")})`;
 }
 
 // One line per battery: name, online, alarms, statuses, SOC, voltage and the power bar.
@@ -1381,27 +1407,34 @@ function bmsCard(b) {
     m.cell_count && tile("Cells (BMS)", bmsNum(m.cell_count, 0), ""),
   ].filter(Boolean);
 
-  // Cells: voltage with a bar between the lowest and highest cell, and the resistance.
-  const span = (sum.max_v ?? 0) - (sum.min_v ?? 0);
-  const cells = (b.cells || []).map((c) => {
-    const v = c.voltage?.value;
-    const cls = v === null || v === undefined ? "bms-cell" : v === sum.min_v && span > 0 ? "bms-cell low" : v === sum.max_v && span > 0 ? "bms-cell high" : "bms-cell";
-    const share = v === null || v === undefined || span <= 0 ? 50 : ((v - sum.min_v) / span) * 100;
-    return el("div", { class: cls, title: [c.voltage?.entity_id, c.resistance?.entity_id].filter(Boolean).join("\n") },
-      el("div", { class: "bms-cell-n" }, `#${pad2(c.n)}`),
-      el("div", { class: "bms-cell-v" }, v === null || v === undefined ? "—" : `${fmt(v, 3)} ${c.voltage.unit || "V"}`),
-      el("div", { class: "bms-bar" }, el("span", { style: `width:${Math.max(4, share)}%` })));
-  });
-  // Resistances: the BMS's cell resistance (JK: the balance wire to that cell) and, when it
-  // reports one separately, the wire resistance; the highest outlined red.
+  // Cell voltages: columns on a LiFePO4 scale (2.8 – 3.65 V); green in the normal range,
+  // amber towards the ends, red outside.
+  const cellItems = (b.cells || []).filter((c) => c.voltage).map((c) => ({ n: c.n, value: c.voltage.value, text: `${fmt(c.voltage.value, 3)} ${c.voltage.unit || "V"}` }));
+  const cellChart = cellItems.length ? bmsColumns(cellItems, {
+    height: (v) => ((v - 2.8) / (3.65 - 2.8)) * 100,
+    colour: (v) => (v === null || v === undefined ? "transparent" : v < 2.9 || v > 3.62 ? "rgb(205,70,60)" : v < 3.05 || v > 3.5 ? "rgb(205,160,60)" : "rgb(76,175,80)"),
+    label: (i) => `Cell ${i.n}`,
+  }) : null;
+  const vAvg = cellItems.length ? cellItems.reduce((a, i) => a + (i.value || 0), 0) / cellItems.length : null;
+
+  // Wire resistances: the BMS's cell resistance (JK: the balance wire to that cell), or a
+  // separate wire resistance when it reports one; coloured from the lowest (green) to the
+  // highest (red) of the pack.
   const resOf = (c) => c.wire?.value ?? c.resistance?.value;
+  const resUnitOf = (c) => (c.wire || c.resistance)?.unit || "";
   const withRes = (b.cells || []).filter((c) => resOf(c) !== null && resOf(c) !== undefined);
-  const maxRes = withRes.reduce((a, c) => (a === null || resOf(c) > resOf(a) ? c : a), null);
-  const resUnit = maxRes ? (maxRes.wire || maxRes.resistance).unit : "";
-  const resistances = withRes.map((c) => el("div", { class: c === maxRes && withRes.length > 1 ? "bms-cell high" : "bms-cell", title: [c.resistance?.entity_id, c.wire?.entity_id].filter(Boolean).join("\n") },
-    el("div", { class: "bms-cell-n" }, `R${pad2(c.n)}`),
-    c.resistance ? el("div", { class: "bms-cell-v" }, `${bmsNum(c.resistance, 3)} ${c.resistance.unit}`) : null,
-    c.wire ? el("div", { class: c.resistance ? "bms-cell-r" : "bms-cell-v" }, `${c.resistance ? "wire " : ""}${bmsNum(c.wire, 3)} ${c.wire.unit}`) : null));
+  const resItems = withRes.map((c) => ({ n: c.n, value: resOf(c), text: `${fmt(resOf(c), 3)} ${resUnitOf(c)}` }));
+  const resMax = resItems.length ? Math.max(...resItems.map((i) => i.value)) : null;
+  const resMin = resItems.length ? Math.min(...resItems.map((i) => i.value)) : null;
+  const resUnit = withRes.length ? resUnitOf(withRes[0]) : "";
+  const resAvg = resItems.length ? resItems.reduce((a, i) => a + i.value, 0) / resItems.length : null;
+  const resChart = resItems.length ? bmsColumns(resItems, {
+    height: (v) => (v / (resMax * 1.6)) * 100,
+    colour: (v, min, max) => heatColour(max > min ? (v - min) / (max - min) : 0),
+    label: (i) => `R${pad2(i.n)}`,
+  }) : null;
+  const maxResItem = resItems.find((i) => i.value === resMax);
+  const stat = (label, value) => el("div", { class: "bms-stat" }, el("span", {}, label), el("b", {}, value));
   const temps = (b.temperatures || []).filter((t) => t.available);
   const hottest = temps.reduce((a, t) => (t.value !== null && (a === null || t.value > a.value) ? t : a), null);
 
@@ -1413,11 +1446,15 @@ function bmsCard(b) {
     bmsLine(b),
     b.found ? null : el("div", { class: "banner" }, `Nothing found for sensor.${b.prefix}_… in Home Assistant – check the prefix in Settings → Batteries.`),
     ...Object.entries(b.issues || {}).map(([code, text]) => el("div", { class: "bms-alarm warn", title: code }, `△ ${text}`)),
-    cells.length ? bmsDetails(key("cells"), [`Cells (${cells.length})`, el("span", { class: "muted" },
+    cellChart ? bmsDetails(key("cells"), [`Cells (${cellItems.length})`, el("span", { class: "muted" },
       ` · Δ ${delta} ${deltaUnit} · V${pad2(sum.min_cell)} min ${fmt(sum.min_v, 3)} V · V${pad2(sum.max_cell)} max ${fmt(sum.max_v, 3)} V`)],
-      el("div", { class: "bms-cells" }, ...cells)) : null,
-    resistances.length ? bmsDetails(key("res"), [`Wire resistances (${resistances.length})`, el("span", { class: "muted" }, ` · R${pad2(maxRes.n)} max ${fmt(resOf(maxRes), 3)} ${resUnit}`)],
-      el("div", { class: "bms-cells" }, ...resistances)) : null,
+      el("div", { class: "bms-stats" }, stat("Delta", `${delta} ${deltaUnit}`), stat("Average", `${fmt(vAvg, 3)} V`),
+        stat(`Min V${pad2(sum.min_cell)}`, `${fmt(sum.min_v, 3)} V`), stat(`Max V${pad2(sum.max_cell)}`, `${fmt(sum.max_v, 3)} V`)),
+      cellChart) : null,
+    resChart ? bmsDetails(key("res"), [`Wire resistances (${resItems.length})`, el("span", { class: "muted" }, ` · R${pad2(maxResItem.n)} max ${fmt(resMax, 3)} ${resUnit}`)],
+      el("div", { class: "bms-stats" }, stat("Spread", `${fmt(resMax - resMin, 3)} ${resUnit}`), stat("Average", `${fmt(resAvg, 3)} ${resUnit}`),
+        stat(`Max R${pad2(maxResItem.n)}`, `${fmt(resMax, 3)} ${resUnit}`)),
+      resChart) : null,
     temps.length ? bmsDetails(key("temps"), [`Temperatures (${temps.length})`, hottest ? el("span", { class: "muted" }, ` · ${tempIndex(hottest)} max ${fmt(hottest.value, 1)} ${hottest.unit}`) : ""],
       el("section", { class: "tiles" }, ...temps.map((t) => tile(t.name, bmsNum(t, 1), t.unit)))) : null,
     more.length ? bmsDetails(key("more"), ["Other sensors", el("span", { class: "muted" }, " · current, power, delta, errors, cycles")],
@@ -1427,6 +1464,24 @@ function bmsCard(b) {
         ...active.map((a) => el("div", { class: "bms-alarm on", title: a.entity_id }, `🚨 ${a.name}`)),
         ...quiet.map((a) => el("div", { class: a.available ? "bms-alarm" : "bms-alarm na", title: a.entity_id }, `${a.available ? "✓" : "?"} ${a.name}`)))) : null);
 }
+
+// The Battery health tab only when batteries are set up in Settings → Batteries.
+function batteryTabVisible() {
+  const tab = document.querySelector('.tabs a[data-tab="batteries"]');
+  if (tab && status) tab.hidden = !status.batteries_count;
+}
+api("api/status").then((s) => {
+  if (!status) status = s;
+  batteryTabVisible();
+}).catch(() => {});
+
+// The dashboard's Batteries card folds by its title (remembered in this browser).
+try { if (localStorage.getItem("batteryai-dash-bms-folded") === "1") $("dashBatteries").classList.add("folded"); } catch (e) {}
+$("dashBatteriesHead").addEventListener("click", (e) => {
+  if (e.target.closest("a")) return;
+  const folded = $("dashBatteries").classList.toggle("folded");
+  try { localStorage.setItem("batteryai-dash-bms-folded", folded ? "1" : "0"); } catch (err) {}
+});
 
 // Main dashboard: one compact line per battery (SOC, voltage, power bar), every 15 s.
 let dashBmsTimer = null;
@@ -1443,6 +1498,16 @@ async function refreshDashBatteries() {
     const packs = data.batteries || [];
     box.hidden = !packs.length;
     $("dashBatteryLines").replaceChildren(...packs.map((b) => bmsLine(b, true)));
+    // Folded: one summary line (average SOC, total power, alarms).
+    const socs = packs.map((b) => b.main?.soc?.value).filter((v) => v !== null && v !== undefined);
+    const signed = (b) => {
+      const p = b.main?.power?.value;
+      if (p === null || p === undefined) return 0;
+      return Math.abs(p) * ((b.main?.current?.value ?? p) < 0 ? -1 : 1);
+    };
+    const total = packs.reduce((a, b) => a + signed(b), 0);
+    const alarms = packs.reduce((a, b) => a + (b.active_alarms || 0), 0);
+    $("dashBatteriesSum").textContent = `${packs.length} batteries · SOC ${socs.length ? fmt(socs.reduce((a, v) => a + v, 0) / socs.length, 0) : "—"} % · ${total >= 0 ? "+" : "−"}${fmt(Math.abs(total), 0)} W${alarms ? ` · 🚨 ${alarms} alarm${alarms > 1 ? "s" : ""}` : ""}`;
   } catch (err) {
     /* the next refresh tries again */
   }
@@ -1669,6 +1734,7 @@ async function refresh() {
     ]);
     api(`api/grid?hours=${hours}`).then((g) => renderGrid(g, Number(hours))).catch(() => {});
     status = s;
+    batteryTabVisible();
     renderStatus();
     refreshDashBatteries();
     renderBattery(rows);
