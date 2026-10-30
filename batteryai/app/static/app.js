@@ -1159,10 +1159,118 @@ async function refreshBatteries() {
   bmsTimer = setTimeout(refreshBatteries, 10000);
 }
 
+// Control: the chosen battery's BMS switches and number settings, locked until "Allow changes".
+let bmsPick = null;
+try { bmsPick = localStorage.getItem("batteryai-bms-pick"); } catch (e) {}
+
+async function refreshBmsControl() {
+  let list;
+  try {
+    list = (await api("api/batteries")).batteries || [];
+  } catch (err) {
+    $("bmsControlResult").className = "result error";
+    $("bmsControlResult").textContent = `✕ ${err.message}`;
+    return;
+  }
+  const pick = $("bmsControlPick");
+  if (!list.length) {
+    pick.replaceChildren();
+    $("bmsControlBody").replaceChildren(el("div", { class: "banner" }, "Add your batteries in Settings → Batteries first."));
+    return;
+  }
+  if (!list.some((b) => b.prefix === bmsPick)) bmsPick = list[0].prefix;
+  pick.replaceChildren(...list.map((b) => el("option", b.prefix === bmsPick ? { value: b.prefix, selected: "" } : { value: b.prefix }, `${b.name} (${b.prefix})`)));
+  let data;
+  try {
+    data = await api(`api/batteries/${encodeURIComponent(bmsPick)}/controls`);
+  } catch (err) {
+    $("bmsControlBody").replaceChildren(el("div", { class: "banner" }, `Could not load the settings: ${err.message}`));
+    return;
+  }
+  renderBmsControl(data);
+}
+
+function renderBmsControl(data) {
+  const locked = !$("bmsUnlock").checked;
+  const prefix = data.prefix;
+  const send = async (body, label) => {
+    const result = $("bmsControlResult");
+    result.className = "result";
+    result.textContent = `Writing ${label} to the BMS, waiting for it to confirm…`;
+    const res = await api(`api/batteries/${encodeURIComponent(prefix)}/control`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .catch((err) => ({ error: err.message }));
+    if (res.error) {
+      result.className = "result error";
+      result.textContent = `✕ ${res.error}`;
+    } else {
+      result.className = `result ${res.confirmed ? "ok" : "warn"}`;
+      result.textContent = `${res.confirmed ? "✓" : "⚠"} ${label}: ${res.from} → ${res.to}${res.confirmed ? "" : " – not confirmed by the BMS yet"}`;
+    }
+    refreshBmsControl();
+  };
+  const switches = data.switches.map((sw) => {
+    const box = el("input", { type: "checkbox", "aria-label": sw.name });
+    box.checked = sw.on;
+    box.disabled = locked || !sw.available;
+    box.addEventListener("change", () => {
+      if (!confirm(`${sw.name}: turn ${box.checked ? "ON" : "OFF"} on ${prefix}?`)) {
+        box.checked = !box.checked;
+        return;
+      }
+      box.disabled = true;
+      send({ entity_id: sw.entity_id, on: box.checked }, sw.name);
+    });
+    return el("label", { class: "bms-switch", title: sw.entity_id }, el("span", {}, sw.name), el("span", { class: "toggle" }, box, el("span")));
+  });
+  const groups = {};
+  for (const n of data.numbers) (groups[n.group] = groups[n.group] || []).push(n);
+  const numberRow = (n) => {
+    const input = el("input", { type: "number", class: "price-input", step: n.step ?? "any", "aria-label": n.name });
+    if (n.min !== null) input.min = n.min;
+    if (n.max !== null) input.max = n.max;
+    input.value = n.value ?? "";
+    input.disabled = locked || !n.available;
+    const set = el("button", { type: "button", class: "secondary small" }, "Set");
+    set.disabled = true;
+    input.addEventListener("input", () => (set.disabled = locked || input.value === "" || Number(input.value) === n.value));
+    set.addEventListener("click", () => {
+      const value = Number(input.value);
+      if (!confirm(`${n.name} on ${prefix}: ${n.value} → ${value} ${n.unit}?`)) return;
+      set.disabled = input.disabled = true;
+      send({ entity_id: n.entity_id, value }, n.name);
+    });
+    const range = n.min !== null && n.max !== null ? `${n.min}–${n.max} ${n.unit}` : "";
+    return el("tr", { title: n.entity_id },
+      el("td", {}, n.name),
+      el("td", { class: "num" }, n.value === null ? "—" : `${n.value} ${n.unit}`),
+      el("td", { class: "num" }, el("span", { class: "soc-cell" }, input, n.unit, set)),
+      el("td", { class: "num muted" }, range));
+  };
+  $("bmsControlBody").replaceChildren(
+    data.switches.length ? el("h3", { class: "group-title" }, "Switches") : null,
+    data.switches.length ? el("div", { class: "bms-switches" }, ...switches) : null,
+    ...Object.entries(groups).flatMap(([group, items]) => [
+      el("h3", { class: "group-title" }, group),
+      el("div", { class: "table-scroll" }, el("table", { class: "programs bms-settings" },
+        el("tr", {}, el("th", {}, "Setting"), el("th", { class: "num" }, "Now"), el("th", { class: "num" }, "New value"), el("th", { class: "num" }, "Allowed")),
+        ...items.map(numberRow))),
+    ]),
+    !data.switches.length && !data.numbers.length ? el("div", { class: "banner" }, `No switch.${prefix}_… or number.${prefix}_… entities found in Home Assistant.`) : null,
+  );
+}
+
+$("bmsControlPick").addEventListener("change", (e) => {
+  bmsPick = e.target.value;
+  try { localStorage.setItem("batteryai-bms-pick", bmsPick); } catch (err) {}
+  $("bmsControlResult").textContent = "";
+  refreshBmsControl();
+});
+$("bmsUnlock").addEventListener("change", () => refreshBmsControl());
+
 // The log: alarms, BMS offline and abnormal data (cell voltages, delta, resistance,
 // temperatures), each logged when it starts and when it ends.
 function bmsLog(events) {
-  const icon = { alarm: "⚠", warning: "△", ok: "✓" };
+  const icon = { alarm: "⚠", warning: "△", ok: "✓", info: "⚙" };
   return el("section", { class: "card" },
     el("div", { class: "card-head" }, el("h2", {}, "Battery log"), el("span", { class: "muted" }, "Alarms, BMS offline and abnormal data – when they start and end")),
     events.length
@@ -1588,7 +1696,7 @@ applyTheme(currentTheme());
 
 // Tabs ---------------------------------------------------------------------------
 
-const OTHER_TABS = ["#settings", "#economy", "#economy-bill", "#batteries", "#logs"];
+const OTHER_TABS = ["#settings", "#economy", "#economy-bill", "#batteries", "#batteries-control", "#logs"];
 
 function showTab() {
   const tab = OTHER_TABS.includes(location.hash) ? location.hash.slice(1).split("-")[0] : "dashboard";
@@ -1620,7 +1728,15 @@ function showTab() {
     refreshStorage();
     refreshLogs(true);
   }
-  if (tab === "batteries") refreshBatteries();
+  const bsub = location.hash === "#batteries-control" ? "control" : "overview";
+  $("bmsOverview").hidden = bsub !== "overview";
+  $("bmsControl").hidden = bsub !== "control";
+  document.querySelectorAll("[data-bsub]").forEach((a) => {
+    a.classList.toggle("active", a.dataset.bsub === bsub);
+    a.setAttribute("aria-selected", a.dataset.bsub === bsub);
+  });
+  if (tab === "batteries" && bsub === "overview") refreshBatteries();
+  if (tab === "batteries" && bsub === "control") refreshBmsControl();
   window.dispatchEvent(new CustomEvent("batteryai:tab", { detail: tab }));
 }
 window.addEventListener("hashchange", () => {

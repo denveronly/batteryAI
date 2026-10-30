@@ -226,6 +226,12 @@ cell resistance above 2× the pack's median, a temperature above 50 °C (power t
 below 0 °C – when it starts and when it ends. Alarms, the error bitmask, the cell count and
 offline are also sent to the phone (Phone notifications → *battery alarms*).
 
+**Control** (Battery health → Control): choose a battery and change the BMS's own switches
+(`switch.<prefix>_*`) and settings (`number.<prefix>_*`). The page is locked until *Allow
+changes* is ticked; each change asks for confirmation, must be within the entity's min/max and is
+recorded in the Battery log. These are cell protection settings – change them only when you know
+the right values for your cells.
+
 ## Leave room for PV
 
 A Deye program's SOC is both the floor the battery discharges to and the level the grid

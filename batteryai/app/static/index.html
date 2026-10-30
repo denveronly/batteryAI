@@ -244,9 +244,27 @@
   </main>
 
   <main id="view-batteries" hidden>
-    <div id="bmsNotes"></div>
-    <div id="bmsPacks"></div>
-    <p class="hint">Live values from each battery's BMS in Home Assistant, refreshed every 10 seconds. Batteries and their entity prefixes are set in Settings → Batteries.</p>
+    <nav class="tabs subtabs" role="tablist" aria-label="Battery health views">
+      <a href="#batteries" role="tab" data-bsub="overview">Overview</a>
+      <a href="#batteries-control" role="tab" data-bsub="control">Control</a>
+    </nav>
+    <div id="bmsOverview">
+      <div id="bmsNotes"></div>
+      <div id="bmsPacks"></div>
+      <p class="hint">Live values from each battery's BMS in Home Assistant, refreshed every 10 seconds. Batteries and their entity prefixes are set in Settings → Batteries.</p>
+    </div>
+    <div id="bmsControl" hidden>
+      <section class="card">
+        <div class="card-head">
+          <h2>BMS settings</h2>
+          <label class="inline-row">Battery <select id="bmsControlPick"></select></label>
+          <label class="switch"><input type="checkbox" id="bmsUnlock"><span>Allow changes</span></label>
+        </div>
+        <p class="hint">The BMS's own switches and protection settings (switch.<i>prefix</i>_…, number.<i>prefix</i>_…). They protect the cells: change them only if you know the right values for your cells. Every change asks for confirmation, stays within the BMS's min/max and is written to the Battery log.</p>
+        <div class="result" id="bmsControlResult"></div>
+        <div id="bmsControlBody"></div>
+      </section>
+    </div>
   </main>
 
   <main id="view-logs" hidden>

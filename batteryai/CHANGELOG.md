@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.50
+
+- Battery health → **Control**: pick a battery from the list and see the BMS's own switches
+  (`switch.<prefix>_*`: balancing, charging, discharging, float mode, …) and settings
+  (`number.<prefix>_*`: cell voltages, balancing, currents, temperatures, delays), grouped,
+  with the current value and the allowed range. Locked until *Allow changes* is ticked; every
+  change asks for confirmation, must stay within the BMS's min/max, waits for the BMS to confirm
+  and is written to the Battery log.
+- Settings → Batteries: the first battery is **BMS0 / bms0**, the next ones BMS1 / bms1, BMS2 /
+  bms2…; typing a name like "BMS3" fills in the prefix. With no batteries yet, BMS0 is added by
+  itself when Home Assistant has `bms0` entities.
+
 ## 0.4.49
 
 - New **Battery health** tab (after Economy), for 1–20 battery packs (Settings →

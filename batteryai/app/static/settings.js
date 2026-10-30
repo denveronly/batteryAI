@@ -163,6 +163,14 @@ function batteryRow(battery = {}) {
   name.value = battery.name || "";
   const prefix = el("input", { type: "text", placeholder: "bms0", maxlength: "40", autocomplete: "off", spellcheck: "false", "data-role": "prefix" });
   prefix.value = battery.prefix || "";
+  // Typing a name like "BMS3" fills in the prefix bms3 (while the prefix still follows the name).
+  let followName = !battery.prefix || battery.prefix === (battery.name || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
+  name.addEventListener("input", () => {
+    if (!followName) return;
+    prefix.value = name.value.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
+  });
+  name.addEventListener("change", () => followName && prefix.dispatchEvent(new Event("change")));
+  prefix.addEventListener("input", () => (followName = false));
   const result = el("div", { class: "result" });
   const test = el("button", { type: "button", class: "secondary" }, "Test");
   const remove = el("button", { type: "button", class: "secondary remove", title: "Remove this battery", "aria-label": "Remove battery" }, "−");
@@ -212,6 +220,15 @@ function renumberBatteries() {
 function fillBatteries(list) {
   $("batteryRows").replaceChildren(...list.map((b) => batteryRow(b)));
   renumberBatteries();
+  // No batteries yet: pre-add BMS0 when Home Assistant has bms0 entities (JK BMS naming).
+  if (!list.length) {
+    api("api/batteries?prefix=bms0").then((r) => {
+      if (r?.found && !$("batteryRows").children.length) {
+        $("batteryRows").append(batteryRow({ name: "BMS0", prefix: "bms0" }));
+        renumberBatteries();
+      }
+    }).catch(() => {});
+  }
 }
 
 function readBatteries() {
@@ -232,7 +249,7 @@ $("addBattery").addEventListener("click", () => {
   const rows = [...$("batteryRows").children];
   const last = rows.length ? readBatteries()[rows.length - 1] : null;
   const prefix = last ? nextNumbered(last.prefix, "") : "bms0";
-  const name = last ? nextNumbered(last.name, `Battery ${rows.length + 1}`) : "Battery 1";
+  const name = last ? nextNumbered(last.name, prefix.toUpperCase()) : "BMS0";
   $("batteryRows").append(batteryRow({ name, prefix }));
   renumberBatteries();
 });

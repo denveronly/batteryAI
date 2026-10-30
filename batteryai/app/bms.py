@@ -274,3 +274,45 @@ def changes(
         for key in sorted(set(old_issues) - set(problems)):
             event("ok", key, f"Back to normal (was: {old_issues[key]})", False)
     return state, lines, events
+
+
+# Control: the BMS's own switches and settings (switch.<prefix>_*, number.<prefix>_*).
+GROUPS = (
+    ("Balancing", ("balanc",)),
+    ("Cell voltages", ("cell_",)),
+    ("Current", ("current",)),
+    ("Temperature", ("temperature",)),
+    ("Delays & times", ("delay", "_time")),
+)
+
+
+def group_of(key: str) -> str:
+    return next((name for name, words in GROUPS if any(w in key for w in words)), "Other")
+
+
+def controls(prefix: str, states: list[dict[str, Any]]) -> dict[str, Any]:
+    switches, numbers = [], []
+    for state in states:
+        entity = str(state.get("entity_id") or "")
+        attrs = state.get("attributes") or {}
+        for domain, target in (("switch", switches), ("number", numbers)):
+            start = f"{domain}.{prefix}_"
+            if not entity.startswith(start):
+                continue
+            key = entity[len(start):]
+            raw = state.get("state")
+            item = {
+                "entity_id": entity, "key": key, "group": group_of(key),
+                "name": _title(key),
+                "available": str(raw).strip().lower() not in UNAVAILABLE,
+            }
+            if domain == "switch":
+                item["on"] = str(raw).strip().lower() == "on"
+            else:
+                item.update(value=to_float(raw), unit=attrs.get("unit_of_measurement") or "",
+                            min=to_float(attrs.get("min")), max=to_float(attrs.get("max")), step=to_float(attrs.get("step")))
+            target.append(item)
+    order = [g for g, _ in GROUPS] + ["Other"]
+    numbers.sort(key=lambda n: (order.index(n["group"]), n["key"]))
+    switches.sort(key=lambda x: x["key"])
+    return {"prefix": prefix, "switches": switches, "numbers": numbers}

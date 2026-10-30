@@ -1195,6 +1195,76 @@ async def batteries(request: web.Request) -> web.Response:
     return web.json_response({"batteries": packs, "events": events})
 
 
+@routes.get(r"/api/batteries/{prefix}/controls")
+async def battery_controls(request: web.Request) -> web.Response:
+    """The BMS's switches and number settings of a configured battery."""
+    app = _app(request)
+    prefix = request.match_info["prefix"]
+    if prefix not in {b.prefix for b in app.opts.batteries}:
+        raise web.HTTPNotFound()
+    try:
+        states = await app.ha.states()
+    except HAError as err:
+        return web.json_response({"error": str(err)}, status=502)
+    return web.json_response(bms.controls(prefix, states))
+
+
+@routes.post(r"/api/batteries/{prefix}/control")
+async def battery_control(request: web.Request) -> web.Response:
+    """Body {"entity_id": "switch.bms0_charging", "on": false} or {"entity_id": "number.bms0_…",
+    "value": 3.45}. Only the battery's own switch./number. entities; numbers within their
+    min/max. Every change goes to the battery log."""
+    app = _app(request)
+    prefix = request.match_info["prefix"]
+    battery = next((b for b in app.opts.batteries if b.prefix == prefix), None)
+    if battery is None:
+        raise web.HTTPNotFound()
+    body = await request.json()
+    entity_id = str(body.get("entity_id") or "")
+    domain = entity_id.split(".", 1)[0]
+    if domain not in ("switch", "number") or not entity_id.startswith(f"{domain}.{prefix}_"):
+        return web.json_response({"error": f"{entity_id} is not a setting of {prefix}"}, status=400)
+    try:
+        state = await app.ha.fetch_state(entity_id)
+        attrs = state.get("attributes") or {}
+        before = state.get("state")
+        if domain == "switch":
+            on = bool(body.get("on"))
+            await app.ha.call_service("switch", "turn_on" if on else "turn_off", {"entity_id": entity_id})
+            target: Any = "on" if on else "off"
+        else:
+            value = to_float(body.get("value"))
+            low, high = to_float(attrs.get("min")), to_float(attrs.get("max"))
+            if value is None:
+                return web.json_response({"error": "enter a number"}, status=400)
+            if (low is not None and value < low) or (high is not None and value > high):
+                allowed = f"{'' if low is None else f'{low:g}'}–{'' if high is None else f'{high:g}'}"
+                return web.json_response({"error": f"{value:g} is outside the allowed range {allowed}"}, status=400)
+            await app.ha.call_service("number", "set_value", {"entity_id": entity_id, "value": value})
+            target = value
+    except HAError as err:
+        return web.json_response({"error": str(err)}, status=502)
+    # Wait (up to 15 s) for Home Assistant to report the new value.
+    confirmed = False
+    for _ in range(15):
+        await asyncio.sleep(1)
+        try:
+            now = (await app.ha.fetch_state(entity_id)).get("state")
+        except HAError:
+            continue
+        confirmed = str(now) == str(target) if domain == "switch" else (to_float(now) is not None and abs(to_float(now) - float(target)) < 1e-6)
+        if confirmed:
+            break
+    name = entity_id.split(".", 1)[1][len(prefix) + 1:].replace("_", " ")
+    unit = attrs.get("unit_of_measurement") or ""
+    message = f"Setting changed: {name} {before} → {target}{(' ' + unit) if unit else ''}" + ("" if confirmed else " (not confirmed yet)")
+    await asyncio.to_thread(app.db.add_bms_events, [{
+        "ts": time.time(), "prefix": prefix, "battery": battery.name, "level": "info", "code": entity_id, "message": message,
+    }])
+    _LOGGER.warning("Battery %s: %s", prefix, message)
+    return web.json_response({"entity_id": entity_id, "from": before, "to": target, "confirmed": confirmed})
+
+
 @routes.get("/api/monthly")
 async def monthly(request: web.Request) -> web.Response:
     app = _app(request)
