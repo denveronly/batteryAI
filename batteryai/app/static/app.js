@@ -1036,10 +1036,8 @@ async function refreshBill() {
   $("billNotes").replaceChildren(...notes.map((n) => el("div", { class: "banner" }, n)));
   $("billInfo").textContent = data.sensor ? `Meter: ${data.sensor}` : "";
 
-  // Per-tariff columns plus the overall total when energy was recorded under more than one
-  // tariff (peak / off-peak); with a single tariff its name labels the total columns.
+  // Per-tariff tiles when energy was recorded under more than one tariff (peak / off-peak).
   const names = data.tariffs.length > 1 ? data.tariffs : [];
-  const single = data.tariffs.length === 1 ? data.tariffs[0] : null;
   const now = new Date();
   const current = data.months.find((m) => m.key === `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`);
   // This month: each tariff, the whole power bill, and the PV (valued at the peak price).
@@ -1052,13 +1050,12 @@ async function refreshBill() {
       pv.kwh === null || pv.kwh === undefined ? "" : `${fmt(pv.kwh, 1)} kWh`), "eco-sun"),
   );
 
-  // Each tariff: kWh, the month's price (editable on month rows) and cost; with several
-  // tariffs also the overall kWh and cost.
-  const priced = single ? [single] : names;
+  // The bill and the appliances share one column layout:
+  // Month · Source · per tariff kWh + cost · kWh · Cost · Share of bill.
+  // The month's prices (editable) and "Use current prices" sit under the month name.
   const priceInput = (m, n) => {
     const input = el("input", { type: "number", min: "0", step: "0.0001", class: "price-input", "aria-label": `${n} price ${m.key}`, title: `${n} price per kWh in ${monthLabel(m.key)}` });
     input.value = m.prices?.[n] ?? "";
-    input.addEventListener("click", (e) => e.stopPropagation());
     input.addEventListener("change", async () => {
       const res = await api("api/bill/price", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ month: m.key, tariff: n, price: input.value }) })
         .catch((err) => ({ error: err.message }));
@@ -1067,87 +1064,77 @@ async function refreshBill() {
     });
     return input;
   };
-  const cells = (item, month = null) => [
-    ...priced.flatMap((n) => {
-      const part = item.by_tariff[n];
-      const b = single ? "" : tariffBlock(n);
-      return [
-        el("td", { class: `num ${b}` }, part ? kwh(part.kwh) : "—"),
-        el("td", { class: `num ${b}` }, month && part ? priceInput(month, n) : ""),
-        el("td", { class: `num ${b}` }, part ? money(part.cost) : "—"),
-      ];
-    }),
-    ...(single ? [] : [el("td", { class: "num" }, kwh(item.kwh)), el("td", { class: "num eco-grid" }, money(item.cost))]),
-  ];
-  const header = [
-    ["Month", ""],
-    ...priced.flatMap((n) => [[`${n} kWh`, single ? "" : tariffBlock(n)], [`${n} price, ${cur}/kWh`, single ? "" : tariffBlock(n)], [`${n} cost`, single ? "" : tariffBlock(n)]]),
-    ...(single ? [] : [["Overall kWh", ""], ["Overall grid cost", ""]]),
-    ["", ""],
-  ];
-  const rows = [];
-  for (const m of data.months) {
-    const open = openBillMonths.has(m.key);
+  const monthCell = (m, open) => {
     const reprice = el("button", { type: "button", class: outdated(m).length ? "small" : "secondary small", title: "Set this month's prices to the current tariffs in Settings" }, "Use current prices");
-    reprice.addEventListener("click", async (e) => {
-      e.stopPropagation();
+    reprice.addEventListener("click", async () => {
       if (!confirm(`Set the prices of ${monthLabel(m.key)} to the current tariffs in Settings and recalculate its costs?`)) return;
       const res = await api("api/bill/reprice", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ month: m.key }) })
         .catch((err) => ({ error: err.message }));
       if (res.error) alert(res.error);
       refreshBill();
     });
-    const row = el("tr", { class: open ? "month open" : "month", title: "Show the days" }, el("td", { class: "nowrap" }, monthLabel(m.key)), ...cells(m, m), el("td", { class: "num" }, reprice));
-    row.addEventListener("click", () => {
-      if (openBillMonths.has(m.key)) openBillMonths.delete(m.key);
-      else openBillMonths.add(m.key);
-      refreshBill();
-    });
-    rows.push(row);
-    if (open) rows.push(...m.days.map((d) => el("tr", { class: "day" }, el("td", { class: "nowrap" }, shortDate(d.key)), ...cells(d), el("td"))));
-  }
+    const prices = el("div", { class: "month-prices" },
+      ...data.tariffs.map((n) => el("label", { class: tariffBlock(n), title: `${n} price, ${cur}/kWh` }, el("span", {}, n), priceInput(m, n))),
+      reprice);
+    prices.addEventListener("click", (e) => e.stopPropagation());  // editing a price doesn't fold the month
+    return el("td", {}, el("div", { class: `month-name${open ? " open" : ""}` }, monthLabel(m.key)), prices);
+  };
+  const billTariffs = data.tariffs.length > 1 ? data.tariffs : [];
+  const grid = "⚡ Grid";
   $("billTable").replaceChildren(
-    el("tr", {}, ...header.map(([h, cls], i) => el("th", { class: `${i ? "num" : ""} ${cls}` }, h))),
-    ...(rows.length ? rows : [el("tr", {}, el("td", { class: "empty", colspan: header.length }, "Nothing recorded for this year yet."))]),
-    el("tr", { class: "total" }, el("td", {}, `Year ${data.year} total`), ...cells(data.total), el("td")),
+    billHeader(billTariffs),
+    ...data.months.flatMap((m) => {
+      const open = openBillMonths.has(m.key);
+      const row = el("tr", { class: open ? "month open group-start" : "month group-start", title: "Show the days" },
+        monthCell(m, open), el("td", {}, grid), ...billCells(billTariffs, m, null, kwh, money));
+      row.addEventListener("click", () => {
+        if (openBillMonths.has(m.key)) openBillMonths.delete(m.key);
+        else openBillMonths.add(m.key);
+        refreshBill();
+      });
+      const days = open ? m.days.map((d) => el("tr", { class: "day" }, el("td", { class: "nowrap" }, shortDate(d.key)), el("td"), ...billCells(billTariffs, d, null, kwh, money))) : [];
+      return [row, ...days];
+    }),
+    ...(data.months.length ? [] : [el("tr", {}, el("td", { class: "empty", colspan: 5 + 2 * billTariffs.length }, "Nothing recorded for this year yet."))]),
+    el("tr", { class: "total" }, el("td", {}, `Year ${data.year} total`), el("td", {}, grid), ...billCells(billTariffs, data.total, null, kwh, money)),
   );
-  renderBillAppliances(data, money, kwh, monthLabel);
+  renderBillAppliances(data, money, kwh, monthLabel, billTariffs);
+}
+
+// Shared by the bill and the appliances: header and cells in the same order.
+function billHeader(tariffs, source = "Source") {
+  const cols = [["Month", ""], [source, ""], ...tariffs.flatMap((t) => [[`${t} kWh`, tariffBlock(t)], [`${t} cost`, tariffBlock(t)]]),
+    ["kWh", ""], ["Cost", ""], ["Share of bill", ""]];
+  return el("tr", {}, ...cols.map(([h, cls], i) => el("th", { class: `${i > 1 ? "num" : ""} ${cls}` }, h)));
+}
+
+function billCells(tariffs, item, total, kwh, money) {
+  return [
+    ...tariffs.flatMap((t) => {
+      const part = item.by_tariff?.[t];
+      const b = tariffBlock(t);
+      return [el("td", { class: `num ${b}` }, part ? kwh(part.kwh) : "—"), el("td", { class: `num ${b}` }, part ? money(part.cost) : "—")];
+    }),
+    el("td", { class: "num" }, kwh(item.kwh)),
+    el("td", { class: "num eco-grid" }, money(item.cost)),
+    el("td", { class: "num" }, total ? `${fmt((item.cost / total) * 100, 0)} %` : ""),
+  ];
 }
 
 // Appliances in the Monthly bill: one row per appliance and month, with the year's total.
-function renderBillAppliances(data, money, kwh, monthLabel) {
-  let tariffs;
+function renderBillAppliances(data, money, kwh, monthLabel, tariffs) {
   const months = data.appliance_months || [];
   $("billAppliancesBox").hidden = !months.length;
   if (!months.length) return;
-  // Only the tariffs the appliances used, in the bill's order; one tariff = just the totals.
-  const used = new Set(months.flatMap((m) => m.appliances.flatMap((a) => Object.keys(a.by_tariff))));
-  tariffs = data.tariffs.filter((t) => used.has(t));
-  if (tariffs.length < 2) tariffs = [];
   const monthCost = Object.fromEntries(data.months.map((m) => [m.key, m.cost]));
-  const share = (cost, total) => (total ? `${fmt((cost / total) * 100, 0)} %` : "—");
   const row = (label, a, total, cls = "") =>
     el("tr", cls ? { class: cls } : {},
       el("td", { class: "nowrap" }, label),
       el("td", {}, applianceName(a.id, a.name), a.removed ? el("span", { class: "hint" }, " (removed)") : ""),
-      ...tariffs.flatMap((t) => {
-        const part = a.by_tariff[t];
-        const b = tariffBlock(t);
-        return [el("td", { class: `num ${b}` }, part ? kwh(part.kwh) : "—"), el("td", { class: `num ${b}` }, part ? money(part.cost) : "—")];
-      }),
-      el("td", { class: "num" }, kwh(a.kwh)),
-      el("td", { class: "num eco-grid" }, money(a.cost)),
-      el("td", { class: "num" }, share(a.cost, total)),
-    );
-  const header = [["Month", ""], ["Appliance", ""], ...tariffs.flatMap((t) => [[`${t} kWh`, tariffBlock(t)], [`${t} cost`, tariffBlock(t)]]),
-    ["kWh", ""], ["Cost", ""], ["Share of bill", ""]];
+      ...billCells(tariffs, a, total, kwh, money));
   const rows = months.flatMap((m) => m.appliances.map((a, i) => row(i ? "" : monthLabel(m.key), a, monthCost[m.key], i ? "" : "group-start")));
   const totals = (data.appliance_total || []).map((a, i) => row(i ? "" : `Year ${data.year}`, a, data.total.cost, i ? "total-more" : "total"));
-  $("billAppliances").replaceChildren(
-    el("tr", {}, ...header.map(([h, cls], i) => el("th", { class: `${i > 1 ? "num" : ""} ${cls}` }, h))),
-    ...rows,
-    ...totals,
-  );
+  $("billAppliances").replaceChildren(billHeader(tariffs, "Appliance"), ...rows, ...totals);
 }
 $("billYear").addEventListener("change", refreshBill);
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.48
+
+- Monthly bill: the bill and the appliances tables share one layout – Month · Source ·
+  Peak kWh · Peak cost · Off-peak kWh · Off-peak cost · kWh · Cost · Share of bill – with the
+  same column widths, so they line up. The meter is the "⚡ Grid" row; each month's prices and
+  *Use current prices* are under the month name.
+
 ## 0.4.47
 
 - **Appliance emoji** (Settings → Appliances): pick one from the list or paste any; it is

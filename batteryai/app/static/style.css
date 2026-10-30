@@ -352,8 +352,6 @@ h1 .version:empty { display: none; }
 /* Economy sub-tabs and the monthly bill */
 .subtabs { display: inline-flex; width: fit-content; align-self: flex-start; margin-bottom: 12px; }
 .bill tr.month { cursor: pointer; }
-.bill tr.month td:first-child::before { content: "▸ "; color: var(--muted); }
-.bill tr.month.open td:first-child::before { content: "▾ "; }
 .bill tr.day td { color: var(--muted); font-size: 13px; }
 .bill tr.day td:first-child { padding-left: 24px; }
 .bill tr.total td { font-weight: 650; border-top: 2px solid var(--border); border-bottom: none; }
@@ -407,3 +405,16 @@ h1 .version:empty { display: none; }
 .tile.eco-cheap { background: var(--eco-cheap-bg); }
 .tile.eco-sun { background: var(--eco-sun-bg); }
 .appliance-fields input.icon-input { width: 4.5em; text-align: center; font-size: 18px; }
+
+/* Monthly bill and its appliances: one column layout so the two tables line up */
+#billTable, #billAppliances { table-layout: fixed; width: 100%; min-width: 860px; }
+#billTable th:nth-child(1), #billAppliances th:nth-child(1) { width: 17%; }
+#billTable th:nth-child(2), #billAppliances th:nth-child(2) { width: 12%; }
+#billTable td, #billAppliances td { overflow-wrap: anywhere; }
+#billTable .month-name { font-weight: 600; }
+#billTable .month-name::before { content: "▸ "; color: var(--muted); }
+#billTable .month-name.open::before { content: "▾ "; }
+#billTable .month-prices { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 6px; cursor: default; }
+#billTable .month-prices label { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 13px; padding: 1px 6px; border-radius: 6px; width: 11em; }
+#billTable .month-prices label > span:first-child { min-width: 4.5em; }
+#billTable .month-prices .price-input { width: 5.5em; }
