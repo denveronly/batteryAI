@@ -1297,10 +1297,9 @@ const BMS_STATUS = {
   charging: { text: "CHG", title: "Charging", offRed: true },
   discharging: { text: "DCHG", title: "Discharging", offRed: true },
   balancing: { text: "♥", title: "Balancing" },
-  heating: { text: "🔥", title: "Heating", icon: true },
   precharging: { text: "⏳", title: "Precharging", icon: true },
 };
-const BMS_STATUS_ORDER = ["charging", "discharging", "balancing", "heating", "precharging"];
+const BMS_STATUS_ORDER = ["charging", "discharging", "balancing", "precharging"];
 
 // Which dropdowns of which battery are open survives the 10-second refresh and reloads.
 let bmsOpen = new Set();
@@ -1371,7 +1370,7 @@ function bmsLine(b, compact = false) {
   const alarmChip = activeCount
     ? el("span", { class: "chip bms-siren on", title: activeNames.join("\n") || "BMS active alarms" }, el("span", { class: "siren" }, "🚨"), ` ${alarmText}`)
     : b.alarms.length || m.alarms_total ? el("span", { class: "chip bms-siren", title: "No alarms" }, el("span", { class: "siren" }, "🚨")) : null;
-  const statuses = (b.statuses || []).slice()
+  const statuses = (b.statuses || []).filter((st) => st.key !== "heating").slice()
     .sort((x, y) => (BMS_STATUS_ORDER.indexOf(x.key) + 1 || 99) - (BMS_STATUS_ORDER.indexOf(y.key) + 1 || 99))
     .map((st) => {
       const look = BMS_STATUS[st.key] || { text: st.name, title: st.name };

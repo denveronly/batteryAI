@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.61
+
+- Battery lines: no heating chip; on the Dashboard the power value is above its bar.
+
 ## 0.4.60
 
 - Faster updates: the add-on version is set at the end of the Dockerfile, so the Python

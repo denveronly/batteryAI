@@ -566,3 +566,7 @@ label { align-content: start; }
 .bms-pval { text-align: center; margin-top: 6px; }
 #dashBatteryLines .bms-line-values { grid-template-columns: 1fr auto; }
 #dashBatteryLines .bms-line-values > .bms-big:nth-child(2) { text-align: right; }
+
+/* Dashboard: the power value above its bar */
+#dashBatteryLines .bms-power { display: flex; flex-direction: column-reverse; }
+#dashBatteryLines .bms-pval { margin: 0 0 4px; }
