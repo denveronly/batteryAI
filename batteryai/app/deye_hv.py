@@ -207,6 +207,7 @@ class DeyeHvReader:
         self.prefix = prefix
         self.name = name
         self._cleared: set[str] = set()
+        self._failures = 0
         self.device_id: str | None = None
         self._device_for: str | None = None
         self.last: dict[str, Any] = {"enabled": False}
@@ -270,8 +271,11 @@ class DeyeHvReader:
             p.update(alarm=block["alarm"], alarm_raw=block["alarm_raw"], fault=block["fault"],
                      fault_raw=block["fault_raw"], inverter_bms=block["registers"])
             packs.append(p)
+        self._failures = 0
         for p in packs:
             await self._publish(p)
+            await self.ha.set_state(f"binary_sensor.{p['prefix']}_status_online", "on",
+                                    {"friendly_name": f"{self.name} online", "device_class": "connectivity"})
             if p["prefix"] not in self._cleared:
                 # Sensors of the 0.4.63–0.4.65 pack layout that no longer exist.
                 for key in ("capacity", "mos_temperature"):
@@ -285,6 +289,18 @@ class DeyeHvReader:
             "header": [{"register": PACK_COUNT_REG, "raw": reported}], "error": None,
         }
         return self.last
+
+    async def failed(self, after: int) -> None:
+        """A read failed: after this many in a row the stacks are reported offline (an alarm)."""
+        self._failures += 1
+        if self._failures != after:
+            return
+        for p in self.last.get("packs") or []:
+            try:
+                await self.ha.set_state(f"binary_sensor.{p['prefix']}_status_online", "off",
+                                        {"friendly_name": f"{self.name} online", "device_class": "connectivity"})
+            except HAError:
+                pass
 
     async def _publish(self, p: dict[str, Any]) -> None:
         label = self.name if p["n"] == 1 else f"{self.name} stack {p['n']}"

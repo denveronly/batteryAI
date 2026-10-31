@@ -88,7 +88,7 @@ async function refreshLlmStatus() {
     showResult($("llmStatus"), d.error ? "error" : "warn", d.error ? `✕ Download failed: ${d.error}` : `⚠ Model not downloaded yet (about 2 GB, stored in the add-on's /data, excluded from backups).`);
   }
 }
-const CHECKBOXES = ["notify_predictions", "notify_soc_changes", "notify_errors", "notify_bms_alarms"];
+const CHECKBOXES = ["notify_predictions", "notify_soc_changes", "notify_errors", "notify_bms_alarms", "notify_bms_critical"];
 const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 const PROGRAMS = 6;
 
@@ -682,7 +682,7 @@ async function testOpenai() {
   }
 }
 
-async function testNotify() {
+async function testNotify(critical = false) {
   const result = $("notifyResult");
   const services = field("notify_services").value.split(",").map((s) => s.trim()).filter(Boolean);
   if (!services.length) {
@@ -690,10 +690,11 @@ async function testNotify() {
     return;
   }
   showResult(result, "", "Sending…");
-  const outcomes = await Promise.all(services.map((service) => postJson("api/test/notify", { service, prefix: field("notify_prefix").value }).catch((err) => ({ error: err.message }))));
+  const outcomes = await Promise.all(services.map((service) => postJson("api/test/notify", { service, prefix: field("notify_prefix").value, critical }).catch((err) => ({ error: err.message }))));
   const failed = outcomes.map((r, i) => (r.ok ? null : `${services[i]}: ${r.error}`)).filter(Boolean);
   if (failed.length) showResult(result, "error", `✕ ${failed.join("; ")}`);
-  else showResult(result, "ok", `✓ Sent to ${services.join(", ")}. Check your phone.`);
+  else showResult(result, "ok", `✓ Sent to ${services.join(", ")}. Check your phone.`
+    + (critical ? " A critical alert sounds even in Silent mode – if it did not, allow Critical Alerts: iPhone Settings → Notifications → Home Assistant → Critical Alerts." : ""));
 }
 
 async function importHistory() {
@@ -804,7 +805,8 @@ $("testHa").addEventListener("click", testHa);
 $("testClaude").addEventListener("click", testClaude);
 $("testOpenai").addEventListener("click", testOpenai);
 $("testAll").addEventListener("click", testAllEntities);
-$("testNotify").addEventListener("click", testNotify);
+$("testNotify").addEventListener("click", () => testNotify(false));
+$("testCritical").addEventListener("click", () => testNotify(true));
 $("importHistory").addEventListener("click", importHistory);
 
 async function openSettings() {

@@ -403,6 +403,7 @@ class BatteryAI:
                     await self.poll_hv(b)
                     logged[b.prefix] = None
                 except HAError as err:
+                    await self.hv_reader(b).failed(3)
                     if str(err) != logged.get(b.prefix):
                         logged[b.prefix] = str(err)
                         _LOGGER.warning("%s (HV battery registers): %s", b.name, err)
@@ -429,10 +430,12 @@ class BatteryAI:
         if lines:
             _LOGGER.warning("Battery alarms: %s", " | ".join(lines))
             alarm = any(line.startswith("⚠") for line in lines)
-            await self.notify(
-                f"🔋 BatteryAI: {'battery alarm' if alarm else 'battery alarm cleared'}", "\n".join(lines),
-                self.opts.notify_bms_alarms, "bms",
-            )
+            if self.opts.notify_bms_alarms and lines and self.opts.notify_services:
+                # A new alarm (or a BMS going offline) is a critical alert; "cleared" is not.
+                await notify.send(
+                    self.ha, self.opts, f"🚨 BatteryAI: battery alarm" if alarm else "🔋 BatteryAI: battery alarm cleared",
+                    "\n".join(lines), kind="bms", url=self.panel_url, critical=alarm and self.opts.notify_bms_critical,
+                )
 
     async def check_balance(self) -> None:
         """Cell Balance to 100% in morning (fixed rule, no AI), see balance.py."""
@@ -1782,7 +1785,7 @@ async def test_notify(request: web.Request) -> web.Response:
             "Test notification from BatteryAI ✓\nThe first lines are the brief. Pull this notification down "
             "(or long-press it) to read everything, and use “Open BatteryAI” to open the panel."
             + ("" if app.panel_url else "\n(No panel link: the add-on could not ask the Supervisor for it.)"),
-            kind="test", url=app.panel_url,
+            kind="test", url=app.panel_url, critical=bool(body.get("critical")),
         )
         if errors:
             raise HAError("http", errors[0].split(": ", 1)[-1])

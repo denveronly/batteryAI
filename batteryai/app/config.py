@@ -237,6 +237,7 @@ class Options:
     notify_soc_changes: bool = True
     notify_errors: bool = True
     notify_bms_alarms: bool = True  # Battery health: BMS alarms on/cleared and BMS offline
+    notify_bms_critical: bool = True  # … sent as critical alerts (sound through Silent / Focus)
 
     @property
     def notification_prefix(self) -> str:
@@ -624,7 +625,7 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         if not re.match(r"^[a-z0-9_]+$", service):
             errors["notify_services"] = f"'{service}' is not a notify service name"
         opts.notify_services.append(service)
-    for key in ("notify_predictions", "notify_soc_changes", "notify_errors", "notify_bms_alarms"):
+    for key in ("notify_predictions", "notify_soc_changes", "notify_errors", "notify_bms_alarms", "notify_bms_critical"):
         value = raw.get(key, getattr(base, key))
         setattr(opts, key, value if isinstance(value, bool) else str(value).lower() in ("1", "true", "on", "yes"))
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.72
+
+- Battery alarms as **critical alerts** (Settings → Phone notifications, on by default): a new
+  BMS alarm, an abnormal-data alarm that goes to the phone, or a battery going offline plays
+  its sound through Silent mode and Focus on iPhone (interruption-level critical; the Home
+  Assistant app needs Critical Alerts allowed) and rings on the alarm stream on Android.
+  "Alarm cleared" stays a normal notification. *Test critical alert* button.
+- HV battery: after 3 failed register reads in a row (about 6 minutes) the stack is reported
+  offline – logged and notified like a DIY BMS going offline; back online with the next read.
+
 ## 0.4.71
 
 - HV battery: at most 2 stacks (one per BMS port – Deye HV inverters have two at most); a

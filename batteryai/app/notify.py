@@ -14,9 +14,13 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def send(
-    ha: HomeAssistant, opts: Options, title: str, message: str, *, kind: str = "info", url: str | None = None
+    ha: HomeAssistant, opts: Options, title: str, message: str, *, kind: str = "info", url: str | None = None,
+    critical: bool = False,
 ) -> list[str]:
-    """Sends a normal-priority (not critical) notification to every configured service.
+    """Sends a notification to every configured service – normal priority, or with critical a
+    critical alert: on iPhone it plays its sound at full volume through Silent mode and Focus
+    (the Home Assistant app must be allowed Critical Alerts), on Android it rings on the alarm
+    stream at high priority.
 
     kind: notifications of the same kind replace each other on the phone (a new plan replaces
     the previous plan), different kinds stay side by side, grouped under BatteryAI.
@@ -29,6 +33,9 @@ async def send(
         "group": "batteryai",
         "push": {"interruption-level": "active"},
     }
+    if critical:
+        extra["push"] = {"interruption-level": "critical", "sound": {"name": "default", "critical": 1, "volume": 1.0}}
+        extra.update(ttl=0, priority="high", channel="alarm_stream")
     if url:
         extra["url"] = url  # iOS: tap opens this page
         extra["clickAction"] = url  # Android: tap opens this page

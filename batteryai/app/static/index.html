@@ -617,9 +617,11 @@
           <label><input type="checkbox" name="notify_soc_changes"> every SOC / grid-charge change</label>
           <label><input type="checkbox" name="notify_errors"> failed predictions</label>
           <label><input type="checkbox" name="notify_bms_alarms"> battery alarms (BMS alarm on / cleared, BMS offline)</label>
+          <label><input type="checkbox" name="notify_bms_critical"> battery alarms as <b>critical alerts</b> – sound through Silent mode and Focus (iPhone: allow Critical Alerts for the Home Assistant app)</label>
         </fieldset>
         <div class="test-row">
           <button type="button" class="secondary" id="testNotify">Send test notification</button>
+          <button type="button" class="secondary" id="testCritical">Test critical alert</button>
           <div class="result" id="notifyResult"></div>
         </div>
       </section>
