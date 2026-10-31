@@ -1156,6 +1156,9 @@ async function refreshBatteries() {
   const packs = data.batteries || [];
   $("bmsNotes").replaceChildren(...(packs.length || status?.batteries_count ? [] : [el("div", { class: "banner" }, "Add your batteries in Settings → Batteries (DIY battery, HV battery or Low voltage battery).")]));
   $("bmsPacks").replaceChildren(...packs.map(bmsCard), ...(packs.length ? [bmsLog(data.events || [])] : []));
+  // Control (BMS switches and settings) exists only for DIY batteries.
+  const controlTab = document.querySelector('[data-bsub="control"]');
+  if (controlTab) controlTab.hidden = !packs.some((b) => b.kind === "diy");
   if (status?.deye_hv) refreshDeyeHv();
   else $("deyeHvBox").replaceChildren();
   bmsTimer = setTimeout(refreshBatteries, 10000);
@@ -1472,7 +1475,139 @@ const tempIndex = (t) => {
   return n ? `T${n[1]}` : /mos|power tube/i.test(t.name) ? "MOS" : t.name;
 };
 
+// HV battery (Deye BOS-G …): one stack = the PDU on top and its modules (16 cells each).
+const HV_CELLS_PER_MODULE = 16;
+const HV_MAX_MODULES = 12;
+const HV_MODULE_V = 16 * 3.33; // a module at rest
+
+function hvModules(m) {
+  const reg = m.modules?.value;
+  const v = m.voltage?.value;
+  const fromVolt = v ? Math.max(1, Math.min(HV_MAX_MODULES, Math.round(v / HV_MODULE_V))) : null;
+  if (reg >= 1 && reg <= HV_MAX_MODULES) return { n: Math.round(reg), source: "BMS", fromVolt };
+  return { n: fromVolt || 1, source: fromVolt ? "voltage" : "unknown", fromVolt };
+}
+
+// Stack picture: PDU with its display, then the modules; the module holding the highest cell
+// is marked red, the lowest blue; the side gauge is the SOC.
+function hvStackSvg(n, soc, hiModule, loModule, alarm) {
+  const w = 190, pduH = 46, gap = 4, modH = n <= 6 ? 30 : n <= 9 ? 24 : 19, top = 6;
+  const height = top + pduH + gap + n * (modH + gap) + 4;
+  const bodyW = 150, gx = bodyW + 14, gw = 14;
+  const parts = [];
+  parts.push(`<rect x="2" y="${top}" width="${bodyW}" height="${pduH}" rx="6" class="hv-pdu"/>`);
+  parts.push(`<rect x="12" y="${top + 9}" width="54" height="28" rx="3" class="hv-screen"/>`);
+  parts.push(`<text x="39" y="${top + 28}" text-anchor="middle" class="hv-screen-text">${soc === null ? "--" : Math.round(soc) + "%"}</text>`);
+  parts.push(`<text x="${bodyW - 10}" y="${top + 19}" text-anchor="end" class="hv-label">PDU</text>`);
+  parts.push(`<circle cx="${bodyW - 34}" cy="${top + 32}" r="3.5" class="${alarm ? "hv-led-bad" : "hv-led-ok"}"/>`);
+  parts.push(`<circle cx="${bodyW - 22}" cy="${top + 32}" r="3.5" class="hv-led-ok"/>`);
+  parts.push(`<circle cx="${bodyW - 10}" cy="${top + 32}" r="3.5" class="hv-led-off"/>`);
+  for (let i = 0; i < n; i++) {
+    const y = top + pduH + gap + i * (modH + gap);
+    const k = i + 1;
+    const mark = k === hiModule && k === loModule ? "hv-mod both" : k === hiModule ? "hv-mod hi" : k === loModule ? "hv-mod lo" : "hv-mod";
+    parts.push(`<rect x="2" y="${y}" width="${bodyW}" height="${modH}" rx="4" class="${mark}"><title>Module ${k}${k === hiModule ? " · highest cell" : ""}${k === loModule ? " · lowest cell" : ""}</title></rect>`);
+    parts.push(`<rect x="10" y="${y + modH / 2 - 1.5}" width="22" height="3" rx="1.5" class="hv-handle"/>`);
+    parts.push(`<rect x="${bodyW - 32}" y="${y + modH / 2 - 1.5}" width="22" height="3" rx="1.5" class="hv-handle"/>`);
+    parts.push(`<text x="${bodyW / 2 + 2}" y="${y + modH / 2 + 4}" text-anchor="middle" class="hv-num">${k}</text>`);
+    parts.push(`<circle cx="${bodyW / 2 + 24}" cy="${y + modH / 2}" r="2.5" class="hv-led-ok"/>`);
+  }
+  const gTop = top + pduH + gap, gH = n * (modH + gap) - gap;
+  const fill = soc === null ? 0 : Math.max(0, Math.min(100, soc)) / 100 * gH;
+  parts.push(`<rect x="${gx}" y="${gTop}" width="${gw}" height="${gH}" rx="4" class="hv-gauge"/>`);
+  parts.push(`<rect x="${gx}" y="${gTop + gH - fill}" width="${gw}" height="${fill}" rx="4" class="hv-gauge-fill${soc !== null && soc < 20 ? " low" : ""}"/>`);
+  const box = el("div", { class: "hv-stack" });
+  box.innerHTML = `<svg viewBox="0 0 ${w} ${height}" width="${w}" height="${height}" role="img" aria-label="Battery stack with ${n} modules">${parts.join("")}</svg>`;
+  return box;
+}
+
+// Status of a reading: [class, word].
+function hvDeltaState(mv) {
+  if (mv === null) return ["", "—"];
+  if (mv <= 15) return ["good", "excellent"];
+  if (mv <= 30) return ["good", "good"];
+  if (mv <= 50) return ["warn", "watch"];
+  if (mv <= 100) return ["bad", "high"];
+  return ["bad", "very high"];
+}
+
+function hvCard(b) {
+  const m = b.main || {};
+  const mod = hvModules(m);
+  const cells = mod.n * HV_CELLS_PER_MODULE;
+  const v = m.voltage?.value ?? null;
+  const hi = m.max_cell?.value ?? null;
+  const lo = m.min_cell?.value ?? null;
+  const avg = v !== null ? v / cells : null;
+  const moduleOf = (pos) => (Number.isInteger(pos) && pos >= 1 && pos <= cells ? Math.ceil(pos / HV_CELLS_PER_MODULE) : null);
+  const hiPos = m.max_cell?.position, loPos = m.min_cell?.position;
+  const hiModule = moduleOf(hiPos), loModule = moduleOf(loPos);
+  const deltaMv = hi !== null && lo !== null ? Math.round((hi - lo) * 1000) : null;
+  const [deltaCls, deltaWord] = hvDeltaState(deltaMv);
+  const temps = (b.temperatures || []).filter((t) => t.available && t.value !== null);
+  const temp = temps.length ? Math.max(...temps.map((t) => t.value)) : null;
+  const soh = m.soh?.value ?? null;
+  const soc = m.soc?.value ?? null;
+  const issues = b.issues || {};
+
+  // Cell scale 2.90–3.65 V with the lowest, average and highest cell.
+  const lowV = 2.9, highV = 3.65;
+  const at = (x) => `${Math.max(0, Math.min(100, ((x - lowV) / (highV - lowV)) * 100))}%`;
+  const scale = el("div", { class: "hv-scale" },
+    el("span", { class: "hv-scale-zone low", style: `width:${at(3.0)}` }),
+    el("span", { class: "hv-scale-zone high", style: `left:${at(3.6)};right:0` }),
+    lo !== null && hi !== null ? el("span", { class: "hv-scale-span", style: `left:${at(lo)};width:calc(${at(hi)} - ${at(lo)} + 3px)` }) : null,
+    lo !== null ? el("span", { class: "hv-scale-mark lo", style: `left:${at(lo)}`, title: `Lowest ${fmt(lo, 3)} V` }) : null,
+    hi !== null ? el("span", { class: "hv-scale-mark hi", style: `left:${at(hi)}`, title: `Highest ${fmt(hi, 3)} V` }) : null,
+    avg !== null ? el("span", { class: "hv-scale-mark avg", style: `left:${at(avg)}`, title: `Average ${fmt(avg, 3)} V` }) : null);
+
+  const where = (pos, module) => (Number.isInteger(pos) ? ` · cell ${pos}${module ? `, module ${module}` : ""}` : "");
+  const cellsBox = el("div", { class: "hv-cells" },
+    el("div", { class: "hv-cells-head" },
+      el("span", { class: "label" }, "Cell balance"),
+      el("span", { class: `hv-delta ${deltaCls}` }, deltaMv === null ? "—" : `Δ ${deltaMv} mV`, el("small", {}, ` ${deltaWord}`))),
+    scale,
+    el("div", { class: "hv-scale-axis" }, el("span", {}, "2.90 V"), el("span", {}, "3.30"), el("span", {}, "3.65 V")),
+    el("div", { class: "hv-cells-rows" },
+      el("div", {}, el("span", { class: "dot lo" }), "Lowest ", el("b", {}, lo === null ? "—" : `${fmt(lo, 3)} V`), el("span", { class: "muted" }, where(loPos, loModule))),
+      el("div", {}, el("span", { class: "dot avg" }), "Average ", el("b", {}, avg === null ? "—" : `${fmt(avg, 3)} V`), el("span", { class: "muted" }, ` · ${fmt(v, 1)} V ÷ ${cells} cells`)),
+      el("div", {}, el("span", { class: "dot hi" }), "Highest ", el("b", {}, hi === null ? "—" : `${fmt(hi, 3)} V`), el("span", { class: "muted" }, where(hiPos, hiModule)))));
+
+  const tiles = el("section", { class: "tiles" },
+    tile("SOH", bmsNum(m.soh, 0), "%"),
+    tile("Temperature", temp === null ? "—" : fmt(temp, 1), "°C"),
+    tile("Modules", String(mod.n), `· ${cells} cells`),
+    tile("Per module", v === null ? "—" : fmt(v / mod.n, 1), "V"),
+    tile("Current", bmsNum(m.current, 1), "A"));
+
+  // Checks: every reading against LiFePO4 limits, plus what the server found (issues).
+  const check = (ok, text, warn = false) => el("li", { class: ok ? "ok" : warn ? "warn" : "bad" }, ok ? "✓ " : warn ? "△ " : "⚠ ", text);
+  const checks = [];
+  if (deltaMv !== null) checks.push(check(deltaMv <= 30, `Cell delta ${deltaMv} mV ${deltaMv <= 30 ? "– cells well balanced" : deltaMv <= 50 ? "– a little apart, a full charge lets the BMS balance" : "– cells apart, check balancing"}`, deltaMv <= 50));
+  if (lo !== null && hi !== null) checks.push(check(lo >= 2.9 && hi <= 3.62, `Cells within 2.90–3.62 V (${fmt(lo, 3)}–${fmt(hi, 3)} V)`));
+  if (avg !== null && lo !== null && hi !== null) {
+    const fits = avg >= lo - 0.02 && avg <= hi + 0.02;
+    checks.push(check(fits, fits ? `Stack voltage fits ${cells} cells (${fmt(avg, 3)} V average)` : `Stack voltage gives ${fmt(avg, 3)} V per cell – not between the lowest and highest cell (module count?)`, true));
+  }
+  if (temp !== null) checks.push(check(temp >= 5 && temp <= 45, `Temperature ${fmt(temp, 1)} °C ${temp < 5 ? "– cold: charging is limited" : temp > 45 ? "– hot" : "– normal"}`, temp >= 0 && temp <= 50));
+  if (soh !== null) checks.push(check(soh >= 80, `SOH ${fmt(soh, 0)} %${soh < 80 ? " – capacity noticeably reduced" : ""}`, soh >= 70));
+  if (mod.source === "BMS" && mod.fromVolt && mod.fromVolt !== mod.n) checks.push(check(false, `The BMS reports ${mod.n} modules, the voltage suggests ${mod.fromVolt}`, true));
+  if (mod.source === "voltage") checks.push(check(false, `Module count estimated from the voltage (${mod.n})`, true));
+  // Server checks not already shown above (drift, unavailable, temperatures …).
+  for (const [code, text] of Object.entries(issues)) {
+    if (!/^(cell_range|delta_high|cell_low_|cell_high_)/.test(code)) checks.push(check(false, text));
+  }
+
+  return el("section", { class: "card hv-card" },
+    bmsLine(b),
+    b.found ? null : el("div", { class: "banner" }, "No values yet – the registers are read every few minutes (see the registers card below)."),
+    el("div", { class: "hv-body" },
+      hvStackSvg(mod.n, soc, hiModule, loModule, Object.keys(issues).length > 0),
+      el("div", { class: "hv-info" }, tiles, cellsBox, el("ul", { class: "hv-checks" }, ...checks))));
+}
+
 function bmsCard(b) {
+  if (b.kind === "hv") return hvCard(b);
   const m = b.main || {};
   const sum = b.summary || {};
   const [delta, deltaUnit] = bmsDelta(m.delta);

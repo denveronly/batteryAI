@@ -594,3 +594,58 @@ label { align-content: start; }
 .battery-kind-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 12px; margin-top: 8px; }
 .battery-row > .hint { margin-top: 6px; }
 @media (max-width: 760px) { .battery-fields { grid-template-columns: 1fr; } }
+
+/* HV battery card (stack picture, cell balance, checks) */
+#bmsPacks > .hv-card { grid-column: 1 / -1; }
+.hv-body { display: grid; grid-template-columns: auto 1fr; gap: 20px; align-items: start; margin-top: 6px; }
+@media (max-width: 700px) { .hv-body { grid-template-columns: 1fr; } .hv-stack { justify-self: center; } }
+.hv-stack svg { display: block; max-width: 100%; height: auto; }
+.hv-pdu { fill: #2b3440; }
+.hv-screen { fill: #0e3b2a; stroke: #4cc27f; stroke-width: 1; }
+.hv-screen-text { fill: #7dffb2; font: 600 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.hv-label { fill: #c9d2dd; font: 600 11px system-ui, sans-serif; }
+.hv-mod { fill: #d9dee5; stroke: #aeb7c2; stroke-width: 1; }
+.hv-mod.hi { stroke: var(--error); stroke-width: 2; }
+.hv-mod.lo { stroke: var(--accent); stroke-width: 2; }
+.hv-mod.both { stroke: var(--warn); stroke-width: 2; }
+.hv-handle { fill: #9aa4b0; }
+.hv-num { fill: #4b5563; font: 600 11px system-ui, sans-serif; }
+.hv-led-ok { fill: #3ddc84; }
+.hv-led-bad { fill: #ff4d4d; }
+.hv-led-off { fill: #5b6573; }
+.hv-gauge { fill: var(--chip); stroke: var(--border); }
+.hv-gauge-fill { fill: var(--ok); }
+.hv-gauge-fill.low { fill: var(--error); }
+@media (prefers-color-scheme: dark) {
+  .hv-mod { fill: #3a4350; stroke: #586374; }
+  .hv-num { fill: #d6dde6; }
+}
+.hv-info { display: grid; gap: 14px; min-width: 0; }
+.hv-info .tiles { margin: 0; }
+.hv-cells { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.hv-cells-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+.hv-cells-head .label { color: var(--muted); font-size: 12px; }
+.hv-delta { font-size: 20px; font-weight: 650; }
+.hv-delta small { font-size: 12px; font-weight: 500; }
+.hv-delta.good { color: var(--ok); }
+.hv-delta.warn { color: var(--warn); }
+.hv-delta.bad { color: var(--error); }
+.hv-scale { position: relative; height: 14px; border-radius: 7px; background: var(--chip); overflow: visible; }
+.hv-scale-zone { position: absolute; top: 0; bottom: 0; }
+.hv-scale-zone.low { left: 0; background: var(--error-bg); border-radius: 7px 0 0 7px; }
+.hv-scale-zone.high { background: var(--error-bg); border-radius: 0 7px 7px 0; }
+.hv-scale-span { position: absolute; top: 3px; bottom: 3px; background: var(--ok); opacity: 0.35; border-radius: 4px; }
+.hv-scale-mark { position: absolute; top: -3px; width: 3px; height: 20px; border-radius: 2px; transform: translateX(-1px); }
+.hv-scale-mark.lo { background: var(--accent); }
+.hv-scale-mark.hi { background: var(--error); }
+.hv-scale-mark.avg { background: var(--text); width: 2px; }
+.hv-scale-axis { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; margin-top: 4px; }
+.hv-cells-rows { display: grid; gap: 4px; margin-top: 10px; font-size: 14px; }
+.hv-cells-rows .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+.hv-cells-rows .dot.lo { background: var(--accent); }
+.hv-cells-rows .dot.hi { background: var(--error); }
+.hv-cells-rows .dot.avg { background: var(--text); }
+.hv-checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 14px; }
+.hv-checks li.ok { color: var(--ok); }
+.hv-checks li.warn { color: var(--warn); }
+.hv-checks li.bad { color: var(--error); }

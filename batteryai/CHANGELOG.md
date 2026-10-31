@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.67
+
+- HV battery card on Battery health: a picture of the stack – the PDU with its display and
+  one block per module (1–12, from the BMS's module count, otherwise from the voltage), the
+  module holding the highest cell outlined red, the lowest blue, SOC gauge at the side;
+  tiles for SOH, temperature, modules / cells, voltage per module and current; cell balance
+  on a 2.90–3.65 V scale with the lowest, average (voltage ÷ cells) and highest cell, their
+  positions and the delta in mV (excellent ≤ 15, good ≤ 30, watch ≤ 50, high above); checks
+  for cell limits, temperature, SOH, whether the voltage fits the cell count, and the
+  abnormal-data checks.
+- Battery health → Control only appears when there is a DIY battery (HV and low-voltage
+  batteries have no BMS controls).
+
 ## 0.4.66
 
 - HV battery (BOS-G): the register layout is fixed from a real BOS-G Pro stack (8 modules,

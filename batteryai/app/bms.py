@@ -78,6 +78,7 @@ def _value(state: dict[str, Any]) -> dict[str, Any]:
         "value": to_float(raw),
         "unit": attrs.get("unit_of_measurement") or "",
         "available": str(raw).strip().lower() not in UNAVAILABLE,
+        **({"position": attrs["position"]} if isinstance(attrs.get("position"), int) else {}),
     }
 
 
