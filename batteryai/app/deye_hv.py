@@ -179,6 +179,8 @@ class DeyeHvReader:
             n = min(per_read, count - first)
             regs += await self._read(device, PACK_BASE + PACK_STRIDE * first, PACK_STRIDE * n)
         packs = [decode_pack(i + 1, regs[i * PACK_STRIDE:(i + 1) * PACK_STRIDE], self.prefix) for i in range(count)]
+        # A block of zeros is a pack that does not exist (more packs set than connected).
+        packs = [p for p in packs if not p["empty"]]
         for p in packs:
             await self._publish(p)
         self.last = {
@@ -206,9 +208,5 @@ class DeyeHvReader:
             state = "unknown" if not v["ok"] or v["value"] is None else (
                 f"{v['value']:.{f.digits}f}" if f else f"{v['value']:g}")
             await self.ha.set_state(f"sensor.{p['prefix']}_{key}", state, attrs)
-        for key, on, raw in (("bms", p["alarm"], p["alarm_raw"]), ("fault", p["fault"], p["fault_raw"])):
-            await self.ha.set_state(
-                f"binary_sensor.{p['prefix']}_alarm_{key}",
-                "unknown" if on is None else ("on" if on else "off"),
-                {"friendly_name": f"{label} {'BMS alarm' if key == 'bms' else 'BMS fault'}", "device_class": "problem",
-                 "raw": " ".join(f"0x{r:04X}" for r in raw)})
+        # The alarm / fault registers are not published as alarms until the BOS-G layout is
+        # confirmed (with a wrong layout they would raise false alarms); they stay in the raw table.

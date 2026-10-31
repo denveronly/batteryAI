@@ -188,8 +188,11 @@ def report(opts: Options, states: list[dict[str, Any]], extra: list[Any] | None 
             out.append({"name": b.name, "prefix": b.prefix, "kind": "lv", "group": "lv", **pack_entities(b.entities, states)})
         elif b.kind == "diy":
             out.append({"name": b.name, "prefix": b.prefix, "kind": "diy", "group": "bms", **pack(b.prefix, states)})
-    out += [{"name": x["name"], "prefix": x["prefix"], "kind": "hv", "group": f"hv:{x['battery']}", **pack(x["prefix"], states)}
-            for x in extra or []]
+    for x in extra or []:
+        found = pack(x["prefix"], states)
+        # HV pack alarms are not used yet (binary sensors left from 0.4.63/0.4.64 are ignored).
+        found.update(alarms=[], active_alarms=0)
+        out.append({"name": x["name"], "prefix": x["prefix"], "kind": "hv", "group": f"hv:{x['battery']}", **found})
     return out
 
 

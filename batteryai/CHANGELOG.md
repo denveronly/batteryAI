@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.65
+
+- HV battery: pack alarm / fault registers are no longer turned into alarms (false alarms
+  until the BOS-G layout is confirmed – they stay in the raw register table); packs whose
+  registers are all zero (more packs set than connected) are left out.
+
 ## 0.4.64
 
 - Settings → Batteries: each battery has a **Type** – *DIY battery* (your own BMS, sensors
