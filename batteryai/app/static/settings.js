@@ -189,11 +189,13 @@ function batteryRow(battery = {}) {
 
   // HV battery
   const hvEntity = entityInput("sensor.deye_battery_soc", battery.entity, "hv_entity");
-  const hvPacks = el("input", { type: "number", min: "0", max: "16", step: "1", "data-role": "hv_packs" });
-  hvPacks.value = battery.packs ?? 0;
+  const hvPacks = el("select", { "data-role": "hv_packs" },
+    el("option", { value: "0" }, "Auto (as the inverter reports)"), el("option", { value: "1" }, "1 – one battery port"),
+    el("option", { value: "2" }, "2 – BAT1 and BAT2"));
+  hvPacks.value = String(Math.min(2, battery.packs || 0));
   const hvBox = el("div", { class: "battery-kind-fields" },
     el("label", { title: "Any entity of the Deye inverter's Solarman device – it identifies the device" }, "Solarman inverter entity", hvEntity),
-    el("label", { title: "Battery stacks (PDU with its modules); 0 = the number the inverter reports (register 0x2712)" }, "Stacks (0 = auto)", hvPacks));
+    el("label", { title: "Battery stacks (PDU with its modules); 0 = the number the inverter reports (register 0x2712)" }, "Battery stacks", hvPacks));
 
   // Low voltage battery
   const lvInputs = Object.fromEntries(LV_FIELDS.map(([k, label, u]) => [k, entityInput(`${label}${u ? ` (${u})` : ""} – optional`, battery.entities?.[k], `lv_${k}`)]));

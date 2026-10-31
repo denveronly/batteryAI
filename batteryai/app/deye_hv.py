@@ -40,7 +40,7 @@ PACK_COUNT_REG = 0x2712
 PACK_BASE = 0x2730
 PACK_STRIDE = 5000  # the next battery bank
 RECORD = 82        # registers of one stack record (10032–10113)
-MAX_PACKS = 16
+MAX_PACKS = 2  # Deye HV inverters have at most two battery / BMS ports
 MAX_READ = 42  # registers per request: Home Assistant waits only ~10 s for an action's answer
 READ_TRIES = 3
 PREFIX = "deye_hv"
@@ -220,19 +220,19 @@ class DeyeHvReader:
         self.device_id, self._device_for = device, entity_id
         return device
 
-    async def _read(self, device: str, address: int, count: int) -> list[int | None]:
+    async def _read(self, device: str, address: int, count: int, tries: int = READ_TRIES) -> list[int | None]:
         """Registers in requests of at most MAX_READ, each retried when Home Assistant gives up
         waiting for the Solarman logger (HTTP 400 "… a long duration of time …") or it times out."""
         out: list[int | None] = []
         for start in range(address, address + count, MAX_READ):
             n = min(MAX_READ, address + count - start)
-            for attempt in range(1, READ_TRIES + 1):
+            for attempt in range(1, tries + 1):
                 try:
                     response = await self.ha.service_response(
                         "solarman", "read_holding_registers", {"device": device, "address": start, "count": n})
                     break
                 except HAError as err:
-                    if attempt == READ_TRIES or err.kind == "auth":
+                    if attempt == tries or err.kind == "auth":
                         raise
                     _LOGGER.debug("Registers 0x%04X×%d, try %d: %s", start, n, attempt, err)
                     await asyncio.sleep(3 * attempt)  # let the logger finish what it is doing
@@ -247,13 +247,16 @@ class DeyeHvReader:
         device = await self._device(entity_id)
         header = await self._read(device, PACK_COUNT_REG, 1)
         reported = header[0]
-        count = packs_setting or (reported if reported and 0 < reported <= MAX_PACKS else 0)
-        if not count:
-            raise HAError("http", f"the inverter reports {reported} battery packs (register 0x2712); "
-                                  "set the number of packs in Settings → Batteries")
+        count = min(MAX_PACKS, packs_setting or (reported if reported and reported > 0 else 1))
         packs = []
         for i in range(count):
-            regs = await self._read(device, PACK_BASE + PACK_STRIDE * i, RECORD)
+            try:
+                regs = await self._read(device, PACK_BASE + PACK_STRIDE * i, RECORD, tries=READ_TRIES if i == 0 else 1)
+            except HAError:
+                if i == 0:
+                    raise
+                _LOGGER.info("No second battery bank answers at %d – skipped", PACK_BASE + PACK_STRIDE * i)
+                continue
             p = decode_pack(i + 1, regs, self.prefix)
             if p["empty"]:
                 continue  # a bank that does not exist

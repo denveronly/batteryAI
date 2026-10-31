@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.71
+
+- HV battery: at most 2 stacks (one per BMS port – Deye HV inverters have two at most); a
+  saved "8" from the per-pack layout becomes Auto. With 8 the reader asked for banks at
+  15032 … 45032 that do not exist, the logger did not answer and every read timed out.
+  A second bank that does not answer is skipped instead of failing the read.
+- Settings: "Battery stacks" is a choice – Auto, 1 (one battery port), 2 (BAT1 and BAT2).
+
 ## 0.4.70
 
 - Settings → HV battery → Read registers shows the error when the read fails (it showed

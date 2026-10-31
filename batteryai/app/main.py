@@ -1297,7 +1297,7 @@ async def deye_hv_read(request: web.Request) -> web.Response:
         if not entity:
             return web.json_response({"error": "Enter an entity of the Deye inverter's Solarman device."}, status=400)
         try:
-            packs = max(0, min(16, int(body.get("packs") or 0)))
+            packs = max(0, min(2, int(body.get("packs") or 0)))
         except (TypeError, ValueError):
             packs = 0
         prefix = str(body.get("prefix") or "deye_hv").strip().lower() or "deye_hv"

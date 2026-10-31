@@ -596,9 +596,7 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
                 count = int(item.get("packs") or 0)
             except (TypeError, ValueError):
                 count = -1
-            if not 0 <= count <= 16:
-                errors[f"batteries.{index}.packs"] = "0 (as reported) to 16"
-                count = 0
+            count = count if 0 <= count <= 2 else 0  # stacks: one per BMS port (0 = as reported)
             opts.batteries.append(BatteryBms(name=name or "HV battery", prefix=prefix, kind="hv",
                                              entity=hv_entity, packs=count))
             continue
