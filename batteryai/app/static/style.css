@@ -649,3 +649,5 @@ label { align-content: start; }
 .hv-checks li.ok { color: var(--ok); }
 .hv-checks li.warn { color: var(--warn); }
 .hv-checks li.bad { color: var(--error); }
+.hv-limits { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px 16px; border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; font-size: 14px; }
+.hv-limits .label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 2px; }

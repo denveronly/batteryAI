@@ -36,6 +36,12 @@ MAIN = {
     "soh": "state_of_health",
     "capacity": "capacity",
     "modules": "module_count",
+    "charge_energy": "total_charge_energy",
+    "discharge_energy": "total_discharge_energy",
+    "charge_v": "bms_charge_voltage",
+    "discharge_v": "bms_discharge_voltage",
+    "charge_limit": "charge_current_limit",
+    "discharge_limit": "discharge_current_limit",
 }
 # Readable names for the JK BMS alarm codes (binary_sensor.<prefix>_alarm_<code>).
 ALARM_NAMES = {
@@ -53,6 +59,7 @@ ALARM_NAMES = {
     "cursensorerr": "Current sensor error", "cpuauxcommuerr": "CPU / aux communication error",
     "plcmoduleanomaly": "PLC module anomaly", "gpsdisconneted": "GPS disconnected",
     "modifypwdintime": "Change the password",
+    "bms_alarm": "Battery alarm (BMS → inverter)", "bms_fault": "Battery fault (BMS → inverter)",
 }
 TEMP_ABSENT_RE = re.compile(r"^battempsensor(\d+)absent$")
 
@@ -79,6 +86,7 @@ def _value(state: dict[str, Any]) -> dict[str, Any]:
         "unit": attrs.get("unit_of_measurement") or "",
         "available": str(raw).strip().lower() not in UNAVAILABLE,
         **({"position": attrs["position"]} if isinstance(attrs.get("position"), int) else {}),
+        **({"module": attrs["module"]} if isinstance(attrs.get("module"), int) else {}),
     }
 
 
@@ -136,7 +144,8 @@ def pack(prefix: str, states: list[dict[str, Any]]) -> dict[str, Any]:
             continue
         if ("temperature" in rest or rest.startswith("temp")) and "protection" not in rest and "recovery" not in rest:
             # Names from the entity id (friendly names carry the bridge's long device name).
-            nice = {"temperature_powertube": "Power tube (MOS)", "mos_temperature": "MOS"}.get(rest)
+            nice = {"temperature_powertube": "Power tube (MOS)", "mos_temperature": "MOS", "bms_temperature": "BMS",
+                    "temperature": "Cells", "max_cell_temperature": "Warmest cell", "min_cell_temperature": "Coolest cell"}.get(rest)
             if nice is None and rest.startswith("temperature_sensor_"):
                 nice = f"Sensor {rest.rsplit('_', 1)[-1]}"
             temps.append({**_value(state), "name": nice or _title(rest)})
@@ -192,8 +201,10 @@ def report(opts: Options, states: list[dict[str, Any]], extra: list[Any] | None 
             out.append({"name": b.name, "prefix": b.prefix, "kind": "diy", "group": "bms", **pack(b.prefix, states)})
     for x in extra or []:
         found = pack(x["prefix"], states)
-        # HV pack alarms are not used yet (binary sensors left from 0.4.63/0.4.64 are ignored).
-        found.update(alarms=[], active_alarms=0)
+        # Only the battery alarm / fault the BMS reports to the inverter; the binary sensors of
+        # 0.4.63/0.4.64 (wrong registers) are ignored.
+        alarms = [a for a in found["alarms"] if a["key"] in ("bms_alarm", "bms_fault")]
+        found.update(alarms=alarms, active_alarms=sum(1 for a in alarms if a["active"]))
         out.append({"name": x["name"], "prefix": x["prefix"], "kind": "hv", "group": f"hv:{x['battery']}", **found})
     return out
 
@@ -240,7 +251,8 @@ def issues(b: dict[str, Any], packs: list[dict[str, Any]] | None = None) -> dict
         found["cell_range"] = (f"Cells {min(volts):.3f}–{max(volts):.3f} V apart by {(max(volts) - min(volts)) * 1000:.0f} mV "
                                f"(above {CELL_RANGE_V * 1000:.0f} mV)")
     battery_temps = [t for t in b.get("temperatures") or [] if t.get("value") is not None
-                     and "powertube" not in str(t["entity_id"]) and "mos" not in str(t["entity_id"])]
+                     and "powertube" not in str(t["entity_id"]) and "mos" not in str(t["entity_id"])
+                     and "bms_temperature" not in str(t["entity_id"])]
     if len(battery_temps) >= 2:
         hot = max(battery_temps, key=lambda t: t["value"])
         cold = min(battery_temps, key=lambda t: t["value"])

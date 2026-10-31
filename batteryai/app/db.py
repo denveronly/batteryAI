@@ -98,6 +98,8 @@ CREATE TABLE IF NOT EXISTS bms_events (
     message TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_bms_events_ts ON bms_events (ts);
+-- False HV pack alarms logged by 0.4.64 (wrong registers); those codes are no longer used.
+DELETE FROM bms_events WHERE code IN ('bms', 'fault');
 """
 
 # Columns added after 0.2.0 (today_load is kept only for old rows; see _migrate).

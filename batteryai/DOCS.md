@@ -245,9 +245,11 @@ packs itself: Settings → Batteries → a battery of Type **HV battery** with t
 entity** (any entity of the inverter's Solarman device), the number of packs (0 = what register
 0x2712 reports) and a sensor prefix (default `deye_hv`); how often all HV batteries are read is
 set below the list.
-It calls `solarman.read_holding_registers` for 0x2710 and the 80-register record of each stack
-(a PDU with its modules; 0x2730 – voltage at 0x2761, SOC 0x2743, SOH 0x2742, temperature
-0x273E, highest / lowest cell 0x2744 / 0x2747, modules 0x2756), checks every value against LiFePO4 limits – trying other scales when the
+It calls `solarman.read_holding_registers` for 0x2710, the 82-register record of the stack
+(a PDU with its modules; decimal 10032–10113: cycles 10046, voltage 10047, current 10048 with
+offset 30000, SOC 10050, SOH 10051, highest / lowest cell 10052 / 10055, cell temperatures with
+offset 40, current limits 10065 / 10066, modules 10070, total energy 10077–10080) and what the
+BMS sends to the inverter (0x00D2–0x00DF, battery alarm 0x00DC and fault 0x00DD), checks every value against LiFePO4 limits – trying other scales when the
 expected one is implausible – and publishes `sensor.<prefix><N>_battery_voltage`, `_battery_current`,
 `_battery_power`, `_battery_capacity_state_of_charge`, `_state_of_health`, `_capacity`,
 `_min_cell_voltage`, `_max_cell_voltage`, `_cell_delta_voltage`, the temperatures,

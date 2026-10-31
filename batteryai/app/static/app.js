@@ -1188,6 +1188,7 @@ function deyeHvText(d) {
     lines.push(`pack ${p.n} ${p.serial || ""}`);
     lines.push((p.registers || []).map((r) => `${r.offset}:${r.raw ?? "-"}`).join(" "));
   }
+  if (d.inverter_bms?.length) lines.push("bms->inverter 0x00D2 " + d.inverter_bms.map((r) => `${r.offset}:${r.raw ?? "-"}`).join(" "));
   return lines.join("\n");
 }
 
@@ -1202,6 +1203,17 @@ function deyeHvCard(d) {
   const head = el("div", { class: "card-head" }, el("h2", {}, `${d.name} – registers`),
     el("span", { class: "muted" }, d.time ? `read ${fmtDateTime(d.time)} · inverter reports ${d.reported_packs} stack(s) · every ${d.interval} s` : "not read yet"),
     read, copy);
+  const regTable = (rows) => el("div", { class: "table-wrap" }, el("table", { class: "bms-regs" },
+    el("thead", {}, el("tr", {}, ...["Register", "#", "Raw", "Signed", "Hex", "Field", "Value"].map((h) => el("th", {}, h)))),
+    el("tbody", {}, ...rows.map((r) => el("tr", { class: r.ok === false ? "bad" : r.ok ? "good" : "" },
+      el("td", {}, `0x${r.register.toString(16).toUpperCase().padStart(4, "0")}`), el("td", { class: "num" }, r.offset),
+      el("td", { class: "num" }, r.raw ?? "—"), el("td", { class: "num" }, r.signed ?? "—"),
+      el("td", { class: "num" }, r.raw === null ? "—" : r.raw.toString(16).toUpperCase().padStart(4, "0")),
+      el("td", {}, r.field || ""),
+      el("td", { class: "num" }, r.value === null || r.value === undefined ? "" : `${r.ok ? "✓" : "?"} ${fmt(r.value, 3)}`))))));
+  const invRows = d.inverter_bms || [];
+  const inverterBlock = invRows.length ? bmsDetails(`deyehv:${d.prefix}:inv`, ["BMS → inverter",
+    el("span", { class: "muted" }, " · 0x00D2–0x00DF: limits, battery alarm and fault")], regTable(invRows)) : null;
   const packs = (d.packs || []).map((p) => {
     const bad = (p.registers || []).filter((r) => r.ok === false).length;
     return bmsDetails(`deyehv:${d.prefix}:${p.n}`, [`Stack ${p.n}${p.serial ? ` · ${p.serial}` : ""}`,
@@ -1217,6 +1229,7 @@ function deyeHvCard(d) {
   });
   return el("section", { class: "card" }, head,
     d.error ? el("div", { class: "banner" }, `Last read failed: ${d.error}`) : null,
+    inverterBlock,
     el("p", { class: "hint" }, "Values marked ? are outside what a LiFePO4 pack can show with the expected scale, so their sensors stay unknown. "
       + "Compare with the Solarman app and send the raw registers (Copy) if a value is wrong – the layout can then be corrected."),
     ...packs);
@@ -1531,6 +1544,15 @@ function hvDeltaState(mv) {
   return ["bad", "very high"];
 }
 
+// What the BMS tells the inverter: how far and how fast it may charge and discharge.
+function hvLimits(m) {
+  if (!m.charge_v && !m.charge_limit && !m.discharge_v && !m.discharge_limit) return null;
+  const part = (v, d, u) => (v?.value === null || v?.value === undefined ? "—" : `${fmt(v.value, d)} ${u}`);
+  return el("div", { class: "hv-limits" },
+    el("div", {}, el("span", { class: "label" }, "Charge – BMS allows"), el("b", {}, `up to ${part(m.charge_v, 1, "V")}`), el("span", {}, ` · max ${part(m.charge_limit, 0, "A")}`)),
+    el("div", {}, el("span", { class: "label" }, "Discharge – BMS allows"), el("b", {}, `down to ${part(m.discharge_v, 1, "V")}`), el("span", {}, ` · max ${part(m.discharge_limit, 0, "A")}`)));
+}
+
 function hvCard(b) {
   const m = b.main || {};
   const mod = hvModules(m);
@@ -1541,11 +1563,15 @@ function hvCard(b) {
   const avg = v !== null ? v / cells : null;
   const moduleOf = (pos) => (Number.isInteger(pos) && pos >= 1 && pos <= cells ? Math.ceil(pos / HV_CELLS_PER_MODULE) : null);
   const hiPos = m.max_cell?.position, loPos = m.min_cell?.position;
-  const hiModule = moduleOf(hiPos), loModule = moduleOf(loPos);
+  // The BMS gives module and cell; without a module the position is counted over the stack.
+  const hiModule = m.max_cell?.module ?? moduleOf(hiPos), loModule = m.min_cell?.module ?? moduleOf(loPos);
   const deltaMv = hi !== null && lo !== null ? Math.round((hi - lo) * 1000) : null;
   const [deltaCls, deltaWord] = hvDeltaState(deltaMv);
   const temps = (b.temperatures || []).filter((t) => t.available && t.value !== null);
-  const temp = temps.length ? Math.max(...temps.map((t) => t.value)) : null;
+  const tempOf = (suffix) => temps.find((t) => t.entity_id === `sensor.${b.prefix}_${suffix}`) || null;
+  const cellT = tempOf("temperature"), hiT = tempOf("max_cell_temperature"), loT = tempOf("min_cell_temperature"), bmsT = tempOf("bms_temperature");
+  const cellTemps = temps.filter((t) => t !== bmsT);
+  const temp = cellTemps.length ? Math.max(...cellTemps.map((t) => t.value)) : null;
   const soh = m.soh?.value ?? null;
   const soc = m.soc?.value ?? null;
   const issues = b.issues || {};
@@ -1561,7 +1587,7 @@ function hvCard(b) {
     hi !== null ? el("span", { class: "hv-scale-mark hi", style: `left:${at(hi)}`, title: `Highest ${fmt(hi, 3)} V` }) : null,
     avg !== null ? el("span", { class: "hv-scale-mark avg", style: `left:${at(avg)}`, title: `Average ${fmt(avg, 3)} V` }) : null);
 
-  const where = (pos, module) => (Number.isInteger(pos) ? ` · cell ${pos}${module ? `, module ${module}` : ""}` : "");
+  const where = (pos, module) => (module ? ` · module ${module}${Number.isInteger(pos) ? `, cell ${pos}` : ""}` : Number.isInteger(pos) ? ` · cell ${pos}` : "");
   const cellsBox = el("div", { class: "hv-cells" },
     el("div", { class: "hv-cells-head" },
       el("span", { class: "label" }, "Cell balance"),
@@ -1573,12 +1599,17 @@ function hvCard(b) {
       el("div", {}, el("span", { class: "dot avg" }), "Average ", el("b", {}, avg === null ? "—" : `${fmt(avg, 3)} V`), el("span", { class: "muted" }, ` · ${fmt(v, 1)} V ÷ ${cells} cells`)),
       el("div", {}, el("span", { class: "dot hi" }), "Highest ", el("b", {}, hi === null ? "—" : `${fmt(hi, 3)} V`), el("span", { class: "muted" }, where(hiPos, hiModule)))));
 
+  const kwh = (x) => (x?.value === null || x?.value === undefined ? "—" : fmt(x.value, 0));
   const tiles = el("section", { class: "tiles" },
     tile("SOH", bmsNum(m.soh, 0), "%"),
-    tile("Temperature", temp === null ? "—" : fmt(temp, 1), "°C"),
+    tile("Cycles", bmsNum(m.cycles, 0), ""),
+    tile("Cells", cellT ? fmt(cellT.value, 0) : temp === null ? "—" : fmt(temp, 0),
+      hiT && loT ? `°C · ${fmt(loT.value, 0)}–${fmt(hiT.value, 0)}` : "°C"),
+    bmsT ? tile("BMS", fmt(bmsT.value, 0), "°C") : null,
     tile("Modules", String(mod.n), `· ${cells} cells`),
     tile("Per module", v === null ? "—" : fmt(v / mod.n, 1), "V"),
-    tile("Current", bmsNum(m.current, 1), "A"));
+    tile("Current", bmsNum(m.current, 1), "A"),
+    m.charge_energy || m.discharge_energy ? tile("Energy in / out", `${kwh(m.charge_energy)} / ${kwh(m.discharge_energy)}`, "kWh") : null);
 
   // Checks: every reading against LiFePO4 limits, plus what the server found (issues).
   const check = (ok, text, warn = false) => el("li", { class: ok ? "ok" : warn ? "warn" : "bad" }, ok ? "✓ " : warn ? "△ " : "⚠ ", text);
@@ -1589,10 +1620,20 @@ function hvCard(b) {
     const fits = avg >= lo - 0.02 && avg <= hi + 0.02;
     checks.push(check(fits, fits ? `Stack voltage fits ${cells} cells (${fmt(avg, 3)} V average)` : `Stack voltage gives ${fmt(avg, 3)} V per cell – not between the lowest and highest cell (module count?)`, true));
   }
-  if (temp !== null) checks.push(check(temp >= 5 && temp <= 45, `Temperature ${fmt(temp, 1)} °C ${temp < 5 ? "– cold: charging is limited" : temp > 45 ? "– hot" : "– normal"}`, temp >= 0 && temp <= 50));
+  if (temp !== null) checks.push(check(temp >= 5 && temp <= 45, `Cell temperature up to ${fmt(temp, 0)} °C ${temp < 5 ? "– cold: charging is limited" : temp > 45 ? "– hot" : "– normal"}`, temp >= 0 && temp <= 50));
+  if (bmsT) checks.push(check(bmsT.value <= 60, `BMS temperature ${fmt(bmsT.value, 0)} °C`, bmsT.value <= 70));
+  if (hiT && loT && hiT.value - loT.value > 8) checks.push(check(false, `Cell temperatures ${fmt(hiT.value - loT.value, 0)} °C apart (module ${hiT.module ?? "?"} warmest, module ${loT.module ?? "?"} coolest)`, true));
   if (soh !== null) checks.push(check(soh >= 80, `SOH ${fmt(soh, 0)} %${soh < 80 ? " – capacity noticeably reduced" : ""}`, soh >= 70));
   if (mod.source === "BMS" && mod.fromVolt && mod.fromVolt !== mod.n) checks.push(check(false, `The BMS reports ${mod.n} modules, the voltage suggests ${mod.fromVolt}`, true));
   if (mod.source === "voltage") checks.push(check(false, `Module count estimated from the voltage (${mod.n})`, true));
+  const alarmOf = (key) => (b.alarms || []).find((a) => a.key === key);
+  for (const [key, label] of [["bms_alarm", "Battery alarm"], ["bms_fault", "Battery fault"]]) {
+    const a = alarmOf(key);
+    if (a) checks.push(check(!a.active, a.active ? `${label} reported by the BMS to the inverter` : `${label}: none reported by the BMS`));
+  }
+  const cl = m.charge_limit?.value, dl = m.discharge_limit?.value;
+  if (cl === 0) checks.push(check(false, `BMS allows no charging now (charge limit 0 A)${soc !== null && soc >= 98 ? " – normal when full" : ""}`, soc !== null && soc >= 98));
+  if (dl === 0) checks.push(check(false, `BMS allows no discharging now (discharge limit 0 A)${soc !== null && soc <= 5 ? " – battery empty" : ""}`));
   // Server checks not already shown above (drift, unavailable, temperatures …).
   for (const [code, text] of Object.entries(issues)) {
     if (!/^(cell_range|delta_high|cell_low_|cell_high_)/.test(code)) checks.push(check(false, text));
@@ -1603,7 +1644,7 @@ function hvCard(b) {
     b.found ? null : el("div", { class: "banner" }, "No values yet – the registers are read every few minutes (see the registers card below)."),
     el("div", { class: "hv-body" },
       hvStackSvg(mod.n, soc, hiModule, loModule, Object.keys(issues).length > 0),
-      el("div", { class: "hv-info" }, tiles, cellsBox, el("ul", { class: "hv-checks" }, ...checks))));
+      el("div", { class: "hv-info" }, tiles, cellsBox, hvLimits(m), el("ul", { class: "hv-checks" }, ...checks))));
 }
 
 function bmsCard(b) {

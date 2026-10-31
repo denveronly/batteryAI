@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.68
+
+- HV battery (BOS-G) decoded with the documented Deye HV map (decimal 10032–10113, verified on
+  other BOS-G systems and matching this one): cycles 10046, voltage 10047, current 10048
+  (offset 30000; shown positive = charging), BMS temperature 10049, SOC 10050, SOH 10051,
+  highest / lowest cell 10052 / 10055 with module and cell, average / warmest / coolest cell
+  temperature, charge / discharge current limit, number of modules 10070, total charge /
+  discharge energy. Earlier guesses corrected (0x273E is the cycle count, not a temperature).
+- Battery alarm and fault come from what the BMS sends to the inverter (0x00DC / 0x00DD) and
+  are logged and notified like other BMS alarms; the false "BMS alarm / fault" entries
+  logged by 0.4.64 are removed from the Battery log.
+- HV card: cycles, cell and BMS temperatures, energy in / out, what the BMS allows (charge up
+  to … V at … A, discharge down to … V), checks for alarms, temperatures and a charge limit
+  of 0 A (normal when full). A raw table of the BMS → inverter registers on the registers card.
+
 ## 0.4.67
 
 - HV battery card on Battery health: a picture of the stack – the PDU with its display and
