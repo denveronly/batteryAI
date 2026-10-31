@@ -1140,6 +1140,57 @@ $("billYear").addEventListener("change", refreshBill);
 
 // Battery health tab ------------------------------------------------------------
 
+// Yellow (warning, logged) / red (alarm, logged and sent to the phone) limits.
+let bmsLimits = { bms_delta_warn_mv: 50, bms_delta_alarm_mv: 100, bms_soc_drift_warn: 15, bms_soc_drift_alarm: 30,
+  bms_volt_drift_warn: 0.5, bms_volt_drift_alarm: 1 };
+const BMS_LIMIT_ROWS = [
+  ["Cell delta", "mV", "bms_delta_warn_mv", "bms_delta_alarm_mv", "1", "highest − lowest cell of a battery"],
+  ["SOC drift", "%", "bms_soc_drift_warn", "bms_soc_drift_alarm", "1", "a battery's SOC away from the other batteries of its kind"],
+  ["Voltage drift", "V", "bms_volt_drift_warn", "bms_volt_drift_alarm", "0.05", "a battery's voltage away from the other batteries of its kind"],
+];
+
+// Rendered once (the 10-second refresh must not wipe what is being typed).
+function renderBmsThresholds(show) {
+  const box = $("bmsThresholds");
+  box.hidden = !show;
+  if (box.dataset.ready) return;
+  box.dataset.ready = "1";
+  const inputs = {};
+  const input = (key, step) => {
+    const i = el("input", { type: "number", min: "0", step, value: String(bmsLimits[key]) });
+    inputs[key] = i;
+    return i;
+  };
+  const result = el("div", { class: "result" });
+  const save = el("button", { type: "button", class: "small" }, "Save");
+  save.addEventListener("click", async () => {
+    const body = Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, Number(i.value)]));
+    result.className = "result";
+    result.textContent = "Saving…";
+    const r = await fetch("api/batteries/thresholds", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then((x) => x.json()).catch((err) => ({ errors: { _: err.message } }));
+    if (r.errors) {
+      result.className = "result error";
+      result.textContent = `✕ ${Object.entries(r.errors).map(([k, v]) => `${BMS_LIMIT_ROWS.find((x) => x.includes(k))?.[0] || k}: ${v}`).join("; ")}`;
+    } else {
+      Object.assign(bmsLimits, body);
+      result.className = "result ok";
+      result.textContent = "✓ Saved – used from the next check (every minute).";
+    }
+  });
+  box.replaceChildren(bmsDetails("thresholds", ["Thresholds", el("span", { class: "muted" },
+    ` · cell delta ${bmsLimits.bms_delta_warn_mv}/${bmsLimits.bms_delta_alarm_mv} mV · SOC drift ${bmsLimits.bms_soc_drift_warn}/${bmsLimits.bms_soc_drift_alarm} % · voltage drift ${bmsLimits.bms_volt_drift_warn}/${bmsLimits.bms_volt_drift_alarm} V`)],
+    el("p", { class: "hint" }, "Above yellow: a warning in the Battery log. Above red: an alarm – logged and sent to the phone (as a critical alert when that is on). Drift compares batteries of the same kind (DIY with DIY, HV stacks with each other)."),
+    el("table", { class: "bms-limits" },
+      el("tr", {}, el("th", {}, ""), el("th", {}, el("span", { class: "dot-y" }), "Yellow above"), el("th", {}, el("span", { class: "dot-r" }), "Red above"), el("th", {}, "")),
+      ...BMS_LIMIT_ROWS.map(([label, unit, warn, alarm, step, hint]) => el("tr", {},
+        el("td", {}, el("b", {}, label), el("div", { class: "muted small" }, hint)),
+        el("td", {}, input(warn, step), ` ${unit}`),
+        el("td", {}, input(alarm, step), ` ${unit}`),
+        el("td", {})))),
+    el("div", { class: "test-row" }, save, result)));
+}
+
 let bmsTimer = null;
 
 async function refreshBatteries() {
@@ -1154,6 +1205,10 @@ async function refreshBatteries() {
     return;
   }
   const packs = data.batteries || [];
+  if (data.thresholds) {
+    bmsLimits = data.thresholds;
+    renderBmsThresholds(packs.length > 0);
+  }
   $("bmsNotes").replaceChildren(...(packs.length || status?.batteries_count ? [] : [el("div", { class: "banner" }, "Add your batteries in Settings → Batteries (DIY battery, HV battery or Low voltage battery).")]));
   $("bmsPacks").replaceChildren(...packs.map(bmsCard), ...(packs.length ? [bmsLog(data.events || [])] : []));
   // Control (BMS switches and settings) exists only for DIY batteries.
@@ -1534,14 +1589,16 @@ function hvStackSvg(n, soc, hiModule, loModule, alarm) {
   return box;
 }
 
-// Status of a reading: [class, word].
+const bmsIsRed = (code) => code.endsWith("_critical") || code === "cell_range";
+
+// Status of a cell delta against the thresholds: [class, word].
 function hvDeltaState(mv) {
   if (mv === null) return ["", "—"];
-  if (mv <= 15) return ["good", "excellent"];
-  if (mv <= 30) return ["good", "good"];
-  if (mv <= 50) return ["warn", "watch"];
-  if (mv <= 100) return ["bad", "high"];
-  return ["bad", "very high"];
+  const warn = bmsLimits.bms_delta_warn_mv, alarm = bmsLimits.bms_delta_alarm_mv;
+  if (mv <= warn * 0.3) return ["good", "excellent"];
+  if (mv <= warn) return ["good", "good"];
+  if (mv <= alarm) return ["warn", `above ${warn} mV`];
+  return ["bad", `above ${alarm} mV`];
 }
 
 // What the BMS tells the inverter: how far and how fast it may charge and discharge.
@@ -1614,7 +1671,11 @@ function hvCard(b) {
   // Checks: every reading against LiFePO4 limits, plus what the server found (issues).
   const check = (ok, text, warn = false) => el("li", { class: ok ? "ok" : warn ? "warn" : "bad" }, ok ? "✓ " : warn ? "△ " : "⚠ ", text);
   const checks = [];
-  if (deltaMv !== null) checks.push(check(deltaMv <= 30, `Cell delta ${deltaMv} mV ${deltaMv <= 30 ? "– cells well balanced" : deltaMv <= 50 ? "– a little apart, a full charge lets the BMS balance" : "– cells apart, check balancing"}`, deltaMv <= 50));
+  if (deltaMv !== null) {
+    const warn = bmsLimits.bms_delta_warn_mv, alarm = bmsLimits.bms_delta_alarm_mv;
+    checks.push(check(deltaMv <= warn, `Cell delta ${deltaMv} mV ${deltaMv <= warn ? "– cells well balanced"
+      : deltaMv <= alarm ? `– above ${warn} mV, a full charge lets the BMS balance` : `– above ${alarm} mV, check balancing`}`, deltaMv <= alarm));
+  }
   if (lo !== null && hi !== null) checks.push(check(lo >= 2.9 && hi <= 3.62, `Cells within 2.90–3.62 V (${fmt(lo, 3)}–${fmt(hi, 3)} V)`));
   if (avg !== null && lo !== null && hi !== null) {
     const fits = avg >= lo - 0.02 && avg <= hi + 0.02;
@@ -1636,7 +1697,7 @@ function hvCard(b) {
   if (dl === 0) checks.push(check(false, `BMS allows no discharging now (discharge limit 0 A)${soc !== null && soc <= 5 ? " – battery empty" : ""}`));
   // Server checks not already shown above (drift, unavailable, temperatures …).
   for (const [code, text] of Object.entries(issues)) {
-    if (!/^(cell_range|delta_high|cell_low_|cell_high_)/.test(code)) checks.push(check(false, text));
+    if (!/^(cell_range|delta_high|cell_low_|cell_high_)/.test(code)) checks.push(check(false, text, !bmsIsRed(code)));
   }
 
   return el("section", { class: "card hv-card" },
@@ -1707,7 +1768,9 @@ function bmsCard(b) {
     b.found ? null : el("div", { class: "banner" }, b.kind === "lv"
       ? `None of its entities found in Home Assistant${b.missing?.length ? ` (${b.missing.join(", ")})` : ""} – check them in Settings → Batteries.`
       : `Nothing found for sensor.${b.prefix}_… in Home Assistant – check the prefix in Settings → Batteries.`),
-    ...Object.entries(b.issues || {}).map(([code, text]) => el("div", { class: "bms-alarm warn", title: code }, `△ ${text}`)),
+    ...Object.entries(b.issues || {}).map(([code, text]) => (bmsIsRed(code)
+      ? el("div", { class: "bms-alarm on", title: code }, `⚠ ${text}`)
+      : el("div", { class: "bms-alarm warn", title: code }, `△ ${text}`))),
     cellChart ? bmsDetails(key("cells"), [`Cells (${cellItems.length})`, el("span", { class: "muted" },
       ` · Δ ${delta} ${deltaUnit} · V${pad2(sum.min_cell)} min ${fmt(sum.min_v, 3)} V · V${pad2(sum.max_cell)} max ${fmt(sum.max_v, 3)} V`)],
       el("div", { class: "bms-stats" }, stat("Delta", `${delta} ${deltaUnit}`), stat("Average", `${fmt(vAvg, 3)} V`),

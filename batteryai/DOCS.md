@@ -231,6 +231,12 @@ its voltage more than 0.5 V away from the other packs, a pack's temperature sens
 8 °C apart – when it starts and when it ends. Alarms, the error bitmask, the cell count and
 offline are also sent to the phone (Phone notifications → *battery alarms*).
 
+**Thresholds** (Battery health, foldable at the top): a yellow and a red limit for the cell
+delta, the SOC drift and the voltage drift (defaults 50 / 100 mV, 15 / 30 %, 0.5 / 1 V). Above
+yellow a warning is logged; above red it is an alarm – logged in red and sent to the phone (as
+a critical alert when *battery alarms as critical alerts* is on). Drift compares batteries of
+the same kind.
+
 **Control** (Battery health → Control): choose a battery and change the BMS's own switches
 (`switch.<prefix>_*`) and settings (`number.<prefix>_*`). The page is locked until *Allow
 changes* is ticked; each change asks for confirmation, must be within the entity's min/max and is

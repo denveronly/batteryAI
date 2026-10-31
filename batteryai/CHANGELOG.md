@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.73
+
+- Battery health → **Thresholds** (foldable, at the top): yellow and red limits for cell
+  delta (50 / 100 mV), SOC drift (15 / 30 %) and voltage drift (0.5 / 1 V). Above yellow: a
+  warning in the Battery log (as before). Above red: an alarm – red on the card, red in the
+  log and sent to the phone (a critical alert when that option is on), and again when it is
+  back to normal.
+- The HV card's cell-balance rating and checks follow the cell delta thresholds.
+
 ## 0.4.72
 
 - Battery alarms as **critical alerts** (Settings → Phone notifications, on by default): a new

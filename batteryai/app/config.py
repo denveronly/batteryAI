@@ -237,6 +237,14 @@ class Options:
     notify_soc_changes: bool = True
     notify_errors: bool = True
     notify_bms_alarms: bool = True  # Battery health: BMS alarms on/cleared and BMS offline
+    # Battery health thresholds: yellow (warning, logged) and red (alarm, logged and sent to the
+    # phone) for the cell delta of a pack and its SOC / voltage drift from the other packs.
+    bms_delta_warn_mv: int = 50
+    bms_delta_alarm_mv: int = 100
+    bms_soc_drift_warn: int = 15
+    bms_soc_drift_alarm: int = 30
+    bms_volt_drift_warn: float = 0.5
+    bms_volt_drift_alarm: float = 1.0
     notify_bms_critical: bool = True  # … sent as critical alerts (sound through Silent / Focus)
 
     @property
@@ -375,6 +383,17 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
             errors[key] = f"must be between {low} and {high}"
         return number
 
+    def decimal(key: str, low: float, high: float) -> float:
+        value = raw.get(key, getattr(base, key))
+        try:
+            number = round(float(str(value).replace(",", ".")), 3)
+        except (TypeError, ValueError):
+            errors[key] = "must be a number"
+            return getattr(base, key)
+        if not low <= number <= high:
+            errors[key] = f"must be between {low:g} and {high:g}"
+        return number
+
     def entity(key: str, value: str) -> str:
         if value and not ENTITY_RE.match(value):
             errors[key] = "must look like sensor.my_sensor (lowercase domain.object_id)"
@@ -413,7 +432,17 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         outage_precharge_minutes=integer("outage_precharge_minutes", 5, 720),
         outage_precharge_soc_percent=integer("outage_precharge_soc_percent", 10, 100),
         deye_hv_interval_seconds=integer("deye_hv_interval_seconds", 30, 3600),
+        bms_delta_warn_mv=integer("bms_delta_warn_mv", 5, 500),
+        bms_delta_alarm_mv=integer("bms_delta_alarm_mv", 5, 1000),
+        bms_soc_drift_warn=integer("bms_soc_drift_warn", 1, 100),
+        bms_soc_drift_alarm=integer("bms_soc_drift_alarm", 1, 100),
+        bms_volt_drift_warn=decimal("bms_volt_drift_warn", 0.05, 50),
+        bms_volt_drift_alarm=decimal("bms_volt_drift_alarm", 0.05, 100),
     )
+    for warn, alarm in (("bms_delta_warn_mv", "bms_delta_alarm_mv"), ("bms_soc_drift_warn", "bms_soc_drift_alarm"),
+                        ("bms_volt_drift_warn", "bms_volt_drift_alarm")):
+        if getattr(opts, alarm) <= getattr(opts, warn):
+            errors[alarm] = "red must be above yellow"
     if opts.min_soc_percent > opts.max_soc_percent:
         errors["min_soc_percent"] = "must not be higher than the maximum SOC"
     for key in SENSOR_KEYS:

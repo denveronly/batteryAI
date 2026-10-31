@@ -82,6 +82,7 @@ class BatteryAI:
         self.emergency = False  # emergency outages in effect (emergency outage sensor)
         self._profile: tuple[float, dict[tuple[int, int], float]] = (0.0, {})
         self.deye_hv: dict[str, deye_hv.DeyeHvReader] = {}  # HV battery prefix → reader
+        bms.configure(opts)
 
     def spawn(self, coro: Any) -> asyncio.Task:
         task = asyncio.create_task(coro)
@@ -506,6 +507,7 @@ class BatteryAI:
         marks_changed = opts.program_time_marks != self.opts.program_time_marks
         weekend_changed = opts.weekend_days != self.opts.weekend_days
         self.opts = opts
+        bms.configure(opts)
         if weekend_changed:
             self.relocalize()
         elif marks_changed:
@@ -1253,7 +1255,26 @@ async def batteries(request: web.Request) -> web.Response:
     for pack in packs:
         pack["issues"] = bms.issues(pack, packs)
     events = await asyncio.to_thread(app.db.bms_events, 200)
-    return web.json_response({"batteries": packs, "events": events})
+    o = app.opts
+    thresholds = {k: getattr(o, k) for k in ("bms_delta_warn_mv", "bms_delta_alarm_mv", "bms_soc_drift_warn",
+                                              "bms_soc_drift_alarm", "bms_volt_drift_warn", "bms_volt_drift_alarm")}
+    return web.json_response({"batteries": packs, "events": events, "thresholds": thresholds})
+
+
+@routes.post("/api/batteries/thresholds")
+async def battery_thresholds(request: web.Request) -> web.Response:
+    """Battery health → Thresholds: yellow / red limits for cell delta, SOC and voltage drift."""
+    app = _app(request)
+    body = await request.json()
+    keys = ("bms_delta_warn_mv", "bms_delta_alarm_mv", "bms_soc_drift_warn", "bms_soc_drift_alarm",
+            "bms_volt_drift_warn", "bms_volt_drift_alarm")
+    try:
+        opts = parse_settings({k: body[k] for k in keys if k in body}, app.opts)
+    except SettingsError as err:
+        return web.json_response({"errors": err.errors}, status=400)
+    save_settings(opts)
+    app.apply_settings(opts)
+    return web.json_response({"ok": True})
 
 
 @routes.post("/api/batteries/test_lv")
