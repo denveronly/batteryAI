@@ -660,3 +660,4 @@ label { align-content: start; }
 .dot-y, .dot-r { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
 .dot-y { background: var(--warn); }
 .dot-r { background: var(--error); }
+.card-head-select { margin-left: auto; align-self: center; width: auto; padding: 4px 8px; font-size: 13px; }

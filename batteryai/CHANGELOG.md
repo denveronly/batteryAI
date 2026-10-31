@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.74
+
+- Dashboard → Power chart has its own range dropdown: 6 h, 12 h, 1 day, 2 days, 3 days,
+  7 days (remembered in the browser). The predicted load is shown as far ahead as the range
+  looks back.
+
 ## 0.4.73
 
 - Battery health → **Thresholds** (foldable, at the top): yellow and red limits for cell

@@ -2063,7 +2063,7 @@ async function refresh() {
     renderStatus();
     refreshDashBatteries();
     renderBattery(rows);
-    renderPower(rows, predicted);
+    refreshPower(Number(hours), rows, predicted);
     renderDaily(days);
     renderAccuracy(accuracy);
     const latestOk = analyses.find((a) => a.status === "ok" && a.result);
@@ -2078,6 +2078,26 @@ async function refresh() {
 }
 
 $("range").addEventListener("change", refresh);
+
+// Power chart: its own range (6 h … 7 days, remembered in this browser). The past part comes
+// from the readings, the predicted load is shown as far ahead as the range looks back.
+try { const saved = localStorage.getItem("batteryai-power-range"); if (saved) $("powerRange").value = saved; } catch (e) {}
+async function refreshPower(pageHours = null, pageRows = null, pagePredicted = null) {
+  const h = Number($("powerRange").value) || 48;
+  try {
+    const same = pageHours === h && pageRows;
+    const [rows, predicted] = same ? [pageRows, pagePredicted]
+      : await Promise.all([api(`api/readings?hours=${h}`), api(`api/predicted_load?hours=${h}`)]);
+    const now = Date.now() / 1000;
+    renderPower(rows.filter((r) => r.ts >= now - h * 3600), (predicted || []).filter((p) => p.ts >= now - h * 3600 && p.ts <= now + h * 3600));
+  } catch (err) {
+    /* the next refresh tries again */
+  }
+}
+$("powerRange").addEventListener("change", () => {
+  try { localStorage.setItem("batteryai-power-range", $("powerRange").value); } catch (e) {}
+  refreshPower();
+});
 $("analyze").addEventListener("click", async () => {
   $("analyze").disabled = true;
   $("analyze").textContent = "Predicting…";
