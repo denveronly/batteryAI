@@ -39,8 +39,9 @@ const SENSORS = SENSOR_GROUPS.flatMap((g) => g.rows);
 const NUMBER_FIELDS = ["record_interval_minutes", "history_days", "detail_days", "local_llm_threads", "prediction_margin_percent", "min_soc_percent",
   "max_soc_percent", "apply_threshold_percent", "charge_all_soc_percent",
   "outage_precharge_minutes", "outage_precharge_soc_percent", "solar_forecast_percent", "night_reserve_soc_percent",
-  "outage_shift_hours", "strict_outage_hours", "strict_min_soc_percent", "balance_soc_above", "pv_room_percent", "prediction_strictness"];
-const TEXT_FIELDS = ["battery_name", "notify_prefix", "claude_effort", "response_language", "extra_instructions", "tariff_currency", "program_time_marks", "prediction_engine", "openai_effort", "balance_time"];
+  "outage_shift_hours", "strict_outage_hours", "strict_min_soc_percent", "balance_soc_above", "pv_room_percent", "prediction_strictness",
+  "deye_hv_packs", "deye_hv_interval_seconds"];
+const TEXT_FIELDS = ["battery_name", "notify_prefix", "claude_effort", "response_language", "extra_instructions", "tariff_currency", "program_time_marks", "prediction_engine", "openai_effort", "balance_time", "deye_hv_entity"];
 const PRICE_FIELDS = ["battery_capacity_kwh"];
 
 const ENGINE_HELP = {
@@ -252,6 +253,29 @@ $("addBattery").addEventListener("click", () => {
   const name = last ? nextNumbered(last.name, prefix.toUpperCase()) : "BMS0";
   $("batteryRows").append(batteryRow({ name, prefix }));
   renumberBatteries();
+});
+
+// Deye HV batteries: read the pack registers once with the entity typed in (before saving).
+$("deyeHvTest").addEventListener("click", async () => {
+  const out = $("deyeHvResult");
+  const entity = field("deye_hv_entity").value.trim();
+  if (!entity) return showResult(out, "warn", "⚠ Enter an entity of the Solarman inverter first.");
+  showResult(out, "", "Reading the battery registers through the Solarman integration…");
+  try {
+    const r = await api("api/deye_hv/read", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entity, packs: Number(field("deye_hv_packs").value) || 0 }) });
+    const lines = (r.packs || []).map((p) => {
+      const v = p.values;
+      const show = (k, d = 1) => (v[k]?.ok ? `${fmt(v[k].value, d)} ${v[k].unit}` : "?");
+      const bad = Object.values(v).filter((x) => x.register !== null && !x.ok).length;
+      return el("div", {}, `Pack ${p.n}${p.serial ? ` (${p.serial})` : ""}: ${show("battery_voltage", 2)} · SOC ${show("battery_capacity_state_of_charge", 0)} · `
+        + `cells ${show("min_cell_voltage", 3)}–${show("max_cell_voltage", 3)} · SOH ${show("state_of_health", 0)}`
+        + (bad ? ` · ${bad} value(s) implausible – see the raw registers on the Battery health tab` : " · all values plausible"));
+    });
+    showResult(out, "ok", `✓ The inverter reports ${r.reported_packs} pack(s); read ${(r.packs || []).length}.`, ...lines);
+  } catch (err) {
+    showResult(out, "error", `✕ ${err.message}`);
+  }
 });
 
 // Suggestions for the appliance emoji field.

@@ -1156,7 +1156,66 @@ async function refreshBatteries() {
   const packs = data.batteries || [];
   $("bmsNotes").replaceChildren(...(packs.length ? [] : [el("div", { class: "banner" }, "Add your batteries in Settings → Batteries (a name and the BMS entity prefix, e.g. bms0).")]));
   $("bmsPacks").replaceChildren(...packs.map(bmsCard), ...(packs.length ? [bmsLog(data.events || [])] : []));
+  if (status?.deye_hv) refreshDeyeHv();
+  else $("deyeHvBox").replaceChildren();
   bmsTimer = setTimeout(refreshBatteries, 10000);
+}
+
+// Deye HV packs: the raw registers read from the inverter and how each was decoded, to check
+// them against the Solarman app (and to work out the right layout when a value is off).
+let deyeHvShown = 0;
+async function refreshDeyeHv(force = false) {
+  let d;
+  try {
+    d = force ? await api("api/deye_hv/read", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
+      : await api("api/deye_hv");
+  } catch (err) {
+    d = { ...(await api("api/deye_hv").catch(() => ({}))), error: err.message };
+  }
+  if (!force && d.time && d.time === deyeHvShown && $("deyeHvBox").children.length) return;
+  deyeHvShown = d.time || 0;
+  $("deyeHvBox").replaceChildren(deyeHvCard(d));
+}
+
+function deyeHvText(d) {
+  const lines = [`Deye HV registers ${d.time ? new Date(d.time * 1000).toISOString() : ""} · reported packs ${d.reported_packs}`];
+  lines.push("header " + (d.header || []).map((h) => `${h.register.toString(16).toUpperCase()}=${h.raw ?? "-"}`).join(" "));
+  for (const p of d.packs || []) {
+    lines.push(`pack ${p.n} ${p.serial || ""}`);
+    lines.push((p.registers || []).map((r) => `${r.offset}:${r.raw ?? "-"}`).join(" "));
+  }
+  return lines.join("\n");
+}
+
+function deyeHvCard(d) {
+  const read = el("button", { type: "button", class: "secondary small" }, "Read now");
+  read.addEventListener("click", () => { read.disabled = true; refreshDeyeHv(true); });
+  const copy = el("button", { type: "button", class: "secondary small" }, "Copy raw registers");
+  copy.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(deyeHvText(d)); copy.textContent = "Copied ✓"; }
+    catch (e) { copy.textContent = "Copy failed – select the text below"; }
+  });
+  const head = el("div", { class: "card-head" }, el("h2", {}, "Deye HV registers"),
+    el("span", { class: "muted" }, d.time ? `read ${fmtDateTime(d.time)} · inverter reports ${d.reported_packs} pack(s) · every ${d.interval} s` : "not read yet"),
+    read, copy);
+  const packs = (d.packs || []).map((p) => {
+    const bad = (p.registers || []).filter((r) => r.ok === false).length;
+    return bmsDetails(`deyehv:${p.n}`, [`Pack ${p.n}${p.serial ? ` · ${p.serial}` : ""}`,
+      el("span", { class: bad ? "bms-bad-text" : "muted" }, bad ? ` · ${bad} implausible value(s), not published` : " · all values plausible")],
+      el("div", { class: "table-wrap" }, el("table", { class: "bms-regs" },
+        el("thead", {}, el("tr", {}, ...["Register", "#", "Raw", "Signed", "Hex", "Field", "Value"].map((h) => el("th", {}, h)))),
+        el("tbody", {}, ...(p.registers || []).map((r) => el("tr", { class: r.ok === false ? "bad" : r.ok ? "good" : "" },
+          el("td", {}, `0x${r.register.toString(16).toUpperCase()}`), el("td", { class: "num" }, r.offset),
+          el("td", { class: "num" }, r.raw ?? "—"), el("td", { class: "num" }, r.signed ?? "—"),
+          el("td", { class: "num" }, r.raw === null ? "—" : r.raw.toString(16).toUpperCase().padStart(4, "0")),
+          el("td", {}, r.field || ""),
+          el("td", { class: "num" }, r.value === null || r.value === undefined ? "" : `${r.ok ? "✓" : "?"} ${fmt(r.value, 3)}`)))))));
+  });
+  return el("section", { class: "card" }, head,
+    d.error ? el("div", { class: "banner" }, `Last read failed: ${d.error}`) : null,
+    el("p", { class: "hint" }, "Values marked ? are outside what a LiFePO4 pack can show with the expected scale, so their sensors stay unknown. "
+      + "Compare with the Solarman app and send the raw registers (Copy) if a value is wrong – the layout can then be corrected."),
+    ...packs);
 }
 
 // Control: the chosen battery's BMS switches and number settings, locked until "Allow changes".
@@ -1424,6 +1483,10 @@ function bmsCard(b) {
     m.cycles && tile("Charging cycles", bmsNum(m.cycles, 0), ""),
     m.alarms_total && tinted(tile("BMS active alarms", bmsNum(m.alarms_total, 0), ""), m.alarms_total.value ? "eco-peak" : "eco-none"),
     m.cell_count && tile("Cells (BMS)", bmsNum(m.cell_count, 0), ""),
+    m.min_cell && tile("Lowest cell", bmsNum(m.min_cell, 3), m.min_cell.unit),
+    m.max_cell && tile("Highest cell", bmsNum(m.max_cell, 3), m.max_cell.unit),
+    m.soh && tile("SOH", bmsNum(m.soh, 0), m.soh.unit),
+    m.capacity && tile("Capacity", bmsNum(m.capacity, 1), m.capacity.unit),
   ].filter(Boolean);
 
   // Cell voltages: columns on a LiFePO4 scale (2.8 – 3.65 V); green in the normal range,

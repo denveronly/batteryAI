@@ -140,6 +140,11 @@ class Options:
     weather_entity: str = ""
     appliances: list[Appliance] = field(default_factory=list)
     batteries: list[BatteryBms] = field(default_factory=list)  # Battery health tab
+    # Deye HV batteries (BOS-G …) read from the inverter registers through the Solarman
+    # integration: any entity of the Solarman inverter device; empty = off. See deye_hv.py.
+    deye_hv_entity: str = ""
+    deye_hv_packs: int = 0  # 0 = the number the inverter reports
+    deye_hv_interval_seconds: int = 120
     pv_energy_sensor: str = ""
     # Battery energy discharged today (kWh counter, e.g. Deye "Daily battery discharge"),
     # for the Economy tab.
@@ -396,11 +401,14 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         notify_prefix=text("notify_prefix")[:40],
         outage_precharge_minutes=integer("outage_precharge_minutes", 5, 720),
         outage_precharge_soc_percent=integer("outage_precharge_soc_percent", 10, 100),
+        deye_hv_packs=integer("deye_hv_packs", 0, 16),
+        deye_hv_interval_seconds=integer("deye_hv_interval_seconds", 30, 3600),
     )
     if opts.min_soc_percent > opts.max_soc_percent:
         errors["min_soc_percent"] = "must not be higher than the maximum SOC"
     for key in SENSOR_KEYS:
         setattr(opts, key, entity(key, text(key)))
+    opts.deye_hv_entity = entity("deye_hv_entity", text("deye_hv_entity"))
 
     opts.program_time_marks = text("program_time_marks") or "start"
     if opts.program_time_marks not in ("end", "start"):

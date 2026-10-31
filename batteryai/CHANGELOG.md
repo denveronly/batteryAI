@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.63
+
+- Deye HV batteries (BOS-G, BOS-G Pro …) read by BatteryAI itself: for packs whose values in
+  the Solarman integration are wrong (0 V, SOH 3000 %, …), set any entity of the Solarman
+  inverter in Settings → Batteries. BatteryAI reads the pack registers through the
+  integration every 2 minutes, checks every value (trying other scales when the expected one
+  gives nonsense) and publishes its own sensors sensor.deye_hv1_… (voltage, current, power,
+  SOC, SOH, capacity, lowest/highest cell, cell delta, temperatures, cycles, BMS alarm/fault).
+- The HV packs appear on the Battery health tab with alarms, abnormal-data checks and the log;
+  pack drift compares them only with each other. A "Deye HV registers" card shows every raw
+  register next to its decoded value, with Read now and Copy raw registers.
+
 ## 0.4.62
 
 - Dashboard batteries, lower: one row "71 % · −587 W DCHG · 52.65 V" over the bar, smaller

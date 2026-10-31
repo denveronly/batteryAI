@@ -27,6 +27,7 @@ from analyzer import AnalysisError, analyze, build_input
 import balance
 import bms
 import control
+import deye_hv
 import local_fast
 import local_llm
 import notify
@@ -37,7 +38,7 @@ import openai_engine
 import backup
 from bill import BillRecorder, bill_report, reprice_month
 from collector import UNAVAILABLE, active_program, collect, has_data, outage_minutes, parse_hhmm, to_float, weather_details
-from config import DATA_DIR, Options, SettingsError, load_settings, parse_settings, save_settings
+from config import DATA_DIR, BatteryBms, Options, SettingsError, load_settings, parse_settings, save_settings
 from db import READING_FIELDS, Database, accuracy_report, economy_report, monthly_summary
 from ha import HAError, HomeAssistant, container_env
 from history import import_history
@@ -80,6 +81,7 @@ class BatteryAI:
         self.outage_duration: float | None = None
         self.emergency = False  # emergency outages in effect (emergency outage sensor)
         self._profile: tuple[float, dict[tuple[int, int], float]] = (0.0, {})
+        self.deye_hv = deye_hv.DeyeHvReader(ha)
 
     def spawn(self, coro: Any) -> asyncio.Task:
         task = asyncio.create_task(coro)
@@ -357,15 +359,48 @@ class BatteryAI:
                 _LOGGER.exception("Checking the battery BMS alarms failed")
             await asyncio.sleep(60)
 
+    def hv_batteries(self) -> list[Any]:
+        """The Deye HV packs read from the inverter registers, as extra Battery health entries."""
+        last = self.deye_hv.last
+        if not self.opts.deye_hv_entity or not last.get("packs"):
+            return []
+        return [BatteryBms(name=f"HV pack {p['n']}" + (f" · {p['serial']}" if p["serial"] else ""), prefix=p["prefix"])
+                for p in last["packs"]]
+
+    async def poll_deye_hv(self) -> dict[str, Any]:
+        try:
+            return await self.deye_hv.poll(self.opts.deye_hv_entity, self.opts.deye_hv_packs)
+        except HAError as err:
+            self.deye_hv.last = {**self.deye_hv.last, "enabled": True, "error": str(err), "error_time": time.time()}
+            raise
+
+    async def deye_hv_loop(self) -> None:
+        """Deye HV battery packs straight from the inverter registers (deye_hv.py)."""
+        if not self.opts.deye_hv_entity:
+            self.deye_hv.last = {"enabled": False}
+            return
+        logged = None
+        while True:
+            try:
+                await self.poll_deye_hv()
+                logged = None
+            except HAError as err:
+                if str(err) != logged:
+                    logged = str(err)
+                    _LOGGER.warning("Deye HV battery registers: %s", err)
+            except Exception:
+                _LOGGER.exception("Reading the Deye HV battery registers failed")
+            await asyncio.sleep(self.opts.deye_hv_interval_seconds)
+
     async def check_bms(self) -> None:
         """Battery health: notify when a BMS alarm turns on or clears, or a BMS goes offline."""
-        if not self.opts.batteries:
+        if not self.opts.batteries and not self.hv_batteries():
             return
         try:
             states = await self.ha.states()
         except HAError:
             return
-        packs = bms.report(self.opts, states)
+        packs = bms.report(self.opts, states, self.hv_batteries())
         previous = self.control.get("bms_state") or {}
         state, lines, events = bms.changes(previous, packs, time.time())
         if events:
@@ -403,6 +438,7 @@ class BatteryAI:
             asyncio.create_task(self.recorder_loop()),
             asyncio.create_task(self.scheduler_loop()),
             asyncio.create_task(self.outage_loop()),
+            asyncio.create_task(self.deye_hv_loop()),
         ]
 
     def stop_loops(self) -> None:
@@ -866,7 +902,8 @@ async def status(request: web.Request) -> web.Response:
                 for a in opts.appliances
                 if a.entity
             ],
-            "batteries_count": len(opts.batteries),
+            "deye_hv": bool(opts.deye_hv_entity),
+            "batteries_count": len(opts.batteries) + max(len(app.hv_batteries()), 1 if opts.deye_hv_entity else 0),
             "weather": app.last_snapshot.get("weather") if app.last_snapshot else None,
             "control": {
                 "mode": app.control["mode"],
@@ -1191,11 +1228,45 @@ async def batteries(request: web.Request) -> web.Response:
             "prefix": prefix, "found": found["found"], "cells": found["summary"]["cells"],
             "main": sorted(found["main"]), "alarms": len(found["alarms"]), "temperatures": len(found["temperatures"]),
         })
-    packs = bms.report(app.opts, states)
+    packs = bms.report(app.opts, states, app.hv_batteries())
     for pack in packs:
         pack["issues"] = bms.issues(pack, packs)
     events = await asyncio.to_thread(app.db.bms_events, 200)
     return web.json_response({"batteries": packs, "events": events})
+
+
+@routes.get("/api/deye_hv")
+async def deye_hv_view(request: web.Request) -> web.Response:
+    """Deye HV packs: the raw registers and how they were decoded (Battery health tab)."""
+    app = _app(request)
+    return web.json_response({**app.deye_hv.last, "configured": bool(app.opts.deye_hv_entity),
+                              "interval": app.opts.deye_hv_interval_seconds})
+
+
+@routes.post("/api/deye_hv/read")
+async def deye_hv_read(request: web.Request) -> web.Response:
+    """Read the Deye HV registers now. Body {"entity": …, "packs": …} tests an entity from
+    Settings before it is saved."""
+    app = _app(request)
+    try:
+        body = await request.json()
+    except (ValueError, json.JSONDecodeError):
+        body = {}
+    entity = str(body.get("entity") or app.opts.deye_hv_entity or "").strip()
+    if not entity:
+        return web.json_response({"error": "Set the Solarman inverter entity in Settings → Batteries first."}, status=400)
+    try:
+        packs = int(body.get("packs", app.opts.deye_hv_packs) or 0)
+    except (TypeError, ValueError):
+        packs = 0
+    try:
+        if entity == app.opts.deye_hv_entity and "packs" not in body:
+            result = await app.poll_deye_hv()
+        else:
+            result = await deye_hv.DeyeHvReader(app.ha).poll(entity, packs)
+    except HAError as err:
+        return web.json_response({"error": str(err)}, status=502)
+    return web.json_response(result)
 
 
 @routes.get(r"/api/batteries/{prefix}/controls")

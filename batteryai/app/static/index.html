@@ -256,6 +256,7 @@
     <div id="bmsOverview">
       <div id="bmsNotes"></div>
       <div id="bmsPacks"></div>
+      <div id="deyeHvBox"></div>
       <p class="hint">Live values from each battery's BMS in Home Assistant, refreshed every 10 seconds. Batteries and their entity prefixes are set in Settings → Batteries.</p>
     </div>
     <div id="bmsControl" hidden>
@@ -553,6 +554,26 @@
         <div class="test-row">
           <button type="button" class="secondary" id="addBattery">+ Add battery</button>
         </div>
+        <h3>Deye HV batteries (BOS-G …) from the inverter registers</h3>
+        <p class="hint">For HV batteries whose per-pack values in the Solarman integration are wrong: BatteryAI reads the pack registers itself through the integration (solarman.read_holding_registers), checks each value and publishes its own sensors <b>sensor.deye_hv1_…</b>, <b>deye_hv2_…</b> – they appear on the Battery health tab with the raw registers. Leave the entity empty to turn this off.</p>
+        <div class="form-grid">
+          <label>Solarman inverter entity
+            <input type="text" name="deye_hv_entity" list="entityList" placeholder="sensor.deye_battery_soc" autocomplete="off" spellcheck="false">
+            <span class="hint">Any entity of the Deye inverter's Solarman device – it identifies the device.</span>
+          </label>
+          <label>Number of packs
+            <input type="number" name="deye_hv_packs" min="0" max="16" step="1">
+            <span class="hint">0 = the number the inverter reports (register 0x2712).</span>
+          </label>
+          <label>Read every (seconds)
+            <input type="number" name="deye_hv_interval_seconds" min="30" max="3600" step="10">
+            <span class="hint">Each read is a few Modbus requests over the Solarman logger.</span>
+          </label>
+        </div>
+        <div class="test-row">
+          <button type="button" class="secondary" id="deyeHvTest">Read the registers now</button>
+        </div>
+        <div class="result" id="deyeHvResult"></div>
       </section>
 
       <section class="card">

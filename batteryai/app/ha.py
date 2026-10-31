@@ -86,6 +86,7 @@ class HomeAssistant:
         method: str = "GET",
         json_body: Any = None,
         timeout: aiohttp.ClientTimeout | None = None,
+        text: bool = False,
     ) -> Any:
         """Calls an API path; raises HAError with a readable reason on failure."""
         if not self.token:
@@ -108,7 +109,7 @@ class HomeAssistant:
                     body = (await resp.text())[:200]
                     self.last_error = f"Home Assistant returned HTTP {resp.status}: {body}"
                     raise HAError("http", self.last_error)
-                data = await resp.json(content_type=None)
+                data = await resp.text() if text else await resp.json(content_type=None)
         except (aiohttp.ClientError, asyncio.TimeoutError) as err:
             self.last_error = f"Cannot reach Home Assistant at {self._api}: {err or type(err).__name__}"
             raise HAError("connection", self.last_error) from err
@@ -188,6 +189,18 @@ class HomeAssistant:
 
     async def call_service(self, domain: str, service: str, data: dict[str, Any]) -> Any:
         return await self.request(f"/services/{domain}/{service}", method="POST", json_body=data)
+
+    async def service_response(self, domain: str, service: str, data: dict[str, Any]) -> Any:
+        """Calls an action that returns data (HA 2024.8+) and returns that data."""
+        response = await self.request(f"/services/{domain}/{service}?return_response", method="POST", json_body=data)
+        return response.get("service_response") if isinstance(response, dict) else None
+
+    async def render_template(self, template: str) -> str:
+        return await self.request("/template", method="POST", json_body={"template": template}, text=True)
+
+    async def set_state(self, entity_id: str, state: str, attributes: dict[str, Any]) -> None:
+        """Creates or updates an entity state (shown in Home Assistant until it restarts)."""
+        await self.request(f"/states/{entity_id}", method="POST", json_body={"state": state, "attributes": attributes})
 
     async def states(self) -> list[dict[str, Any]]:
         return await self.request("/states")

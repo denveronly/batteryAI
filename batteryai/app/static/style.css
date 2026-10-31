@@ -583,3 +583,10 @@ label { align-content: start; }
 .bms-row-volt { text-align: right; }
 .bms-row-power.p1 { color: #4caf50; } .bms-row-power.p2 { color: #e0c341; } .bms-row-power.p3 { color: #c08a55; } .bms-row-power.p4 { color: #e2615a; } .bms-row-power.idle { color: var(--muted); }
 #dashBatteryLines .bms-pbar { height: 10px; }
+
+/* Deye HV raw registers */
+.bms-regs { font-size: 0.85em; width: 100%; }
+.bms-regs td, .bms-regs th { padding: 2px 8px; white-space: nowrap; }
+.bms-regs tr.bad td { background: rgba(220, 60, 60, 0.12); }
+.bms-regs tr.good td:last-child { color: var(--ok, #2e9d5b); }
+.table-wrap { overflow-x: auto; }

@@ -30,6 +30,11 @@ MAIN = {
     "cycles": "charging_cycles",
     "cell_count": "cell_count_real",
     "alarms_total": "battery_total_alarms_active",
+    # Deye HV packs (deye_hv.py) report only the highest and lowest cell, SOH and capacity.
+    "max_cell": "max_cell_voltage",
+    "min_cell": "min_cell_voltage",
+    "soh": "state_of_health",
+    "capacity": "capacity",
 }
 # Readable names for the JK BMS alarm codes (binary_sensor.<prefix>_alarm_<code>).
 ALARM_NAMES = {
@@ -154,8 +159,13 @@ def pack(prefix: str, states: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def report(opts: Options, states: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [{"name": b.name, "prefix": b.prefix, **pack(b.prefix, states)} for b in opts.batteries]
+def report(opts: Options, states: list[dict[str, Any]], extra: list[Any] | None = None) -> list[dict[str, Any]]:
+    """Every configured battery, then the Deye HV packs (group "deye_hv")."""
+    listed = {b.prefix for b in opts.batteries}
+    out = [{"name": b.name, "prefix": b.prefix, "group": "bms", **pack(b.prefix, states)} for b in opts.batteries]
+    out += [{"name": b.name, "prefix": b.prefix, "group": "deye_hv", **pack(b.prefix, states)}
+            for b in extra or [] if b.prefix not in listed]
+    return out
 
 
 # Abnormal data (LiFePO4 limits): logged when it starts and when it ends.
@@ -193,6 +203,9 @@ def issues(b: dict[str, Any], packs: list[dict[str, Any]] | None = None) -> dict
     found: dict[str, str] = {}
     volts = [_volts(c.get("voltage")) for c in b.get("cells") or []]
     volts = [v for v in volts if v is not None]
+    main_now = b.get("main") or {}
+    if len(volts) < 2 and (hi := _volts(main_now.get("max_cell"))) and (lo := _volts(main_now.get("min_cell"))):
+        volts = [lo, hi]  # a BMS that only reports its highest and lowest cell
     if len(volts) >= 2 and max(volts) - min(volts) > CELL_RANGE_V:
         found["cell_range"] = (f"Cells {min(volts):.3f}–{max(volts):.3f} V apart by {(max(volts) - min(volts)) * 1000:.0f} mV "
                                f"(above {CELL_RANGE_V * 1000:.0f} mV)")
@@ -204,7 +217,8 @@ def issues(b: dict[str, Any], packs: list[dict[str, Any]] | None = None) -> dict
         if hot["value"] - cold["value"] > TEMP_SPREAD:
             found["temp_spread"] = (f"Temperatures {hot['value'] - cold['value']:.1f} °C apart ({cold['name']} {cold['value']:g}, "
                                     f"{hot['name']} {hot['value']:g}; above {TEMP_SPREAD:g} °C)")
-    others = [o for o in packs or [] if o is not b and o.get("found")]
+    # Drift only against packs of the same kind (JK BMS packs vs Deye HV packs).
+    others = [o for o in packs or [] if o is not b and o.get("found") and o.get("group") == b.get("group")]
     if others:
         soc = ((b.get("main") or {}).get("soc") or {}).get("value")
         median = _median([v for o in others if (v := ((o.get("main") or {}).get("soc") or {}).get("value")) is not None])
@@ -222,6 +236,13 @@ def issues(b: dict[str, Any], packs: list[dict[str, Any]] | None = None) -> dict
         found["delta_high"] = f"Cell delta {delta * 1000:.0f} mV (above {DELTA_HIGH_V * 1000:.0f} mV)"
     resistances = sorted(c["resistance"]["value"] for c in b.get("cells") or [] if c.get("resistance") and c["resistance"]["value"])
     median = resistances[len(resistances) // 2] if resistances else None
+    if not b.get("cells"):
+        for key, label in (("min_cell", "Lowest"), ("max_cell", "Highest")):
+            v = _volts(main.get(key))
+            if v is not None and v < CELL_LOW_V:
+                found[f"cell_low_{key}"] = f"{label} cell at {v:.3f} V (below {CELL_LOW_V:.2f} V)"
+            elif v is not None and v > CELL_HIGH_V:
+                found[f"cell_high_{key}"] = f"{label} cell at {v:.3f} V (above {CELL_HIGH_V:.2f} V)"
     for cell in b.get("cells") or []:
         v = _volts(cell.get("voltage"))
         if v is not None and v < CELL_LOW_V:

@@ -234,6 +234,23 @@ changes* is ticked; each change asks for confirmation, must be within the entity
 recorded in the Battery log. These are cell protection settings – change them only when you know
 the right values for your cells.
 
+### Deye HV batteries (BOS-G …)
+
+The Solarman integration's per-pack sensors are wrong for some Deye HV batteries (BOS-G Pro on
+SG01HP3: 0 V, SOH 3000 %, max cell 0 V – ha-solarman issue #1205). BatteryAI can read the
+packs itself: Settings → Batteries → **Solarman inverter entity** (any entity of the inverter's
+Solarman device), the number of packs (0 = what register 0x2712 reports) and how often to read.
+It calls `solarman.read_holding_registers` for 0x2710 and the 38-register block of each pack
+(0x2730, 0x2756, …), checks every value against LiFePO4 limits – trying other scales when the
+expected one is implausible – and publishes `sensor.deye_hv<N>_battery_voltage`, `_battery_current`,
+`_battery_power`, `_battery_capacity_state_of_charge`, `_state_of_health`, `_capacity`,
+`_min_cell_voltage`, `_max_cell_voltage`, `_cell_delta_voltage`, the temperatures,
+`_charging_cycles` and `binary_sensor.deye_hv<N>_alarm_bms` / `_alarm_fault`. A value that stays
+implausible is published as *unknown*. The packs appear on the Battery health tab (alarms,
+abnormal data, log) and the **Deye HV registers** card lists every raw register with its decoded
+value; *Copy raw registers* gives a text to compare with the Solarman app when a value is off.
+These sensors live until Home Assistant restarts and are written again on the next read.
+
 ## Prediction strictness
 
 Settings → Prediction tuning → **Prediction strictness**, from −10 (relaxed) to +10 (strict);
