@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.70
+
+- Settings → HV battery → Read registers shows the error when the read fails (it showed
+  "✓ … undefined stack(s)").
+
 ## 0.4.69
 
 - HV battery: registers are read in requests of at most 42 and each is retried (3 tries) when

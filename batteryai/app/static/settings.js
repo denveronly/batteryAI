@@ -233,6 +233,7 @@ function batteryRow(battery = {}) {
       try {
         const r = await api("api/deye_hv/read", { method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ entity: hvEntity.value.trim(), packs: Number(hvPacks.value) || 0, prefix: prefix.value.trim() || "deye_hv", name: name.value.trim() }) });
+        if (r.error || !Array.isArray(r.packs)) throw new Error(r.error || "no answer from the add-on");
         const lines = (r.packs || []).map((p) => {
           const v = p.values;
           const val = (key, d = 1) => (v[key]?.ok ? `${fmt(v[key].value, d)} ${v[key].unit}` : "?");
