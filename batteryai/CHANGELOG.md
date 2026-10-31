@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.69
+
+- HV battery: registers are read in requests of at most 42 and each is retried (3 tries) when
+  Home Assistant gives up waiting for the Solarman logger ("HTTP 400 … a long duration of
+  time will be required"); the pack count is one register instead of 32.
+
 ## 0.4.68
 
 - HV battery (BOS-G) decoded with the documented Deye HV map (decimal 10032–10113, verified on

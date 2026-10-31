@@ -24,6 +24,7 @@ the Battery health tab so the layout can be checked.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass
@@ -40,7 +41,8 @@ PACK_BASE = 0x2730
 PACK_STRIDE = 5000  # the next battery bank
 RECORD = 82        # registers of one stack record (10032–10113)
 MAX_PACKS = 16
-MAX_READ = 125  # registers per Modbus request
+MAX_READ = 42  # registers per request: Home Assistant waits only ~10 s for an action's answer
+READ_TRIES = 3
 PREFIX = "deye_hv"
 # What the BMS reports to the inverter (CAN), inverter registers 0x00D2–0x00DF: limits and the
 # battery alarm / fault flags (any bit set = a problem, as the Solarman integration reads them).
@@ -219,20 +221,32 @@ class DeyeHvReader:
         return device
 
     async def _read(self, device: str, address: int, count: int) -> list[int | None]:
-        response = await self.ha.service_response(
-            "solarman", "read_holding_registers", {"device": device, "address": address, "count": count})
-        data = response if isinstance(response, dict) else {}
+        """Registers in requests of at most MAX_READ, each retried when Home Assistant gives up
+        waiting for the Solarman logger (HTTP 400 "… a long duration of time …") or it times out."""
         out: list[int | None] = []
-        for reg in range(address, address + count):
-            raw = data.get(str(reg), data.get(reg))
-            out.append(int(raw) if isinstance(raw, (int, float)) else None)
+        for start in range(address, address + count, MAX_READ):
+            n = min(MAX_READ, address + count - start)
+            for attempt in range(1, READ_TRIES + 1):
+                try:
+                    response = await self.ha.service_response(
+                        "solarman", "read_holding_registers", {"device": device, "address": start, "count": n})
+                    break
+                except HAError as err:
+                    if attempt == READ_TRIES or err.kind == "auth":
+                        raise
+                    _LOGGER.debug("Registers 0x%04X×%d, try %d: %s", start, n, attempt, err)
+                    await asyncio.sleep(3 * attempt)  # let the logger finish what it is doing
+            data = response if isinstance(response, dict) else {}
+            for reg in range(start, start + n):
+                raw = data.get(str(reg), data.get(reg))
+                out.append(int(raw) if isinstance(raw, (int, float)) else None)
         return out
 
     async def poll(self, entity_id: str, packs_setting: int) -> dict[str, Any]:
         """Reads all packs, publishes their sensors and returns what was read."""
         device = await self._device(entity_id)
-        header = await self._read(device, HEADER, HEADER_COUNT)
-        reported = header[PACK_COUNT_REG - HEADER]
+        header = await self._read(device, PACK_COUNT_REG, 1)
+        reported = header[0]
         count = packs_setting or (reported if reported and 0 < reported <= MAX_PACKS else 0)
         if not count:
             raise HAError("http", f"the inverter reports {reported} battery packs (register 0x2712); "
@@ -265,7 +279,7 @@ class DeyeHvReader:
         self.last = {
             "enabled": True, "time": time.time(), "entity": entity_id, "prefix": self.prefix, "name": self.name, "device_id": device,
             "reported_packs": reported, "packs": packs,
-            "header": [{"register": HEADER + i, "raw": raw} for i, raw in enumerate(header)], "error": None,
+            "header": [{"register": PACK_COUNT_REG, "raw": reported}], "error": None,
         }
         return self.last
 
