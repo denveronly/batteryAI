@@ -590,3 +590,7 @@ label { align-content: start; }
 .bms-regs tr.bad td { background: rgba(220, 60, 60, 0.12); }
 .bms-regs tr.good td:last-child { color: var(--ok, #2e9d5b); }
 .table-wrap { overflow-x: auto; }
+.battery-fields { grid-template-columns: minmax(150px, 0.8fr) minmax(140px, 1fr) minmax(160px, 1.2fr) auto; }
+.battery-kind-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 12px; margin-top: 8px; }
+.battery-row > .hint { margin-top: 6px; }
+@media (max-width: 760px) { .battery-fields { grid-template-columns: 1fr; } }

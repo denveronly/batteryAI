@@ -60,14 +60,27 @@ class Appliance:
     icon: str = ""  # optional emoji shown before the name, e.g. 🚗
 
 
+BATTERY_KINDS = ("diy", "lv", "hv")
+# Entities of a low-voltage battery (picked one by one, e.g. the Solarman "Battery BMS …" sensors).
+LV_ENTITIES = ("soc", "voltage", "current", "power", "temperature", "soh", "cycles")
+
+
 @dataclass
 class BatteryBms:
-    """A battery pack watched on the Battery health tab: its BMS entities are found in Home
-    Assistant by their prefix (sensor.<prefix>_battery_voltage, sensor.<prefix>_cell_voltage_01,
-    binary_sensor.<prefix>_alarm_*, …)."""
+    """A battery on the Battery health tab, by kind:
+    diy – a DIY pack with its own BMS (JK BMS …): entities found by their prefix
+          (sensor.<prefix>_battery_voltage, sensor.<prefix>_cell_voltage_01, binary_sensor.<prefix>_alarm_*, …)
+    lv  – a low-voltage battery: its entities picked one by one (entities: soc, voltage, …)
+    hv  – a Deye HV battery (BOS-G …): packs read from the inverter registers through the
+          Solarman integration (entity = any entity of the inverter device); published as
+          sensor.<prefix>1_…, <prefix>2_… (deye_hv.py)."""
 
     name: str
-    prefix: str
+    prefix: str = ""
+    kind: str = "diy"
+    entities: dict[str, str] = field(default_factory=dict)  # lv
+    entity: str = ""  # hv: an entity of the Solarman inverter device
+    packs: int = 0    # hv: 0 = the number the inverter reports
 
 
 @dataclass
@@ -140,10 +153,7 @@ class Options:
     weather_entity: str = ""
     appliances: list[Appliance] = field(default_factory=list)
     batteries: list[BatteryBms] = field(default_factory=list)  # Battery health tab
-    # Deye HV batteries (BOS-G …) read from the inverter registers through the Solarman
-    # integration: any entity of the Solarman inverter device; empty = off. See deye_hv.py.
-    deye_hv_entity: str = ""
-    deye_hv_packs: int = 0  # 0 = the number the inverter reports
+    # How often HV batteries (kind "hv") are read from the inverter registers.
     deye_hv_interval_seconds: int = 120
     pv_energy_sensor: str = ""
     # Battery energy discharged today (kWh counter, e.g. Deye "Daily battery discharge"),
@@ -401,14 +411,12 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         notify_prefix=text("notify_prefix")[:40],
         outage_precharge_minutes=integer("outage_precharge_minutes", 5, 720),
         outage_precharge_soc_percent=integer("outage_precharge_soc_percent", 10, 100),
-        deye_hv_packs=integer("deye_hv_packs", 0, 16),
         deye_hv_interval_seconds=integer("deye_hv_interval_seconds", 30, 3600),
     )
     if opts.min_soc_percent > opts.max_soc_percent:
         errors["min_soc_percent"] = "must not be higher than the maximum SOC"
     for key in SENSOR_KEYS:
         setattr(opts, key, entity(key, text(key)))
-    opts.deye_hv_entity = entity("deye_hv_entity", text("deye_hv_entity"))
 
     opts.program_time_marks = text("program_time_marks") or "start"
     if opts.program_time_marks not in ("end", "start"):
@@ -550,17 +558,62 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
     packs = raw.get("batteries")
     if packs is None:
         packs = [asdict(b) for b in base.batteries]
+    packs = [p for p in packs if isinstance(p, dict)] if isinstance(packs, list) else []
+    # 0.4.63 had one HV battery in its own settings (deye_hv_entity / deye_hv_packs).
+    old_hv = str(raw.get("deye_hv_entity") or "").strip()
+    if old_hv and not any(p.get("kind") == "hv" for p in packs):
+        packs.append({"kind": "hv", "name": "HV battery", "prefix": "deye_hv", "entity": old_hv,
+                      "packs": raw.get("deye_hv_packs") or 0})
     opts.batteries = []
-    for index, item in enumerate(packs[:MAX_BATTERIES] if isinstance(packs, list) else []):
-        if not isinstance(item, dict):
-            continue
+    for index, item in enumerate(packs[:MAX_BATTERIES]):
+        kind = str(item.get("kind") or "diy").strip().lower()
+        if kind not in BATTERY_KINDS:
+            kind = "diy"
         name = str(item.get("name") or "").strip()[:40]
         prefix = str(item.get("prefix") or "").strip().lower().removeprefix("sensor.").rstrip("_")
+        if kind == "lv":
+            given = item.get("entities") if isinstance(item.get("entities"), dict) else {}
+            ents = {k: entity(f"batteries.{index}.entities.{k}", str(given.get(k) or "").strip()) for k in LV_ENTITIES}
+            ents = {k: v for k, v in ents.items() if v}
+            if not name and not ents:
+                continue
+            if not ents:
+                errors[f"batteries.{index}.entities.soc"] = "pick at least one entity (SOC, voltage, …)"
+            # An internal prefix keeps the battery's log and alarms apart from the others.
+            prefix = prefix if BMS_PREFIX_RE.match(prefix) else f"lv{index + 1}"
+            opts.batteries.append(BatteryBms(name=name or "Battery", prefix=prefix, kind="lv", entities=ents))
+            continue
+        if kind == "hv":
+            hv_entity = entity(f"batteries.{index}.entity", str(item.get("entity") or "").strip())
+            if not name and not hv_entity:
+                continue
+            if not hv_entity:
+                errors[f"batteries.{index}.entity"] = "an entity of the Deye inverter's Solarman device"
+            prefix = prefix or "deye_hv"
+            if not BMS_PREFIX_RE.match(prefix):
+                errors[f"batteries.{index}.prefix"] = "sensor prefix, e.g. deye_hv (letters, digits, _)"
+            try:
+                count = int(item.get("packs") or 0)
+            except (TypeError, ValueError):
+                count = -1
+            if not 0 <= count <= 16:
+                errors[f"batteries.{index}.packs"] = "0 (as reported) to 16"
+                count = 0
+            opts.batteries.append(BatteryBms(name=name or "HV battery", prefix=prefix, kind="hv",
+                                             entity=hv_entity, packs=count))
+            continue
         if not name and not prefix:
             continue  # an empty row
         if not BMS_PREFIX_RE.match(prefix):
             errors[f"batteries.{index}.prefix"] = "the entity prefix, e.g. bms0 (letters, digits, _)"
         opts.batteries.append(BatteryBms(name=name or prefix, prefix=prefix))
+    prefixes = [b.prefix for b in opts.batteries]
+    for index, b in enumerate(opts.batteries):
+        if prefixes.count(b.prefix) > 1:
+            errors[f"batteries.{index}.prefix"] = f"{b.prefix} is used by another battery"
+        elif b.kind != "hv" and any(h.kind == "hv" and re.fullmatch(re.escape(h.prefix) + r"\d+", b.prefix)
+                                    for h in opts.batteries):
+            errors[f"batteries.{index}.prefix"] = f"{b.prefix} is taken by the packs of an HV battery"
 
     services = raw.get("notify_services", base.notify_services) or []
     if isinstance(services, str):

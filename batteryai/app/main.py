@@ -81,7 +81,7 @@ class BatteryAI:
         self.outage_duration: float | None = None
         self.emergency = False  # emergency outages in effect (emergency outage sensor)
         self._profile: tuple[float, dict[tuple[int, int], float]] = (0.0, {})
-        self.deye_hv = deye_hv.DeyeHvReader(ha)
+        self.deye_hv: dict[str, deye_hv.DeyeHvReader] = {}  # HV battery prefix → reader
 
     def spawn(self, coro: Any) -> asyncio.Task:
         task = asyncio.create_task(coro)
@@ -359,42 +359,58 @@ class BatteryAI:
                 _LOGGER.exception("Checking the battery BMS alarms failed")
             await asyncio.sleep(60)
 
-    def hv_batteries(self) -> list[Any]:
-        """The Deye HV packs read from the inverter registers, as extra Battery health entries."""
-        last = self.deye_hv.last
-        if not self.opts.deye_hv_entity or not last.get("packs"):
-            return []
-        return [BatteryBms(name=f"HV pack {p['n']}" + (f" · {p['serial']}" if p["serial"] else ""), prefix=p["prefix"])
-                for p in last["packs"]]
+    def hv_reader(self, battery: BatteryBms) -> deye_hv.DeyeHvReader:
+        """One register reader per HV battery (kept while its prefix stays the same)."""
+        reader = self.deye_hv.get(battery.prefix)
+        if reader is None:
+            reader = self.deye_hv[battery.prefix] = deye_hv.DeyeHvReader(self.ha, battery.prefix, battery.name)
+        reader.name = battery.name
+        return reader
 
-    async def poll_deye_hv(self) -> dict[str, Any]:
+    def hv_batteries(self) -> list[dict[str, Any]]:
+        """The packs of every HV battery read from the inverter registers (Battery health entries)."""
+        out = []
+        for b in self.opts.batteries:
+            if b.kind != "hv":
+                continue
+            for p in (self.deye_hv.get(b.prefix).last.get("packs") or []) if b.prefix in self.deye_hv else []:
+                out.append({"name": f"{b.name} · pack {p['n']}" + (f" · {p['serial']}" if p["serial"] else ""),
+                            "prefix": p["prefix"], "battery": b.prefix})
+        return out
+
+    async def poll_hv(self, battery: BatteryBms) -> dict[str, Any]:
+        reader = self.hv_reader(battery)
         try:
-            return await self.deye_hv.poll(self.opts.deye_hv_entity, self.opts.deye_hv_packs)
+            return await reader.poll(battery.entity, battery.packs)
         except HAError as err:
-            self.deye_hv.last = {**self.deye_hv.last, "enabled": True, "error": str(err), "error_time": time.time()}
+            reader.last = {**reader.last, "enabled": True, "prefix": battery.prefix, "name": battery.name,
+                           "error": str(err), "error_time": time.time()}
             raise
 
     async def deye_hv_loop(self) -> None:
-        """Deye HV battery packs straight from the inverter registers (deye_hv.py)."""
-        if not self.opts.deye_hv_entity:
-            self.deye_hv.last = {"enabled": False}
+        """HV battery packs straight from the inverter registers (deye_hv.py)."""
+        hv = [b for b in self.opts.batteries if b.kind == "hv"]
+        for prefix in [p for p in self.deye_hv if p not in {b.prefix for b in hv}]:
+            del self.deye_hv[prefix]  # a removed or renamed HV battery
+        if not hv:
             return
-        logged = None
+        logged: dict[str, str | None] = {}
         while True:
-            try:
-                await self.poll_deye_hv()
-                logged = None
-            except HAError as err:
-                if str(err) != logged:
-                    logged = str(err)
-                    _LOGGER.warning("Deye HV battery registers: %s", err)
-            except Exception:
-                _LOGGER.exception("Reading the Deye HV battery registers failed")
+            for b in hv:
+                try:
+                    await self.poll_hv(b)
+                    logged[b.prefix] = None
+                except HAError as err:
+                    if str(err) != logged.get(b.prefix):
+                        logged[b.prefix] = str(err)
+                        _LOGGER.warning("%s (HV battery registers): %s", b.name, err)
+                except Exception:
+                    _LOGGER.exception("Reading the HV battery registers of %s failed", b.name)
             await asyncio.sleep(self.opts.deye_hv_interval_seconds)
 
     async def check_bms(self) -> None:
         """Battery health: notify when a BMS alarm turns on or clears, or a BMS goes offline."""
-        if not self.opts.batteries and not self.hv_batteries():
+        if not self.opts.batteries:
             return
         try:
             states = await self.ha.states()
@@ -902,8 +918,8 @@ async def status(request: web.Request) -> web.Response:
                 for a in opts.appliances
                 if a.entity
             ],
-            "deye_hv": bool(opts.deye_hv_entity),
-            "batteries_count": len(opts.batteries) + max(len(app.hv_batteries()), 1 if opts.deye_hv_entity else 0),
+            "deye_hv": any(b.kind == "hv" for b in opts.batteries),
+            "batteries_count": len(opts.batteries),
             "weather": app.last_snapshot.get("weather") if app.last_snapshot else None,
             "control": {
                 "mode": app.control["mode"],
@@ -1235,38 +1251,60 @@ async def batteries(request: web.Request) -> web.Response:
     return web.json_response({"batteries": packs, "events": events})
 
 
+@routes.post("/api/batteries/test_lv")
+async def battery_test_lv(request: web.Request) -> web.Response:
+    """Settings → Batteries, low-voltage battery: the current value of each picked entity."""
+    app = _app(request)
+    body = await request.json()
+    entities = {k: str(v).strip() for k, v in (body.get("entities") or {}).items() if str(v or "").strip()}
+    try:
+        states = await app.ha.states()
+    except HAError as err:
+        return web.json_response({"error": str(err)}, status=502)
+    found = bms.pack_entities(entities, states)
+    values = {**found["main"], **({"temperature": found["temperatures"][0]} if found["temperatures"] else {})}
+    return web.json_response({"values": values, "missing": found["missing"]})
+
+
 @routes.get("/api/deye_hv")
 async def deye_hv_view(request: web.Request) -> web.Response:
-    """Deye HV packs: the raw registers and how they were decoded (Battery health tab)."""
+    """HV batteries: the raw registers of every pack and how they were decoded."""
     app = _app(request)
-    return web.json_response({**app.deye_hv.last, "configured": bool(app.opts.deye_hv_entity),
-                              "interval": app.opts.deye_hv_interval_seconds})
+    out = []
+    for b in app.opts.batteries:
+        if b.kind == "hv":
+            last = app.deye_hv[b.prefix].last if b.prefix in app.deye_hv else {}
+            out.append({**last, "prefix": b.prefix, "name": b.name, "interval": app.opts.deye_hv_interval_seconds})
+    return web.json_response({"batteries": out})
 
 
 @routes.post("/api/deye_hv/read")
 async def deye_hv_read(request: web.Request) -> web.Response:
-    """Read the Deye HV registers now. Body {"entity": …, "packs": …} tests an entity from
-    Settings before it is saved."""
+    """Reads an HV battery's registers now: {"prefix": …} a saved one, or {"entity", "packs",
+    "prefix", "name"} to test a row in Settings before it is saved."""
     app = _app(request)
     try:
         body = await request.json()
     except (ValueError, json.JSONDecodeError):
         body = {}
-    entity = str(body.get("entity") or app.opts.deye_hv_entity or "").strip()
-    if not entity:
-        return web.json_response({"error": "Set the Solarman inverter entity in Settings → Batteries first."}, status=400)
+    saved = next((b for b in app.opts.batteries if b.kind == "hv" and b.prefix == body.get("prefix")), None)
     try:
-        packs = int(body.get("packs", app.opts.deye_hv_packs) or 0)
-    except (TypeError, ValueError):
-        packs = 0
-    try:
-        if entity == app.opts.deye_hv_entity and "packs" not in body:
-            result = await app.poll_deye_hv()
-        else:
-            result = await deye_hv.DeyeHvReader(app.ha).poll(entity, packs)
+        if saved and not body.get("entity"):
+            return web.json_response(await app.poll_hv(saved))
+        entity = str(body.get("entity") or "").strip()
+        if not entity:
+            return web.json_response({"error": "Enter an entity of the Deye inverter's Solarman device."}, status=400)
+        try:
+            packs = max(0, min(16, int(body.get("packs") or 0)))
+        except (TypeError, ValueError):
+            packs = 0
+        prefix = str(body.get("prefix") or "deye_hv").strip().lower() or "deye_hv"
+        if saved and saved.entity == entity and saved.packs == packs:
+            return web.json_response(await app.poll_hv(saved))
+        reader = deye_hv.DeyeHvReader(app.ha, prefix, str(body.get("name") or "HV battery")[:40])
+        return web.json_response(await reader.poll(entity, packs))
     except HAError as err:
         return web.json_response({"error": str(err)}, status=502)
-    return web.json_response(result)
 
 
 @routes.get(r"/api/batteries/{prefix}/controls")
@@ -1274,7 +1312,7 @@ async def battery_controls(request: web.Request) -> web.Response:
     """The BMS's switches and number settings of a configured battery."""
     app = _app(request)
     prefix = request.match_info["prefix"]
-    if prefix not in {b.prefix for b in app.opts.batteries}:
+    if prefix not in {b.prefix for b in app.opts.batteries if b.kind == "diy"}:
         raise web.HTTPNotFound()
     try:
         states = await app.ha.states()
@@ -1290,7 +1328,7 @@ async def battery_control(request: web.Request) -> web.Response:
     min/max. Every change goes to the battery log."""
     app = _app(request)
     prefix = request.match_info["prefix"]
-    battery = next((b for b in app.opts.batteries if b.prefix == prefix), None)
+    battery = next((b for b in app.opts.batteries if b.prefix == prefix and b.kind == "diy"), None)
     if battery is None:
         raise web.HTTPNotFound()
     body = await request.json()

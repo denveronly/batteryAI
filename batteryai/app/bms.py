@@ -159,12 +159,37 @@ def pack(prefix: str, states: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def pack_entities(entities: dict[str, str], states: list[dict[str, Any]]) -> dict[str, Any]:
+    """A low-voltage battery from its entities picked one by one (soc, voltage, current, …)."""
+    by_id = {s.get("entity_id"): s for s in states}
+    main: dict[str, Any] = {}
+    temps: list[dict[str, Any]] = []
+    for key, entity_id in entities.items():
+        state = by_id.get(entity_id)
+        if state is None:
+            continue
+        if key == "temperature":
+            temps.append({**_value(state), "name": "Battery"})
+        else:
+            main[key] = _value(state)
+    return {
+        "main": main, "cells": [], "temperatures": temps, "alarms": [], "statuses": [], "online": None,
+        "summary": {"cells": 0, "min_v": None, "max_v": None, "avg_v": None}, "active_alarms": 0,
+        "found": bool(main or temps), "missing": [e for e in entities.values() if e not in by_id],
+    }
+
+
 def report(opts: Options, states: list[dict[str, Any]], extra: list[Any] | None = None) -> list[dict[str, Any]]:
-    """Every configured battery, then the Deye HV packs (group "deye_hv")."""
-    listed = {b.prefix for b in opts.batteries}
-    out = [{"name": b.name, "prefix": b.prefix, "group": "bms", **pack(b.prefix, states)} for b in opts.batteries]
-    out += [{"name": b.name, "prefix": b.prefix, "group": "deye_hv", **pack(b.prefix, states)}
-            for b in extra or [] if b.prefix not in listed]
+    """Every configured battery: DIY packs (group "bms"), low-voltage batteries ("lv") and, for
+    an HV battery, its packs read from the inverter (extra, group "hv:<prefix>")."""
+    out = []
+    for b in opts.batteries:
+        if b.kind == "lv":
+            out.append({"name": b.name, "prefix": b.prefix, "kind": "lv", "group": "lv", **pack_entities(b.entities, states)})
+        elif b.kind == "diy":
+            out.append({"name": b.name, "prefix": b.prefix, "kind": "diy", "group": "bms", **pack(b.prefix, states)})
+    out += [{"name": x["name"], "prefix": x["prefix"], "kind": "hv", "group": f"hv:{x['battery']}", **pack(x["prefix"], states)}
+            for x in extra or []]
     return out
 
 

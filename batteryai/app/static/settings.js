@@ -40,8 +40,8 @@ const NUMBER_FIELDS = ["record_interval_minutes", "history_days", "detail_days",
   "max_soc_percent", "apply_threshold_percent", "charge_all_soc_percent",
   "outage_precharge_minutes", "outage_precharge_soc_percent", "solar_forecast_percent", "night_reserve_soc_percent",
   "outage_shift_hours", "strict_outage_hours", "strict_min_soc_percent", "balance_soc_above", "pv_room_percent", "prediction_strictness",
-  "deye_hv_packs", "deye_hv_interval_seconds"];
-const TEXT_FIELDS = ["battery_name", "notify_prefix", "claude_effort", "response_language", "extra_instructions", "tariff_currency", "program_time_marks", "prediction_engine", "openai_effort", "balance_time", "deye_hv_entity"];
+  "deye_hv_interval_seconds"];
+const TEXT_FIELDS = ["battery_name", "notify_prefix", "claude_effort", "response_language", "extra_instructions", "tariff_currency", "program_time_marks", "prediction_engine", "openai_effort", "balance_time"];
 const PRICE_FIELDS = ["battery_capacity_kwh"];
 
 const ENGINE_HELP = {
@@ -155,30 +155,113 @@ function renumberAppliances() {
   if (!rows.length) $("applianceRows").replaceChildren();
 }
 
-// Batteries (BMS) for the Battery health tab: a name and the entity prefix (bms0, bms1, …).
+// Batteries for the Battery health tab, each of a kind:
+//   DIY battery – its own BMS (JK BMS …), entities found by their prefix (bms0, bms1, …)
+//   HV battery  – Deye HV (BOS-G …), packs read from the inverter registers via Solarman
+//   Low voltage battery – entities picked one by one (SOC, voltage, …)
 const MAX_BATTERIES = 20;
+const BATTERY_KINDS = [["diy", "DIY battery"], ["hv", "HV battery"], ["lv", "Low voltage battery"]];
+const LV_FIELDS = [["soc", "SOC", "%"], ["voltage", "Voltage", "V"], ["current", "Current", "A"], ["power", "Power", "W"],
+  ["temperature", "Temperature", "°C"], ["soh", "SOH", "%"], ["cycles", "Cycles", ""]];
+const entityInput = (placeholder, value, role) => {
+  const input = el("input", { type: "text", list: "entityList", placeholder, autocomplete: "off", spellcheck: "false", "data-role": role });
+  input.value = value || "";
+  return input;
+};
 
 function batteryRow(battery = {}) {
-  const row = el("div", { class: "appliance-row" });
+  const row = el("div", { class: "appliance-row battery-row" });
+  const kind = el("select", { "data-role": "kind" }, ...BATTERY_KINDS.map(([v, t]) => el("option", { value: v }, t)));
+  kind.value = battery.kind || "diy";
   const name = el("input", { type: "text", placeholder: "Name, e.g. Battery 1", maxlength: "40", "data-role": "name" });
   name.value = battery.name || "";
   const prefix = el("input", { type: "text", placeholder: "bms0", maxlength: "40", autocomplete: "off", spellcheck: "false", "data-role": "prefix" });
   prefix.value = battery.prefix || "";
-  // Typing a name like "BMS3" fills in the prefix bms3 (while the prefix still follows the name).
+  // DIY: typing a name like "BMS3" fills in the prefix bms3 (while the prefix still follows the name).
   let followName = !battery.prefix || battery.prefix === (battery.name || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
   name.addEventListener("input", () => {
-    if (!followName) return;
+    if (!followName || kind.value !== "diy") return;
     prefix.value = name.value.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
   });
-  name.addEventListener("change", () => followName && prefix.dispatchEvent(new Event("change")));
+  name.addEventListener("change", () => followName && kind.value === "diy" && prefix.dispatchEvent(new Event("change")));
   prefix.addEventListener("input", () => (followName = false));
+  const prefixLabel = el("label", {}, "Entity prefix", prefix);
+
+  // HV battery
+  const hvEntity = entityInput("sensor.deye_battery_soc", battery.entity, "hv_entity");
+  const hvPacks = el("input", { type: "number", min: "0", max: "16", step: "1", "data-role": "hv_packs" });
+  hvPacks.value = battery.packs ?? 0;
+  const hvBox = el("div", { class: "battery-kind-fields" },
+    el("label", { title: "Any entity of the Deye inverter's Solarman device – it identifies the device" }, "Solarman inverter entity", hvEntity),
+    el("label", { title: "0 = the number the inverter reports (register 0x2712)" }, "Packs (0 = auto)", hvPacks));
+
+  // Low voltage battery
+  const lvInputs = Object.fromEntries(LV_FIELDS.map(([k, label, u]) => [k, entityInput(`${label}${u ? ` (${u})` : ""} – optional`, battery.entities?.[k], `lv_${k}`)]));
+  const lvBox = el("div", { class: "battery-kind-fields lv" }, ...LV_FIELDS.map(([k, label]) => el("label", {}, label, lvInputs[k])));
+
+  const hint = el("div", { class: "hint" });
   const result = el("div", { class: "result" });
   const test = el("button", { type: "button", class: "secondary" }, "Test");
   const remove = el("button", { type: "button", class: "secondary remove", title: "Remove this battery", "aria-label": "Remove battery" }, "−");
+
+  const show = (fresh = false) => {
+    const k = kind.value;
+    prefixLabel.firstChild.textContent = k === "hv" ? "Sensor prefix" : "Entity prefix";
+    prefix.placeholder = k === "hv" ? "deye_hv" : "bms0";
+    prefixLabel.hidden = k === "lv";
+    prefixLabel.title = k === "hv" ? "BatteryAI publishes sensor.<prefix>1_…, <prefix>2_… for the packs" : "The part between sensor. and _battery_voltage, e.g. bms0";
+    if (fresh && k === "hv" && (!prefix.value || /^bms\d*$/.test(prefix.value))) prefix.value = "deye_hv";
+    hvBox.hidden = k !== "hv";
+    lvBox.hidden = k !== "lv";
+    test.textContent = k === "hv" ? "Read registers" : "Test";
+    hint.textContent = {
+      diy: "Your own BMS in Home Assistant (JK BMS …): its sensors are found by the prefix – sensor.bms0_battery_voltage, sensor.bms0_cell_voltage_01, binary_sensor.bms0_alarm_…",
+      hv: "Deye HV battery (BOS-G …): BatteryAI reads every pack from the inverter registers through the Solarman integration, checks the values and publishes its own sensors sensor.<prefix>1_…, <prefix>2_… – shown per pack with the raw registers.",
+      lv: "Low voltage battery: pick its entities one by one, e.g. the inverter's Battery BMS sensors (SOC, voltage, current, temperature).",
+    }[k];
+    result.replaceChildren();
+    result.className = "result";
+  };
+  kind.addEventListener("change", () => show(true));
+
   const check = async () => {
+    result.className = "result";
+    const k = kind.value;
+    if (k === "hv") {
+      if (!hvEntity.value.trim()) return showResult(result, "warn", "⚠ Enter an entity of the Solarman inverter first.");
+      result.textContent = "Reading the battery registers through the Solarman integration…";
+      try {
+        const r = await api("api/deye_hv/read", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entity: hvEntity.value.trim(), packs: Number(hvPacks.value) || 0, prefix: prefix.value.trim() || "deye_hv", name: name.value.trim() }) });
+        const lines = (r.packs || []).map((p) => {
+          const v = p.values;
+          const val = (key, d = 1) => (v[key]?.ok ? `${fmt(v[key].value, d)} ${v[key].unit}` : "?");
+          const bad = Object.values(v).filter((x) => x.register !== null && !x.ok).length;
+          return el("div", {}, `Pack ${p.n}${p.serial ? ` (${p.serial})` : ""}: ${val("battery_voltage", 2)} · SOC ${val("battery_capacity_state_of_charge", 0)} · `
+            + `cells ${val("min_cell_voltage", 3)}–${val("max_cell_voltage", 3)} · SOH ${val("state_of_health", 0)}`
+            + (bad ? ` · ${bad} implausible – see the raw registers on the Battery health tab` : " · all plausible"));
+        });
+        showResult(result, "ok", `✓ The inverter reports ${r.reported_packs} pack(s); read ${(r.packs || []).length}.`, ...lines);
+      } catch (err) {
+        showResult(result, "error", `✕ ${err.message}`);
+      }
+      return;
+    }
+    if (k === "lv") {
+      const entities = Object.fromEntries(Object.entries(lvInputs).map(([key, i]) => [key, i.value.trim()]).filter(([, v]) => v));
+      if (!Object.keys(entities).length) return showResult(result, "warn", "⚠ Pick at least one entity.");
+      try {
+        const r = await api("api/batteries/test_lv", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entities }) });
+        const parts = LV_FIELDS.filter(([key]) => r.values[key]).map(([key, label]) => `${label} ${r.values[key].available ? `${fmt(r.values[key].value, 2)} ${r.values[key].unit}` : "unavailable"}`);
+        showResult(result, r.missing.length ? "warn" : "ok", `${r.missing.length ? "⚠" : "✓"} ${parts.join(" · ") || "no values"}`
+          + (r.missing.length ? ` · not found: ${r.missing.join(", ")}` : ""));
+      } catch (err) {
+        showResult(result, "error", `✕ ${err.message}`);
+      }
+      return;
+    }
     const value = prefix.value.trim();
     if (!value) return result.replaceChildren();
-    result.className = "result";
     result.textContent = "Looking for its entities…";
     const r = await api(`api/batteries?prefix=${encodeURIComponent(value)}`).catch((err) => ({ error: err.message }));
     if (r.error) {
@@ -193,19 +276,21 @@ function batteryRow(battery = {}) {
     }
   };
   test.addEventListener("click", check);
-  prefix.addEventListener("change", check);
+  prefix.addEventListener("change", () => kind.value === "diy" && check());
   remove.addEventListener("click", () => {
     row.remove();
     renumberBatteries();
   });
   row.append(
-    el("div", { class: "appliance-fields" },
+    el("div", { class: "appliance-fields battery-fields" },
+      el("label", {}, "Type", kind),
       el("label", {}, "Name", name),
-      el("label", { title: "The part between sensor. and _battery_voltage, e.g. bms0" }, "Entity prefix", prefix),
+      prefixLabel,
       el("span", { class: "appliance-buttons" }, test, remove)),
-    result,
+    hvBox, lvBox, hint, result,
   );
-  if (battery.prefix) check();
+  show();
+  if (kind.value === "diy" && battery.prefix) check();
   return row;
 }
 
@@ -214,6 +299,9 @@ function renumberBatteries() {
   rows.forEach((row, i) => {
     row.querySelector('[data-role="name"]').name = `batteries.${i}.name`;
     row.querySelector('[data-role="prefix"]').name = `batteries.${i}.prefix`;
+    row.querySelector('[data-role="hv_entity"]').name = `batteries.${i}.entity`;
+    row.querySelector('[data-role="hv_packs"]').name = `batteries.${i}.packs`;
+    for (const [k] of LV_FIELDS) row.querySelector(`[data-role="lv_${k}"]`).name = `batteries.${i}.entities.${k}`;
   });
   $("addBattery").disabled = rows.length >= MAX_BATTERIES;
 }
@@ -233,10 +321,14 @@ function fillBatteries(list) {
 }
 
 function readBatteries() {
-  return [...$("batteryRows").children].map((row) => ({
-    name: row.querySelector('[data-role="name"]').value.trim(),
-    prefix: row.querySelector('[data-role="prefix"]').value.trim(),
-  }));
+  return [...$("batteryRows").children].map((row) => {
+    const get = (role) => row.querySelector(`[data-role="${role}"]`).value.trim();
+    const kind = get("kind");
+    const out = { kind, name: get("name"), prefix: get("prefix") };
+    if (kind === "hv") Object.assign(out, { entity: get("hv_entity"), packs: Number(get("hv_packs")) || 0 });
+    if (kind === "lv") out.entities = Object.fromEntries(LV_FIELDS.map(([k]) => [k, get(`lv_${k}`)]).filter(([, v]) => v));
+    return out;
+  });
 }
 
 // "+ Add battery" continues from the previous battery: bms0 → bms1 → bms2 (every sensor of the
@@ -247,35 +339,12 @@ const nextNumbered = (text, fallback) => {
 };
 
 $("addBattery").addEventListener("click", () => {
-  const rows = [...$("batteryRows").children];
-  const last = rows.length ? readBatteries()[rows.length - 1] : null;
+  // Continues from the last DIY battery (a new row is a DIY battery; change its Type for others).
+  const last = readBatteries().filter((b) => b.kind === "diy").pop() || null;
   const prefix = last ? nextNumbered(last.prefix, "") : "bms0";
   const name = last ? nextNumbered(last.name, prefix.toUpperCase()) : "BMS0";
   $("batteryRows").append(batteryRow({ name, prefix }));
   renumberBatteries();
-});
-
-// Deye HV batteries: read the pack registers once with the entity typed in (before saving).
-$("deyeHvTest").addEventListener("click", async () => {
-  const out = $("deyeHvResult");
-  const entity = field("deye_hv_entity").value.trim();
-  if (!entity) return showResult(out, "warn", "⚠ Enter an entity of the Solarman inverter first.");
-  showResult(out, "", "Reading the battery registers through the Solarman integration…");
-  try {
-    const r = await api("api/deye_hv/read", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ entity, packs: Number(field("deye_hv_packs").value) || 0 }) });
-    const lines = (r.packs || []).map((p) => {
-      const v = p.values;
-      const show = (k, d = 1) => (v[k]?.ok ? `${fmt(v[k].value, d)} ${v[k].unit}` : "?");
-      const bad = Object.values(v).filter((x) => x.register !== null && !x.ok).length;
-      return el("div", {}, `Pack ${p.n}${p.serial ? ` (${p.serial})` : ""}: ${show("battery_voltage", 2)} · SOC ${show("battery_capacity_state_of_charge", 0)} · `
-        + `cells ${show("min_cell_voltage", 3)}–${show("max_cell_voltage", 3)} · SOH ${show("state_of_health", 0)}`
-        + (bad ? ` · ${bad} value(s) implausible – see the raw registers on the Battery health tab` : " · all values plausible"));
-    });
-    showResult(out, "ok", `✓ The inverter reports ${r.reported_packs} pack(s); read ${(r.packs || []).length}.`, ...lines);
-  } catch (err) {
-    showResult(out, "error", `✕ ${err.message}`);
-  }
 });
 
 // Suggestions for the appliance emoji field.

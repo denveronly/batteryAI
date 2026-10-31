@@ -102,7 +102,7 @@ def _serial(regs: list[int | None]) -> str:
     return "".join(chars).strip()
 
 
-def decode_pack(n: int, regs: list[int | None]) -> dict[str, Any]:
+def decode_pack(n: int, regs: list[int | None], prefix: str = PREFIX) -> dict[str, Any]:
     """One pack from its 38 registers."""
     values: dict[str, Any] = {}
     for f in FIELDS:
@@ -128,7 +128,7 @@ def decode_pack(n: int, regs: list[int | None]) -> dict[str, Any]:
             "value": values[f.key]["value"] if f else None, "ok": values[f.key]["ok"] if f else None,
         })
     return {
-        "n": n, "prefix": f"{PREFIX}{n}", "serial": _serial(regs[0:8]), "values": values,
+        "n": n, "prefix": f"{prefix}{n}", "serial": _serial(regs[0:8]), "values": values,
         "alarm": None if not alarm else any(alarm), "alarm_raw": alarm,
         "fault": None if not fault else any(fault), "fault_raw": fault,
         "registers": raw_rows,
@@ -137,8 +137,10 @@ def decode_pack(n: int, regs: list[int | None]) -> dict[str, Any]:
 
 
 class DeyeHvReader:
-    def __init__(self, ha: HomeAssistant) -> None:
+    def __init__(self, ha: HomeAssistant, prefix: str = PREFIX, name: str = "HV battery") -> None:
         self.ha = ha
+        self.prefix = prefix
+        self.name = name
         self.device_id: str | None = None
         self._device_for: str | None = None
         self.last: dict[str, Any] = {"enabled": False}
@@ -176,18 +178,18 @@ class DeyeHvReader:
         for first in range(0, count, per_read):
             n = min(per_read, count - first)
             regs += await self._read(device, PACK_BASE + PACK_STRIDE * first, PACK_STRIDE * n)
-        packs = [decode_pack(i + 1, regs[i * PACK_STRIDE:(i + 1) * PACK_STRIDE]) for i in range(count)]
+        packs = [decode_pack(i + 1, regs[i * PACK_STRIDE:(i + 1) * PACK_STRIDE], self.prefix) for i in range(count)]
         for p in packs:
             await self._publish(p)
         self.last = {
-            "enabled": True, "time": time.time(), "entity": entity_id, "device_id": device,
+            "enabled": True, "time": time.time(), "entity": entity_id, "prefix": self.prefix, "name": self.name, "device_id": device,
             "reported_packs": reported, "packs": packs,
             "header": [{"register": HEADER + i, "raw": raw} for i, raw in enumerate(header)], "error": None,
         }
         return self.last
 
     async def _publish(self, p: dict[str, Any]) -> None:
-        label = f"HV pack {p['n']}"
+        label = f"{self.name} pack {p['n']}"
         for key, v in p["values"].items():
             f = next((x for x in FIELDS if x.key == key), None)
             attrs: dict[str, Any] = {"friendly_name": f"{label} {v['name']}", "state_class": "measurement",

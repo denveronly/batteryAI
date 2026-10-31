@@ -1154,7 +1154,7 @@ async function refreshBatteries() {
     return;
   }
   const packs = data.batteries || [];
-  $("bmsNotes").replaceChildren(...(packs.length ? [] : [el("div", { class: "banner" }, "Add your batteries in Settings → Batteries (a name and the BMS entity prefix, e.g. bms0).")]));
+  $("bmsNotes").replaceChildren(...(packs.length || status?.batteries_count ? [] : [el("div", { class: "banner" }, "Add your batteries in Settings → Batteries (DIY battery, HV battery or Low voltage battery).")]));
   $("bmsPacks").replaceChildren(...packs.map(bmsCard), ...(packs.length ? [bmsLog(data.events || [])] : []));
   if (status?.deye_hv) refreshDeyeHv();
   else $("deyeHvBox").replaceChildren();
@@ -1163,22 +1163,23 @@ async function refreshBatteries() {
 
 // Deye HV packs: the raw registers read from the inverter and how each was decoded, to check
 // them against the Solarman app (and to work out the right layout when a value is off).
-let deyeHvShown = 0;
-async function refreshDeyeHv(force = false) {
-  let d;
+let deyeHvShown = "";
+async function refreshDeyeHv(force = null) {
+  let list;
   try {
-    d = force ? await api("api/deye_hv/read", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
-      : await api("api/deye_hv");
+    if (force) await api("api/deye_hv/read", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prefix: force }) }).catch(() => {});
+    list = (await api("api/deye_hv")).batteries || [];
   } catch (err) {
-    d = { ...(await api("api/deye_hv").catch(() => ({}))), error: err.message };
+    return;
   }
-  if (!force && d.time && d.time === deyeHvShown && $("deyeHvBox").children.length) return;
-  deyeHvShown = d.time || 0;
-  $("deyeHvBox").replaceChildren(deyeHvCard(d));
+  const stamp = list.map((d) => `${d.prefix}:${d.time}:${d.error_time}`).join("|");
+  if (!force && stamp === deyeHvShown && $("deyeHvBox").children.length) return;
+  deyeHvShown = stamp;
+  $("deyeHvBox").replaceChildren(...list.map(deyeHvCard));
 }
 
 function deyeHvText(d) {
-  const lines = [`Deye HV registers ${d.time ? new Date(d.time * 1000).toISOString() : ""} · reported packs ${d.reported_packs}`];
+  const lines = [`${d.name} (${d.prefix}) registers ${d.time ? new Date(d.time * 1000).toISOString() : ""} · reported packs ${d.reported_packs}`];
   lines.push("header " + (d.header || []).map((h) => `${h.register.toString(16).toUpperCase()}=${h.raw ?? "-"}`).join(" "));
   for (const p of d.packs || []) {
     lines.push(`pack ${p.n} ${p.serial || ""}`);
@@ -1189,18 +1190,18 @@ function deyeHvText(d) {
 
 function deyeHvCard(d) {
   const read = el("button", { type: "button", class: "secondary small" }, "Read now");
-  read.addEventListener("click", () => { read.disabled = true; refreshDeyeHv(true); });
+  read.addEventListener("click", () => { read.disabled = true; refreshDeyeHv(d.prefix); });
   const copy = el("button", { type: "button", class: "secondary small" }, "Copy raw registers");
   copy.addEventListener("click", async () => {
     try { await navigator.clipboard.writeText(deyeHvText(d)); copy.textContent = "Copied ✓"; }
     catch (e) { copy.textContent = "Copy failed – select the text below"; }
   });
-  const head = el("div", { class: "card-head" }, el("h2", {}, "Deye HV registers"),
+  const head = el("div", { class: "card-head" }, el("h2", {}, `${d.name} – registers`),
     el("span", { class: "muted" }, d.time ? `read ${fmtDateTime(d.time)} · inverter reports ${d.reported_packs} pack(s) · every ${d.interval} s` : "not read yet"),
     read, copy);
   const packs = (d.packs || []).map((p) => {
     const bad = (p.registers || []).filter((r) => r.ok === false).length;
-    return bmsDetails(`deyehv:${p.n}`, [`Pack ${p.n}${p.serial ? ` · ${p.serial}` : ""}`,
+    return bmsDetails(`deyehv:${d.prefix}:${p.n}`, [`Pack ${p.n}${p.serial ? ` · ${p.serial}` : ""}`,
       el("span", { class: bad ? "bms-bad-text" : "muted" }, bad ? ` · ${bad} implausible value(s), not published` : " · all values plausible")],
       el("div", { class: "table-wrap" }, el("table", { class: "bms-regs" },
         el("thead", {}, el("tr", {}, ...["Register", "#", "Raw", "Signed", "Hex", "Field", "Value"].map((h) => el("th", {}, h)))),
@@ -1225,7 +1226,7 @@ try { bmsPick = localStorage.getItem("batteryai-bms-pick"); } catch (e) {}
 async function refreshBmsControl() {
   let list;
   try {
-    list = (await api("api/batteries")).batteries || [];
+    list = ((await api("api/batteries")).batteries || []).filter((b) => b.kind === "diy");
   } catch (err) {
     $("bmsControlResult").className = "result error";
     $("bmsControlResult").textContent = `✕ ${err.message}`;
@@ -1234,7 +1235,7 @@ async function refreshBmsControl() {
   const pick = $("bmsControlPick");
   if (!list.length) {
     pick.replaceChildren();
-    $("bmsControlBody").replaceChildren(el("div", { class: "banner" }, "Add your batteries in Settings → Batteries first."));
+    $("bmsControlBody").replaceChildren(el("div", { class: "banner" }, "BMS settings are for DIY batteries (their own BMS in Home Assistant) – add one in Settings → Batteries."));
     return;
   }
   if (!list.some((b) => b.prefix === bmsPick)) bmsPick = list[0].prefix;
@@ -1526,7 +1527,9 @@ function bmsCard(b) {
 
   return el("section", { class: "card" },
     bmsLine(b),
-    b.found ? null : el("div", { class: "banner" }, `Nothing found for sensor.${b.prefix}_… in Home Assistant – check the prefix in Settings → Batteries.`),
+    b.found ? null : el("div", { class: "banner" }, b.kind === "lv"
+      ? `None of its entities found in Home Assistant${b.missing?.length ? ` (${b.missing.join(", ")})` : ""} – check them in Settings → Batteries.`
+      : `Nothing found for sensor.${b.prefix}_… in Home Assistant – check the prefix in Settings → Batteries.`),
     ...Object.entries(b.issues || {}).map(([code, text]) => el("div", { class: "bms-alarm warn", title: code }, `△ ${text}`)),
     cellChart ? bmsDetails(key("cells"), [`Cells (${cellItems.length})`, el("span", { class: "muted" },
       ` · Δ ${delta} ${deltaUnit} · V${pad2(sum.min_cell)} min ${fmt(sum.min_v, 3)} V · V${pad2(sum.max_cell)} max ${fmt(sum.max_v, 3)} V`)],

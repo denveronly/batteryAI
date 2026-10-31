@@ -211,8 +211,11 @@ control) predictions only set the SOC and never change the grid-charge switches.
 
 ## Battery health
 
-Settings → **Batteries**: add each battery pack (up to 20) with a name and its BMS entity
-prefix – the part between `sensor.` and `_battery_voltage`, e.g. `bms0`. *Test* shows what
+Settings → **Batteries**: add each battery (up to 20) and choose its **Type**:
+*DIY battery* (your own BMS in Home Assistant, described here), *HV battery* (Deye HV packs from
+the inverter registers, below) or *Low voltage battery* (its entities picked one by one – SOC,
+voltage, current, power, temperature, SOH, cycles – e.g. the inverter's Battery BMS sensors).
+A DIY battery has a name and its BMS entity prefix – the part between `sensor.` and `_battery_voltage`, e.g. `bms0`. *Test* shows what
 was found; *+ Add battery* continues from the previous one (bms0 → bms1). The **Battery health**
 tab then shows, per pack and refreshed every 10 s: SOC, voltage, current, power, cell delta,
 error bitmask, charging cycles, cell count, the BMS's active alarm count, every cell's voltage
@@ -238,11 +241,13 @@ the right values for your cells.
 
 The Solarman integration's per-pack sensors are wrong for some Deye HV batteries (BOS-G Pro on
 SG01HP3: 0 V, SOH 3000 %, max cell 0 V – ha-solarman issue #1205). BatteryAI can read the
-packs itself: Settings → Batteries → **Solarman inverter entity** (any entity of the inverter's
-Solarman device), the number of packs (0 = what register 0x2712 reports) and how often to read.
+packs itself: Settings → Batteries → a battery of Type **HV battery** with the **Solarman inverter
+entity** (any entity of the inverter's Solarman device), the number of packs (0 = what register
+0x2712 reports) and a sensor prefix (default `deye_hv`); how often all HV batteries are read is
+set below the list.
 It calls `solarman.read_holding_registers` for 0x2710 and the 38-register block of each pack
 (0x2730, 0x2756, …), checks every value against LiFePO4 limits – trying other scales when the
-expected one is implausible – and publishes `sensor.deye_hv<N>_battery_voltage`, `_battery_current`,
+expected one is implausible – and publishes `sensor.<prefix><N>_battery_voltage`, `_battery_current`,
 `_battery_power`, `_battery_capacity_state_of_charge`, `_state_of_health`, `_capacity`,
 `_min_cell_voltage`, `_max_cell_voltage`, `_cell_delta_voltage`, the temperatures,
 `_charging_cycles` and `binary_sensor.deye_hv<N>_alarm_bms` / `_alarm_fault`. A value that stays

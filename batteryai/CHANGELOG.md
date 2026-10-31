@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.64
+
+- Settings → Batteries: each battery has a **Type** – *DIY battery* (your own BMS, sensors
+  found by the prefix, as before), *HV battery* (Deye HV / BOS-G packs read from the inverter
+  registers: Solarman inverter entity, number of packs, sensor prefix, *Read registers*) or
+  *Low voltage battery* (entities picked one by one: SOC, voltage, current, power,
+  temperature, SOH, cycles). Several HV batteries are possible, each with its own prefix.
+- The HV battery set up in 0.4.63 moves into the list as an HV battery row by itself.
+- Battery health: one registers card per HV battery; Control lists only DIY batteries.
+
 ## 0.4.63
 
 - Deye HV batteries (BOS-G, BOS-G Pro …) read by BatteryAI itself: for packs whose values in
