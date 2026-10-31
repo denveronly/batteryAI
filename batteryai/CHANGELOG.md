@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.66
+
+- HV battery (BOS-G): the register layout is fixed from a real BOS-G Pro stack (8 modules,
+  128 cells) checked against Solar Assistant. The inverter reports one record per stack
+  (PDU with its modules), not per module: voltage 0x2761 (426.7 V), temperature 0x273E,
+  SOC 0x2743, SOH 0x2742, highest / lowest cell 0x2744 / 0x2747 with their positions,
+  number of modules 0x2756; current 0x2739 still to be confirmed. One battery card per
+  stack; "Packs" is now "Stacks (0 = auto)". Sensors of the old layout are set unavailable.
+
 ## 0.4.65
 
 - HV battery: pack alarm / fault registers are no longer turned into alarms (false alarms

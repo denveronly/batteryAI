@@ -35,6 +35,7 @@ MAIN = {
     "min_cell": "min_cell_voltage",
     "soh": "state_of_health",
     "capacity": "capacity",
+    "modules": "module_count",
 }
 # Readable names for the JK BMS alarm codes (binary_sensor.<prefix>_alarm_<code>).
 ALARM_NAMES = {

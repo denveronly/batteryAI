@@ -1197,11 +1197,11 @@ function deyeHvCard(d) {
     catch (e) { copy.textContent = "Copy failed – select the text below"; }
   });
   const head = el("div", { class: "card-head" }, el("h2", {}, `${d.name} – registers`),
-    el("span", { class: "muted" }, d.time ? `read ${fmtDateTime(d.time)} · inverter reports ${d.reported_packs} pack(s) · every ${d.interval} s` : "not read yet"),
+    el("span", { class: "muted" }, d.time ? `read ${fmtDateTime(d.time)} · inverter reports ${d.reported_packs} stack(s) · every ${d.interval} s` : "not read yet"),
     read, copy);
   const packs = (d.packs || []).map((p) => {
     const bad = (p.registers || []).filter((r) => r.ok === false).length;
-    return bmsDetails(`deyehv:${d.prefix}:${p.n}`, [`Pack ${p.n}${p.serial ? ` · ${p.serial}` : ""}`,
+    return bmsDetails(`deyehv:${d.prefix}:${p.n}`, [`Stack ${p.n}${p.serial ? ` · ${p.serial}` : ""}`,
       el("span", { class: bad ? "bms-bad-text" : "muted" }, bad ? ` · ${bad} implausible value(s), not published` : " · all values plausible")],
       el("div", { class: "table-wrap" }, el("table", { class: "bms-regs" },
         el("thead", {}, el("tr", {}, ...["Register", "#", "Raw", "Signed", "Hex", "Field", "Value"].map((h) => el("th", {}, h)))),
@@ -1488,6 +1488,7 @@ function bmsCard(b) {
     m.max_cell && tile("Highest cell", bmsNum(m.max_cell, 3), m.max_cell.unit),
     m.soh && tile("SOH", bmsNum(m.soh, 0), m.soh.unit),
     m.capacity && tile("Capacity", bmsNum(m.capacity, 1), m.capacity.unit),
+    m.modules && tile("Modules", bmsNum(m.modules, 0), ""),
   ].filter(Boolean);
 
   // Cell voltages: columns on a LiFePO4 scale (2.8 – 3.65 V); green in the normal range,

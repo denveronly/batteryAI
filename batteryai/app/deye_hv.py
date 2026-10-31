@@ -1,20 +1,22 @@
-"""Deye HV battery packs (BOS-G, BOS-G Pro …) read straight from the inverter's registers.
+"""Deye HV batteries (BOS-G, BOS-G Pro …) read straight from the inverter's registers.
 
-The Solarman integration's per-pack sensors are wrong for some HV batteries (ha-solarman
-issue #1205). BatteryAI reads the same registers itself through the integration's
-solarman.read_holding_registers action (it returns the raw values), decodes them with its
-own checks and publishes the result as Home Assistant sensors with the prefix
-deye_hv<N> (sensor.deye_hv1_battery_voltage, …), which the Battery health tab shows like
-any other BMS.
+The Solarman integration's per-pack sensors are wrong for BOS-G (ha-solarman issue #1205):
+it cuts the battery data into 38-register "packs", but a BOS-G stack (PDU + modules) is one
+record of about 80 registers. BatteryAI reads the registers itself through the integration's
+solarman.read_holding_registers action, decodes the stack record and publishes Home
+Assistant sensors with the battery's prefix and the stack number
+(sensor.deye_hv1_battery_voltage, …), shown on the Battery health tab like any other BMS.
 
-Registers (holding, Deye three-phase HV hybrids SG01HP3 / SG04HP3):
-  0x2712            number of battery packs reported by the BMS
-  0x2730 + 38·(N−1) block of 38 registers for pack N (offsets in FIELDS)
+Registers (holding, Deye three-phase HV hybrids SG01HP3), from a BOS-G Pro stack of 8 modules
+(128 cells) checked against Solar Assistant – 0x2730 + offset:
+   0–7  serial number (ASCII)                     14  temperature, 0.1 °C
+   9    current, 0.1 A signed (to be confirmed)   18  SOH %        19  SOC %
+  20    highest cell, mV   21  its position       22  lowest cell's position   23  lowest cell, mV
+  38    number of modules                         49  battery voltage, 0.1 V (50, 51: two more voltages)
+  0x2712 = number of stacks; a second stack is assumed 80 registers further (not confirmed).
 
-The layout is the one ha-solarman uses. Where a value is implausible with the expected
-scale, other scales are tried (SOH 0.1 % or 1 %, …); a value that stays implausible is
-not published, and the raw registers are kept so the right layout can be worked out on
-the Battery health tab (Deye HV registers).
+A value implausible with the expected scale is not published; every raw register is kept for
+the Battery health tab so the layout can be checked.
 """
 
 from __future__ import annotations
@@ -32,7 +34,7 @@ HEADER = 0x2710
 HEADER_COUNT = 32
 PACK_COUNT_REG = 0x2712
 PACK_BASE = 0x2730
-PACK_STRIDE = 38
+PACK_STRIDE = 80  # one stack record
 MAX_PACKS = 16
 MAX_READ = 125  # registers per Modbus request
 PREFIX = "deye_hv"
@@ -54,24 +56,24 @@ class Field:
 
 
 FIELDS: tuple[Field, ...] = (
-    Field("battery_voltage", "Voltage", 8, (0.1, 0.01), 10, 1000, "V", "voltage", digits=2),
-    Field("battery_current", "Current", 9, (0.1, 0.01), -600, 600, "A", "current", signed=True),
-    Field("temperature", "Temperature", 10, (0.1,), -40, 90, "°C", "temperature", shift=1000),
-    Field("max_cell_temperature", "Max cell temperature", 11, (0.1,), -40, 90, "°C", "temperature", shift=1000),
-    Field("min_cell_temperature", "Min cell temperature", 12, (0.1,), -40, 90, "°C", "temperature", shift=1000),
-    Field("mos_temperature", "MOS temperature", 13, (0.1,), -40, 120, "°C", "temperature", shift=1000),
-    Field("battery_capacity_state_of_charge", "SOC", 15, (0.1, 1), 0, 100, "%", "battery", digits=0),
-    Field("state_of_health", "SOH", 16, (0.1, 1, 0.01), 30, 100, "%", None, digits=0),
-    Field("capacity", "Capacity", 18, (0.1, 1, 0.01), 20, 2000, "Ah", None),
-    Field("max_cell_voltage", "Max cell voltage", 22, (0.001,), 2.0, 3.9, "V", "voltage", digits=3),
-    Field("min_cell_voltage", "Min cell voltage", 23, (0.001,), 2.0, 3.9, "V", "voltage", digits=3),
-    Field("charging_cycles", "Cycles", 24, (1,), 0, 20000, "", None, digits=0),
+    Field("battery_voltage", "Voltage", 49, (0.1,), 10, 1000, "V", "voltage", digits=1),
+    Field("battery_current", "Current", 9, (0.1,), -600, 600, "A", "current", signed=True),
+    Field("temperature", "Temperature", 14, (0.1,), -40, 90, "°C", "temperature"),
+    Field("battery_capacity_state_of_charge", "SOC", 19, (1,), 0, 100, "%", "battery", digits=0),
+    Field("state_of_health", "SOH", 18, (1,), 30, 100, "%", None, digits=0),
+    Field("max_cell_voltage", "Highest cell", 20, (0.001,), 2.0, 3.9, "V", "voltage", digits=3),
+    Field("min_cell_voltage", "Lowest cell", 23, (0.001,), 2.0, 3.9, "V", "voltage", digits=3),
+    Field("module_count", "Modules", 38, (1,), 1, 32, "", None, digits=0),
 )
+# Checked against Solar Assistant / the BMS; the others are marked "to be confirmed".
+CONFIRMED = {"battery_voltage", "temperature", "battery_capacity_state_of_charge", "max_cell_voltage",
+             "min_cell_voltage", "module_count"}
 FIELD_AT = {f.offset: f for f in FIELDS}
 EXTRA_NAMES = {
     **{i: "Serial number" for i in range(8)},
-    25: "MOS state", 26: "Alarm (high)", 27: "Alarm (low)", 28: "Fault (high)", 29: "Fault (low)",
-    30: "Software version", 31: "Hardware version",
+    15: "a voltage, 0.1 V?", 21: "Highest cell position", 22: "Lowest cell position",
+    24: "Modules? / cycles?", 46: "?", 48: "?", 50: "Voltage 2, 0.1 V", 51: "Voltage 3, 0.1 V",
+    53: "?", 62: "Modules?",
 }
 
 
@@ -103,11 +105,12 @@ def _serial(regs: list[int | None]) -> str:
 
 
 def decode_pack(n: int, regs: list[int | None], prefix: str = PREFIX) -> dict[str, Any]:
-    """One pack from its 38 registers."""
+    """One stack from its record."""
     values: dict[str, Any] = {}
     for f in FIELDS:
         values[f.key] = {**decode_field(f, regs[f.offset] if f.offset < len(regs) else None),
-                         "name": f.name, "unit": f.unit, "register": PACK_BASE + PACK_STRIDE * (n - 1) + f.offset}
+                         "name": f.name, "unit": f.unit, "register": PACK_BASE + PACK_STRIDE * (n - 1) + f.offset,
+                         "confirmed": f.key in CONFIRMED}
     v, i = values["battery_voltage"], values["battery_current"]
     power_ok = v["ok"] and i["ok"]
     values["battery_power"] = {"value": round(v["value"] * i["value"], 1) if power_ok else None, "ok": power_ok,
@@ -116,15 +119,18 @@ def decode_pack(n: int, regs: list[int | None], prefix: str = PREFIX) -> dict[st
     delta_ok = hi["ok"] and lo["ok"] and hi["value"] >= lo["value"]
     values["cell_delta_voltage"] = {"value": round(hi["value"] - lo["value"], 3) if delta_ok else None, "ok": delta_ok,
                                     "name": "Cell delta", "unit": "V", "scale": None, "register": None}
-    alarm = [regs[o] for o in (26, 27) if o < len(regs) and regs[o] is not None]
-    fault = [regs[o] for o in (28, 29) if o < len(regs) and regs[o] is not None]
+    pos = lambda o: regs[o] if o < len(regs) else None
+    values["max_cell_voltage"]["position"] = pos(21)
+    values["min_cell_voltage"]["position"] = pos(22)
+    alarm: list[int] = []  # alarm / fault registers not identified yet
+    fault: list[int] = []
     raw_rows = []
     for offset, raw in enumerate(regs):
         f = FIELD_AT.get(offset)
         raw_rows.append({
             "register": PACK_BASE + PACK_STRIDE * (n - 1) + offset, "offset": offset, "raw": raw,
             "signed": None if raw is None else _signed(raw),
-            "field": f.name if f else EXTRA_NAMES.get(offset),
+            "field": (f.name + ("" if f.key in CONFIRMED else " (to be confirmed)")) if f else EXTRA_NAMES.get(offset),
             "value": values[f.key]["value"] if f else None, "ok": values[f.key]["ok"] if f else None,
         })
     return {
@@ -141,6 +147,7 @@ class DeyeHvReader:
         self.ha = ha
         self.prefix = prefix
         self.name = name
+        self._cleared: set[str] = set()
         self.device_id: str | None = None
         self._device_for: str | None = None
         self.last: dict[str, Any] = {"enabled": False}
@@ -183,6 +190,13 @@ class DeyeHvReader:
         packs = [p for p in packs if not p["empty"]]
         for p in packs:
             await self._publish(p)
+            if p["prefix"] not in self._cleared:
+                # Sensors of the 0.4.63–0.4.65 pack layout that no longer exist.
+                for key in ("capacity", "charging_cycles", "max_cell_temperature", "min_cell_temperature", "mos_temperature"):
+                    await self.ha.set_state(f"sensor.{p['prefix']}_{key}", "unavailable", {"friendly_name": "(no longer used)"})
+                for key in ("bms", "fault"):
+                    await self.ha.set_state(f"binary_sensor.{p['prefix']}_alarm_{key}", "unavailable", {"friendly_name": "(no longer used)"})
+                self._cleared.add(p["prefix"])
         self.last = {
             "enabled": True, "time": time.time(), "entity": entity_id, "prefix": self.prefix, "name": self.name, "device_id": device,
             "reported_packs": reported, "packs": packs,
@@ -191,7 +205,7 @@ class DeyeHvReader:
         return self.last
 
     async def _publish(self, p: dict[str, Any]) -> None:
-        label = f"{self.name} pack {p['n']}"
+        label = self.name if p["n"] == 1 else f"{self.name} stack {p['n']}"
         for key, v in p["values"].items():
             f = next((x for x in FIELDS if x.key == key), None)
             attrs: dict[str, Any] = {"friendly_name": f"{label} {v['name']}", "state_class": "measurement",
@@ -205,6 +219,10 @@ class DeyeHvReader:
                 attrs["register"] = f"0x{v['register']:04X}"
             if key == "battery_voltage" and p["serial"]:
                 attrs["serial_number"] = p["serial"]
+            if v.get("position") is not None:
+                attrs["position"] = v["position"]
+            if v.get("confirmed") is False:
+                attrs["note"] = "register not confirmed yet"
             state = "unknown" if not v["ok"] or v["value"] is None else (
                 f"{v['value']:.{f.digits}f}" if f else f"{v['value']:g}")
             await self.ha.set_state(f"sensor.{p['prefix']}_{key}", state, attrs)

@@ -374,7 +374,9 @@ class BatteryAI:
             if b.kind != "hv":
                 continue
             for p in (self.deye_hv.get(b.prefix).last.get("packs") or []) if b.prefix in self.deye_hv else []:
-                out.append({"name": f"{b.name} · pack {p['n']}" + (f" · {p['serial']}" if p["serial"] else ""),
+                packs = self.deye_hv[b.prefix].last.get("packs") or []
+                label = b.name if len(packs) == 1 else f"{b.name} · stack {p['n']}"
+                out.append({"name": label + (f" · {p['serial']}" if p["serial"] else ""),
                             "prefix": p["prefix"], "battery": b.prefix})
         return out
 

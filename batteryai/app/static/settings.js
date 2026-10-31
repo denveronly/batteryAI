@@ -193,7 +193,7 @@ function batteryRow(battery = {}) {
   hvPacks.value = battery.packs ?? 0;
   const hvBox = el("div", { class: "battery-kind-fields" },
     el("label", { title: "Any entity of the Deye inverter's Solarman device – it identifies the device" }, "Solarman inverter entity", hvEntity),
-    el("label", { title: "0 = the number the inverter reports (register 0x2712)" }, "Packs (0 = auto)", hvPacks));
+    el("label", { title: "Battery stacks (PDU with its modules); 0 = the number the inverter reports (register 0x2712)" }, "Stacks (0 = auto)", hvPacks));
 
   // Low voltage battery
   const lvInputs = Object.fromEntries(LV_FIELDS.map(([k, label, u]) => [k, entityInput(`${label}${u ? ` (${u})` : ""} – optional`, battery.entities?.[k], `lv_${k}`)]));
@@ -237,11 +237,11 @@ function batteryRow(battery = {}) {
           const v = p.values;
           const val = (key, d = 1) => (v[key]?.ok ? `${fmt(v[key].value, d)} ${v[key].unit}` : "?");
           const bad = Object.values(v).filter((x) => x.register !== null && !x.ok).length;
-          return el("div", {}, `Pack ${p.n}${p.serial ? ` (${p.serial})` : ""}: ${val("battery_voltage", 2)} · SOC ${val("battery_capacity_state_of_charge", 0)} · `
-            + `cells ${val("min_cell_voltage", 3)}–${val("max_cell_voltage", 3)} · SOH ${val("state_of_health", 0)}`
+          return el("div", {}, `Stack ${p.n}${p.serial ? ` (${p.serial})` : ""}: ${val("battery_voltage", 2)} · SOC ${val("battery_capacity_state_of_charge", 0)} · `
+            + `cells ${val("min_cell_voltage", 3)}–${val("max_cell_voltage", 3)} · ${val("temperature", 1)} · ${val("module_count", 0)} modules`
             + (bad ? ` · ${bad} implausible – see the raw registers on the Battery health tab` : " · all plausible"));
         });
-        showResult(result, "ok", `✓ The inverter reports ${r.reported_packs} pack(s); read ${(r.packs || []).length}.`, ...lines);
+        showResult(result, "ok", `✓ The inverter reports ${r.reported_packs} stack(s); read ${(r.packs || []).length}.`, ...lines);
       } catch (err) {
         showResult(result, "error", `✕ ${err.message}`);
       }
