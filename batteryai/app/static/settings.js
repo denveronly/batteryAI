@@ -40,9 +40,9 @@ const NUMBER_FIELDS = ["record_interval_minutes", "history_days", "detail_days",
   "max_soc_percent", "apply_threshold_percent", "charge_all_soc_percent",
   "outage_precharge_minutes", "outage_precharge_soc_percent", "solar_forecast_percent", "night_reserve_soc_percent",
   "outage_shift_hours", "strict_outage_hours", "strict_min_soc_percent", "balance_soc_above", "pv_room_percent", "prediction_strictness",
-  "deye_hv_interval_seconds"];
-const TEXT_FIELDS = ["battery_name", "notify_prefix", "claude_effort", "response_language", "extra_instructions", "tariff_currency", "program_time_marks", "prediction_engine", "openai_effort", "balance_time"];
-const PRICE_FIELDS = ["battery_capacity_kwh"];
+  "deye_hv_interval_seconds", "ext_charger_start_below", "ext_charger_stop_at"];
+const TEXT_FIELDS = ["battery_name", "notify_prefix", "claude_effort", "response_language", "extra_instructions", "tariff_currency", "program_time_marks", "prediction_engine", "openai_effort", "balance_time", "ext_charger_switch", "ext_charger_power_sensor", "ext_charger_grid_sensor", "ext_charger_soc_sensor", "ext_charger_battery_power_sensor", "ext_charger_charge_negative"];
+const PRICE_FIELDS = ["battery_capacity_kwh", "ext_charger_grid_limit_kw", "ext_charger_grid_resume_kw", "ext_charger_grid_low_kw"];
 
 const ENGINE_HELP = {
   claude: "Claude reads all recorded history, weather, tariffs and outages and writes the plan. Needs internet and an API key; each prediction costs API tokens.",

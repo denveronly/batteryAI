@@ -28,6 +28,7 @@ import balance
 import bms
 import control
 import deye_hv
+import ext_charger
 import local_fast
 import local_llm
 import notify
@@ -355,6 +356,10 @@ class BatteryAI:
             except Exception:
                 _LOGGER.exception("%s failed", balance.NAME)
             try:
+                await self.check_ext_charger()
+            except Exception:
+                _LOGGER.exception("%s failed", ext_charger.NAME)
+            try:
                 await self.check_bms()
             except Exception:
                 _LOGGER.exception("Checking the battery BMS alarms failed")
@@ -437,6 +442,13 @@ class BatteryAI:
                     self.ha, self.opts, f"🚨 BatteryAI: battery alarm" if alarm else "🔋 BatteryAI: battery alarm cleared",
                     "\n".join(lines), kind="bms", url=self.panel_url, critical=alarm and self.opts.notify_bms_critical,
                 )
+
+    async def check_ext_charger(self) -> None:
+        """External charger in the night tariff (fixed rule, no AI), see ext_charger.py."""
+        lines = await ext_charger.check(self.ha, self.opts, self.control, self.tz)
+        control.save_state(self.control)
+        if lines:
+            await self.notify(f"🔌 BatteryAI: {ext_charger.NAME.lower()}", "\n".join(lines), self.opts.notify_soc_changes, "ext_charger")
 
     async def check_balance(self) -> None:
         """Cell Balance to 100% in morning (fixed rule, no AI), see balance.py."""
@@ -942,6 +954,21 @@ async def status(request: web.Request) -> web.Response:
                 "keep_grid_charge": app.control.get("keep_grid_charge", False),
                 "precharge_smart_applies": not opts.single_price and bool(opts.outage_duration_sensor),
                 "outage_plan": app.outage_plan,
+                "ext_charger": {
+                    **ext_charger.state(app.control),
+                    "available": bool(opts.ext_charger_switch) and bool(opts.ext_charger_soc_sensor or opts.battery_soc_sensor),
+                    "switch": opts.ext_charger_switch,
+                    "start_below": opts.ext_charger_start_below,
+                    "stop_at": opts.ext_charger_stop_at,
+                    "grid_limit_kw": opts.ext_charger_grid_limit_kw,
+                    "grid_resume_kw": opts.ext_charger_grid_resume_kw,
+                    "grid_low_kw": opts.ext_charger_grid_low_kw,
+                    "has_battery": bool(opts.ext_charger_battery_power_sensor),
+                    "has_grid": bool(opts.ext_charger_grid_sensor),
+                    "has_power": bool(opts.ext_charger_power_sensor),
+                    "night": next((f"{t.name} {', '.join(t.windows)}" for t in opts.tariffs
+                                   if t.price == opts.cheapest_price and not t.default), None),
+                },
                 "balance": {
                     **balance.state(app.control),
                     "available": balance._program(opts) is not None and bool(opts.battery_soc_sensor),
@@ -1567,6 +1594,21 @@ async def set_keep_grid_charge(request: web.Request) -> web.Response:
     control.save_state(app.control)
     _LOGGER.info("Grid charge %s by predictions", "left alone" if app.control["keep_grid_charge"] else "set")
     return web.json_response({"keep": app.control["keep_grid_charge"]})
+
+
+@routes.post("/api/control/ext_charger")
+async def set_ext_charger(request: web.Request) -> web.Response:
+    """Body {"enabled": bool}: the external charger rule on/off; off turns the charger off
+    if BatteryAI turned it on."""
+    app = _app(request)
+    enabled = bool((await request.json()).get("enabled"))
+    ext_charger.state(app.control)["enabled"] = enabled
+    if enabled:  # decide again for the current night
+        ext_charger.state(app.control).update(window=None, decided=False)
+    control.save_state(app.control)
+    _LOGGER.info("%s %s", ext_charger.NAME, "on" if enabled else "off")
+    await app.check_ext_charger()
+    return web.json_response({"enabled": enabled})
 
 
 @routes.post("/api/control/balance")

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.75
+
+- **External charger** (fixed rules, no AI): a separate charger switched by BatteryAI.
+  Settings → External charger: the charger switch, its power sensor, grid power, battery SOC
+  (empty = Battery SOC), battery power, start below 60 %, stop at 90 %, grid limit 35 kW,
+  resume below 30 kW, grid low 10 kW. Rules, every minute:
+  - at or above 90 % it is turned off – also when it was switched on by hand;
+  - grid draw above 35 kW: paused (off), back on below 30 kW after at least 5 minutes;
+  - grid draw without the charger below 10 kW while the inverters are not charging the
+    battery (an outage, or no grid charging): off;
+  - the night (cheapest) tariff starts and the battery is below 60 %: on, until 90 % or the
+    end of the night;
+  - the inverters start charging the battery (battery power above 1 kW) and it is below
+    60 %: on, at any time of day, until 90 %;
+  - switched off by hand during a session: left off until the next night / day.
+- Dashboard → Battery control: *External charger* toggle with the charger state, its power,
+  grid power, battery SOC, whether the inverters are charging, and the last change. Each
+  switch is sent to the phone with the SOC / grid-charge change notifications.
+
 ## 0.4.74
 
 - Dashboard → Power chart has its own range dropdown: 6 h, 12 h, 1 day, 2 days, 3 days,

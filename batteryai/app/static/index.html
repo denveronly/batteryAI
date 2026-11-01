@@ -112,6 +112,11 @@
           <span id="balanceLabel">Cell Balance to 100% in morning</span>
         </label>
         <p class="muted" id="balanceInfo"></p>
+        <label class="switch">
+          <input type="checkbox" id="extChargerToggle">
+          <span id="extChargerLabel">External charger</span>
+        </label>
+        <p class="muted" id="extChargerInfo"></p>
         <div class="control-buttons">
           <button type="button" id="chargeAll" class="warn-button">Charge all to 98%</button>
         </div>
@@ -542,6 +547,58 @@
           <label>Battery above (%)
             <input type="number" name="balance_soc_above" min="50" max="99" step="1">
             <span class="hint">Above this SOC program 1 is set to 100% with grid charge on, held until program 1 ends, then put back.</span>
+          </label>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>External charger</h2><span class="muted">A separate charger switched by fixed rules (no AI): on in the night tariff or while the inverters charge the battery, off at the stop level, above the grid limit or with little grid draw – turn it on in Battery control on the dashboard</span></div>
+        <div class="form-grid">
+          <label>Charger switch
+            <input type="text" name="ext_charger_switch" list="entityList" placeholder="switch.battery_charger" autocomplete="off" spellcheck="false">
+            <span class="hint">switch / input_boolean that powers the charger.</span>
+          </label>
+          <label>Charger power
+            <input type="text" name="ext_charger_power_sensor" list="entityList" placeholder="sensor.battery_charger_power" autocomplete="off" spellcheck="false">
+            <span class="hint">Its consumption, W or kW (optional, shown on the dashboard).</span>
+          </label>
+          <label>Grid power
+            <input type="text" name="ext_charger_grid_sensor" list="entityList" placeholder="sensor.grid_power" autocomplete="off" spellcheck="false">
+            <span class="hint">Power taken from the grid now, W or kW – for the grid limit.</span>
+          </label>
+          <label>Battery SOC
+            <input type="text" name="ext_charger_soc_sensor" list="entityList" placeholder="empty = the Battery SOC sensor" autocomplete="off" spellcheck="false">
+            <span class="hint">The battery this charger charges (optional).</span>
+          </label>
+          <label>Start below (%)
+            <input type="number" name="ext_charger_start_below" min="1" max="100" step="1">
+            <span class="hint">When the night tariff starts, the charger is turned on if the battery is below this.</span>
+          </label>
+          <label>Stop at (%)
+            <input type="number" name="ext_charger_stop_at" min="1" max="100" step="1">
+            <span class="hint">Turned off when the battery reaches this (and when the night tariff ends).</span>
+          </label>
+          <label>Grid limit (kW)
+            <input type="number" name="ext_charger_grid_limit_kw" min="0.5" step="0.5">
+            <span class="hint">Grid draw above this turns the charger off (paused).</span>
+          </label>
+          <label>Resume below (kW)
+            <input type="number" name="ext_charger_grid_resume_kw" min="0" step="0.5">
+            <span class="hint">Back on when the grid draw is below this (after at least 5 minutes off).</span>
+          </label>
+          <label>Grid low (kW)
+            <input type="number" name="ext_charger_grid_low_kw" min="0" step="0.5">
+            <span class="hint">Grid draw without the charger below this while the inverters are not charging (outage, no grid charging) turns it off. 0 = off.</span>
+          </label>
+          <label>Battery power
+            <input type="text" name="ext_charger_battery_power_sensor" list="entityList" placeholder="sensor.deye_battery_power" autocomplete="off" spellcheck="false">
+            <span class="hint">When the inverters start charging the battery (above 1 kW) and it is below the start level, the charger is turned on – at any time of day.</span>
+          </label>
+          <label>Battery charging shows as
+            <select name="ext_charger_charge_negative">
+              <option value="true">negative power (Deye / Solarman)</option>
+              <option value="false">positive power</option>
+            </select>
           </label>
         </div>
       </section>

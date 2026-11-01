@@ -623,6 +623,7 @@ function renderControl() {
       : b.last
         ? `Last check ${b.last.date}: ${b.last.done ? "✓ " : "skipped – "}${b.last.reason}.`
         : b.enabled ? `Waiting for ${b.time || "06:30"}.` : "";
+  renderExtCharger(c.ext_charger || {});
   const since = c.since ? ` since ${fmtTime(c.since)}` : "";
   $("controlInfo").textContent = !c.can_write
     ? "Configure the Deye program SOC entities in Settings to control the inverter."
@@ -633,6 +634,34 @@ function renderControl() {
       : c.mode === "charge_all"
         ? `All programs are held at ${c.charge_all_soc}%${since}. Turn on AI auto-control to hand control back to the predictions.`
         : "Predictions only advise; nothing is written to the inverter. Use Apply on a prediction to write it once.";
+}
+
+// External charger: on in the night tariff below start_below %, off at stop_at %, paused above
+// the grid limit (ext_charger.py).
+function renderExtCharger(x) {
+  $("extChargerToggle").checked = !!x.enabled;
+  $("extChargerToggle").disabled = !x.available;
+  $("extChargerLabel").replaceChildren("External charger ", el("span", { class: "hint" },
+    `— no AI: on below ${x.start_below ?? 60}% when the night tariff starts${x.night ? ` (${x.night})` : ""}${x.has_battery ? " or when the inverters start charging the battery" : ""}; off at ${x.stop_at ?? 90}% (also if switched on by hand), when the night ends, `
+    + `paused above ${x.grid_limit_kw ?? 35} kW grid${x.grid_low_kw ? `, off below ${x.grid_low_kw} kW grid while the inverters are not charging` : ""} (Settings → External charger)`));
+  const live = x.live || {};
+  const kw = (v) => (v === null || v === undefined ? "—" : `${fmt(v, 1)} kW`);
+  const parts = [];
+  if (x.available) {
+    parts.push(live.on ? "🔌 Charger ON" : "Charger off");
+    if (x.has_power) parts.push(`charger ${kw(live.charger_kw)}`);
+    if (x.has_grid) parts.push(`grid ${kw(live.grid_kw)}${live.grid_kw > x.grid_limit_kw ? " ⚠ above the limit" : ""}`);
+    if (live.soc !== null && live.soc !== undefined) parts.push(`battery ${fmt(live.soc, 0)}%`);
+    if (x.has_battery && live.inverters_charging !== null && live.inverters_charging !== undefined) parts.push(live.inverters_charging ? "inverters charging" : "inverters not charging");
+  }
+  const status = !x.available ? "Set the charger switch (and the battery SOC) in Settings → External charger."
+    : !x.enabled ? ""
+    : x.paused ? `⏸ Paused: grid above ${x.grid_limit_kw} kW – back on below ${x.grid_resume_kw} kW.`
+    : x.session === "night" ? `⚡ Night charging until ${x.stop_at}%.`
+    : x.session === "follow" ? `⚡ Charging with the inverters until ${x.stop_at}%.`
+    : live.in_window ? "" : live.next_window ? `Waiting for the night tariff at ${new Date(live.next_window * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.` : "";
+  const last = x.last ? `Last: ${x.last.text} (${fmtTime(x.last.ts)}).` : "";
+  $("extChargerInfo").textContent = [parts.join(" · "), status, last].filter(Boolean).join("  ");
 }
 
 // Deye programs in the Battery control card: SOC and grid charge can be changed here.
@@ -743,6 +772,7 @@ $("keepGridCharge").addEventListener("change", (e) => controlAction("api/control
 $("emergencyToggle").addEventListener("change", (e) => controlAction("api/control/precharge", { emergency: e.target.checked }));
 $("prechargeSmart").addEventListener("change", (e) => controlAction("api/control/precharge", { smart: e.target.checked }));
 $("balanceToggle").addEventListener("change", (e) => controlAction("api/control/balance", { enabled: e.target.checked }));
+$("extChargerToggle").addEventListener("change", (e) => controlAction("api/control/ext_charger", { enabled: e.target.checked }));
 $("prechargeToggle").addEventListener("change", (e) => controlAction("api/control/precharge", { enabled: e.target.checked }));
 $("chargeAll").addEventListener("click", () => {
   const soc = status?.control?.charge_all_soc ?? 98;

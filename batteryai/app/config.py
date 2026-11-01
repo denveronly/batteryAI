@@ -237,6 +237,20 @@ class Options:
     notify_soc_changes: bool = True
     notify_errors: bool = True
     notify_bms_alarms: bool = True  # Battery health: BMS alarms on/cleared and BMS offline
+    # External charger (a fixed rule, ext_charger.py): a switch turned on when the night
+    # (cheapest) tariff starts if the battery is below start_below %, off at stop_at %, paused
+    # while the grid draw is above grid_limit kW (back on below grid_resume kW).
+    ext_charger_switch: str = ""
+    ext_charger_power_sensor: str = ""  # its consumption (W or kW), shown on the dashboard
+    ext_charger_grid_sensor: str = ""   # grid power now (W or kW)
+    ext_charger_soc_sensor: str = ""    # empty = the Battery SOC sensor
+    ext_charger_start_below: int = 60
+    ext_charger_stop_at: int = 90
+    ext_charger_grid_limit_kw: float = 35.0
+    ext_charger_grid_resume_kw: float = 30.0
+    ext_charger_grid_low_kw: float = 10.0  # grid draw (without the charger) below this → off; 0 = off
+    ext_charger_battery_power_sensor: str = ""  # battery power: the inverters charging it turn the charger on
+    ext_charger_charge_negative: bool = True    # charging shows as negative power (Deye / Solarman)
     # Battery health thresholds: yellow (warning, logged) and red (alarm, logged and sent to the
     # phone) for the cell delta of a pack and its SOC / voltage drift from the other packs.
     bms_delta_warn_mv: int = 50
@@ -432,6 +446,11 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         outage_precharge_minutes=integer("outage_precharge_minutes", 5, 720),
         outage_precharge_soc_percent=integer("outage_precharge_soc_percent", 10, 100),
         deye_hv_interval_seconds=integer("deye_hv_interval_seconds", 30, 3600),
+        ext_charger_start_below=integer("ext_charger_start_below", 1, 100),
+        ext_charger_stop_at=integer("ext_charger_stop_at", 1, 100),
+        ext_charger_grid_limit_kw=decimal("ext_charger_grid_limit_kw", 0.5, 1000),
+        ext_charger_grid_resume_kw=decimal("ext_charger_grid_resume_kw", 0, 1000),
+        ext_charger_grid_low_kw=decimal("ext_charger_grid_low_kw", 0, 1000),
         bms_delta_warn_mv=integer("bms_delta_warn_mv", 5, 500),
         bms_delta_alarm_mv=integer("bms_delta_alarm_mv", 5, 1000),
         bms_soc_drift_warn=integer("bms_soc_drift_warn", 1, 100),
@@ -439,6 +458,19 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         bms_volt_drift_warn=decimal("bms_volt_drift_warn", 0.05, 50),
         bms_volt_drift_alarm=decimal("bms_volt_drift_alarm", 0.05, 100),
     )
+    neg = raw.get("ext_charger_charge_negative", base.ext_charger_charge_negative)
+    opts.ext_charger_charge_negative = neg if isinstance(neg, bool) else str(neg).lower() in ("1", "true", "on", "yes", "negative")
+    if opts.ext_charger_grid_low_kw >= opts.ext_charger_grid_resume_kw:
+        errors["ext_charger_grid_low_kw"] = "must be below the resume level"
+    for key in ("ext_charger_switch", "ext_charger_power_sensor", "ext_charger_grid_sensor", "ext_charger_soc_sensor",
+                "ext_charger_battery_power_sensor"):
+        setattr(opts, key, entity(key, text(key)))
+    if opts.ext_charger_stop_at <= opts.ext_charger_start_below:
+        errors["ext_charger_stop_at"] = "must be above the start level"
+    if opts.ext_charger_grid_resume_kw >= opts.ext_charger_grid_limit_kw:
+        errors["ext_charger_grid_resume_kw"] = "must be below the grid limit"
+    if opts.ext_charger_switch and opts.ext_charger_switch.split(".", 1)[0] not in ("switch", "input_boolean", "light", "fan"):
+        errors["ext_charger_switch"] = "a switch (or input_boolean) entity"
     for warn, alarm in (("bms_delta_warn_mv", "bms_delta_alarm_mv"), ("bms_soc_drift_warn", "bms_soc_drift_alarm"),
                         ("bms_volt_drift_warn", "bms_volt_drift_alarm")):
         if getattr(opts, alarm) <= getattr(opts, warn):
