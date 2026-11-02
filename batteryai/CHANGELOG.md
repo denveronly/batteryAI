@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.76
+
+- Cell delta warnings and alarms name the cells: "Cell delta 102 mV (above 100 mV) – highest
+  #07 3.452 V, lowest #12 3.350 V" (DIY batteries), with module and cell for HV stacks – in
+  the Battery log, on the battery card and in the phone notification.
+
 ## 0.4.75
 
 - **External charger** (fixed rules, no AI): a separate charger switched by BatteryAI.

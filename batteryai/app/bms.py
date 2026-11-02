@@ -261,6 +261,26 @@ def _median(values: list[float]) -> float | None:
     return values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2
 
 
+def _extremes(b: dict[str, Any]) -> str:
+    """' – highest #07 3.452 V, lowest #12 3.350 V': which cells make the delta."""
+    cells = [(c["n"], v) for c in b.get("cells") or [] if (v := _volts(c.get("voltage"))) is not None]
+    if len(cells) >= 2:
+        hi = max(cells, key=lambda x: x[1])
+        lo = min(cells, key=lambda x: x[1])
+        return f" – highest #{hi[0]:02d} {hi[1]:.3f} V, lowest #{lo[0]:02d} {lo[1]:.3f} V"
+    main = b.get("main") or {}
+    hi, lo = main.get("max_cell"), main.get("min_cell")
+    hv, lv = _volts(hi), _volts(lo)
+    if hv is None or lv is None:
+        return ""
+
+    def where(v: dict[str, Any]) -> str:
+        parts = [f"module {v['module']}" if v.get("module") else "", f"cell {v['position']}" if v.get("position") else ""]
+        return f" ({', '.join(p for p in parts if p)})" if any(parts) else ""
+
+    return f" – highest {hv:.3f} V{where(hi)}, lowest {lv:.3f} V{where(lo)}"
+
+
 def issues(b: dict[str, Any], packs: list[dict[str, Any]] | None = None) -> dict[str, str]:
     """Abnormal readings now: {code: description}. With all packs, also a pack whose SOC or
     voltage drifts away from the others."""
@@ -304,7 +324,7 @@ def issues(b: dict[str, Any], packs: list[dict[str, Any]] | None = None) -> dict
     if delta is not None:
         lvl, limit = _level(delta, "delta")
         if lvl is not None:
-            found["delta_high" + lvl] = f"Cell delta {delta * 1000:.0f} mV (above {limit * 1000:.0f} mV)"
+            found["delta_high" + lvl] = f"Cell delta {delta * 1000:.0f} mV (above {limit * 1000:.0f} mV){_extremes(b)}"
     resistances = sorted(c["resistance"]["value"] for c in b.get("cells") or [] if c.get("resistance") and c["resistance"]["value"])
     median = resistances[len(resistances) // 2] if resistances else None
     if not b.get("cells"):
