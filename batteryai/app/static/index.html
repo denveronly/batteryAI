@@ -685,6 +685,15 @@
           <label><input type="checkbox" name="notify_bms_alarms"> battery alarms (BMS alarm on / cleared, BMS offline)</label>
           <label><input type="checkbox" name="notify_bms_critical"> battery alarms as <b>critical alerts</b> – sound through Silent mode and Focus (iPhone: allow Critical Alerts for the Home Assistant app)</label>
         </fieldset>
+        <div class="form-grid">
+          <label>Quiet hours from
+            <input type="time" name="notify_quiet_from" step="60">
+          </label>
+          <label>until
+            <input type="time" name="notify_quiet_to" step="60">
+            <span class="hint">No critical alerts in this time (default 22:00–09:00): battery alarms still arrive, as normal notifications, so Silent mode / Focus keeps them quiet. Clear both to turn quiet hours off.</span>
+          </label>
+        </div>
         <div class="test-row">
           <button type="button" class="secondary" id="testNotify">Send test notification</button>
           <button type="button" class="secondary" id="testCritical">Test critical alert</button>

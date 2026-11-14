@@ -260,10 +260,22 @@ class Options:
     bms_volt_drift_warn: float = 0.5
     bms_volt_drift_alarm: float = 1.0
     notify_bms_critical: bool = True  # … sent as critical alerts (sound through Silent / Focus)
+    # Quiet hours (HH:MM, Home Assistant time; both empty = off): no critical alerts from
+    # notify_quiet_from until notify_quiet_to – they arrive as normal notifications, which
+    # the phone's Silent mode / Focus keeps quiet.
+    notify_quiet_from: str = "22:00"
+    notify_quiet_to: str = "09:00"
 
     @property
     def notification_prefix(self) -> str:
         return self.notify_prefix or self.battery_name
+
+    def in_quiet_hours(self, minute_of_day: int) -> bool:
+        """True from notify_quiet_from until notify_quiet_to (may cross midnight)."""
+        if not (TIME_RE.match(self.notify_quiet_from) and TIME_RE.match(self.notify_quiet_to)):
+            return False
+        start, end = _window_minutes(f"{self.notify_quiet_from}-{self.notify_quiet_to}")
+        return _in_window(minute_of_day, start, end)
 
     def adjust_forecast(self, value: float | None) -> float | None:
         """A solar forecast (kWh) with the solar forecast correction applied."""
@@ -440,6 +452,8 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         pv_room_percent=integer("pv_room_percent", 0, 50),
         prediction_strictness=integer("prediction_strictness", -10, 10),
         balance_time=text("balance_time") or "06:30",
+        notify_quiet_from=text("notify_quiet_from")[:5],
+        notify_quiet_to=text("notify_quiet_to")[:5],
         balance_soc_above=integer("balance_soc_above", 50, 99),
         battery_name=text("battery_name")[:40],
         notify_prefix=text("notify_prefix")[:40],
@@ -485,6 +499,11 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         errors["program_time_marks"] = "must be end or start"
     if not TIME_RE.match(opts.balance_time):
         errors["balance_time"] = "must be HH:MM (24-hour), e.g. 06:30"
+    for key in ("notify_quiet_from", "notify_quiet_to"):
+        if getattr(opts, key) and not TIME_RE.match(getattr(opts, key)):
+            errors[key] = "must be HH:MM (24-hour), e.g. 22:00, or empty"
+    if bool(opts.notify_quiet_from) != bool(opts.notify_quiet_to):
+        errors["notify_quiet_to"] = "set both times, or leave both empty to turn quiet hours off"
     if opts.claude_effort not in EFFORTS:
         errors["claude_effort"] = "must be one of " + ", ".join(EFFORTS)
     if opts.openai_effort not in OPENAI_EFFORTS:

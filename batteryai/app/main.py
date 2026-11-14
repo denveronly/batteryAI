@@ -438,9 +438,16 @@ class BatteryAI:
             alarm = any(line.startswith("⚠") for line in lines)
             if self.opts.notify_bms_alarms and lines and self.opts.notify_services:
                 # A new alarm (or a BMS going offline) is a critical alert; "cleared" is not.
+                # In the quiet hours it comes as a normal notification instead.
+                local = datetime.now(self.tz)
+                quiet = self.opts.in_quiet_hours(local.hour * 60 + local.minute)
+                critical = alarm and self.opts.notify_bms_critical and not quiet
+                if alarm and self.opts.notify_bms_critical and quiet:
+                    _LOGGER.info("Quiet hours (%s–%s): battery alarm sent as a normal notification",
+                                 self.opts.notify_quiet_from, self.opts.notify_quiet_to)
                 await notify.send(
                     self.ha, self.opts, f"🚨 BatteryAI: battery alarm" if alarm else "🔋 BatteryAI: battery alarm cleared",
-                    "\n".join(lines), kind="bms", url=self.panel_url, critical=alarm and self.opts.notify_bms_critical,
+                    "\n".join(lines), kind="bms", url=self.panel_url, critical=critical,
                 )
 
     async def check_ext_charger(self) -> None:

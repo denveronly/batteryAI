@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.77
+
+- **Quiet hours for critical alerts** (Settings → Phone notifications, 22:00–09:00 by
+  default): battery alarms at night arrive as normal notifications instead of critical alerts,
+  so they no longer ring through Silent mode / Focus. Clear both times to turn it off.
+- Cell messages in **millivolts** with the cells named and their distance from the average:
+  "Cell delta 102 mV (above 100 mV) – highest #07 3452 mV (+48 mV from average), lowest #12
+  3350 mV (−54 mV), average 3404 mV" – in the Battery log, the add-on log, the battery card
+  and the phone notification. Cell range, low-cell and high-cell messages are in mV too.
+
 ## 0.4.76
 
 - Cell delta warnings and alarms name the cells: "Cell delta 102 mV (above 100 mV) – highest

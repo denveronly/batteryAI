@@ -235,7 +235,14 @@ offline are also sent to the phone (Phone notifications → *battery alarms*).
 delta, the SOC drift and the voltage drift (defaults 50 / 100 mV, 15 / 30 %, 0.5 / 1 V). Above
 yellow a warning is logged; above red it is an alarm – logged in red and sent to the phone (as
 a critical alert when *battery alarms as critical alerts* is on). Drift compares batteries of
-the same kind.
+the same kind. Cell messages are in millivolts and name the cells: "Cell delta 102 mV (above
+100 mV) – highest #07 3452 mV (+48 mV from average), lowest #12 3350 mV (−54 mV), average
+3404 mV".
+
+**Quiet hours** (Phone notifications, 22:00–09:00 by default): no critical alerts at night.
+Battery alarms still arrive, as normal notifications, so the phone's Silent mode or Focus keeps
+them quiet; from the end of the quiet hours they are critical again. Clear both times to turn
+quiet hours off. *Test critical alert* always sends a critical alert.
 
 **Control** (Battery health → Control): choose a battery and change the BMS's own switches
 (`switch.<prefix>_*`) and settings (`number.<prefix>_*`). The page is locked until *Allow

@@ -261,13 +261,21 @@ def _median(values: list[float]) -> float | None:
     return values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2
 
 
+def _mv(volts: float) -> str:
+    return f"{volts * 1000:.0f} mV"
+
+
 def _extremes(b: dict[str, Any]) -> str:
-    """' – highest #07 3.452 V, lowest #12 3.350 V': which cells make the delta."""
+    """' – highest #07 3452 mV (+48 mV from average), lowest #12 3350 mV (−54 mV), average
+    3404 mV': which cells make the delta, in millivolts."""
     cells = [(c["n"], v) for c in b.get("cells") or [] if (v := _volts(c.get("voltage"))) is not None]
     if len(cells) >= 2:
         hi = max(cells, key=lambda x: x[1])
         lo = min(cells, key=lambda x: x[1])
-        return f" – highest #{hi[0]:02d} {hi[1]:.3f} V, lowest #{lo[0]:02d} {lo[1]:.3f} V"
+        avg = sum(v for _, v in cells) / len(cells)
+        up, down = (hi[1] - avg) * 1000, (avg - lo[1]) * 1000
+        return (f" – highest #{hi[0]:02d} {_mv(hi[1])} (+{up:.0f} mV from average), "
+                f"lowest #{lo[0]:02d} {_mv(lo[1])} (−{down:.0f} mV), average {_mv(avg)}")
     main = b.get("main") or {}
     hi, lo = main.get("max_cell"), main.get("min_cell")
     hv, lv = _volts(hi), _volts(lo)
@@ -278,7 +286,7 @@ def _extremes(b: dict[str, Any]) -> str:
         parts = [f"module {v['module']}" if v.get("module") else "", f"cell {v['position']}" if v.get("position") else ""]
         return f" ({', '.join(p for p in parts if p)})" if any(parts) else ""
 
-    return f" – highest {hv:.3f} V{where(hi)}, lowest {lv:.3f} V{where(lo)}"
+    return f" – highest {_mv(hv)}{where(hi)}, lowest {_mv(lv)}{where(lo)}"
 
 
 def issues(b: dict[str, Any], packs: list[dict[str, Any]] | None = None) -> dict[str, str]:
@@ -291,8 +299,8 @@ def issues(b: dict[str, Any], packs: list[dict[str, Any]] | None = None) -> dict
     if len(volts) < 2 and (hi := _volts(main_now.get("max_cell"))) and (lo := _volts(main_now.get("min_cell"))):
         volts = [lo, hi]  # a BMS that only reports its highest and lowest cell
     if len(volts) >= 2 and max(volts) - min(volts) > CELL_RANGE_V:
-        found["cell_range"] = (f"Cells {min(volts):.3f}–{max(volts):.3f} V apart by {(max(volts) - min(volts)) * 1000:.0f} mV "
-                               f"(above {CELL_RANGE_V * 1000:.0f} mV)")
+        found["cell_range"] = (f"Cells {(max(volts) - min(volts)) * 1000:.0f} mV apart (above {CELL_RANGE_V * 1000:.0f} mV)"
+                               + (_extremes(b) or f" – {_mv(min(volts))} to {_mv(max(volts))}"))
     battery_temps = [t for t in b.get("temperatures") or [] if t.get("value") is not None
                      and "powertube" not in str(t["entity_id"]) and "mos" not in str(t["entity_id"])
                      and "bms_temperature" not in str(t["entity_id"])]
@@ -331,15 +339,15 @@ def issues(b: dict[str, Any], packs: list[dict[str, Any]] | None = None) -> dict
         for key, label in (("min_cell", "Lowest"), ("max_cell", "Highest")):
             v = _volts(main.get(key))
             if v is not None and v < CELL_LOW_V:
-                found[f"cell_low_{key}"] = f"{label} cell at {v:.3f} V (below {CELL_LOW_V:.2f} V)"
+                found[f"cell_low_{key}"] = f"{label} cell at {_mv(v)} (below {_mv(CELL_LOW_V)})"
             elif v is not None and v > CELL_HIGH_V:
-                found[f"cell_high_{key}"] = f"{label} cell at {v:.3f} V (above {CELL_HIGH_V:.2f} V)"
+                found[f"cell_high_{key}"] = f"{label} cell at {_mv(v)} (above {_mv(CELL_HIGH_V)})"
     for cell in b.get("cells") or []:
         v = _volts(cell.get("voltage"))
         if v is not None and v < CELL_LOW_V:
-            found[f"cell_low_{cell['n']:02d}"] = f"Cell #{cell['n']:02d} at {v:.3f} V (below {CELL_LOW_V:.2f} V)"
+            found[f"cell_low_{cell['n']:02d}"] = f"Cell #{cell['n']:02d} at {_mv(v)} (below {_mv(CELL_LOW_V)})"
         elif v is not None and v > CELL_HIGH_V:
-            found[f"cell_high_{cell['n']:02d}"] = f"Cell #{cell['n']:02d} at {v:.3f} V (above {CELL_HIGH_V:.2f} V)"
+            found[f"cell_high_{cell['n']:02d}"] = f"Cell #{cell['n']:02d} at {_mv(v)} (above {_mv(CELL_HIGH_V)})"
         r = (cell.get("resistance") or {}).get("value")
         if r and median and len(resistances) >= 4 and r > median * RESISTANCE_FACTOR:
             unit = cell["resistance"].get("unit") or ""
