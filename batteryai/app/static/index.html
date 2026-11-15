@@ -354,6 +354,7 @@
           <label>Engine
             <select name="prediction_engine">
               <option value="claude">Claude (cloud)</option>
+              <option value="claude_code">Claude via Claude Code (subscription)</option>
               <option value="openai">ChatGPT (OpenAI cloud)</option>
               <option value="local_fast">Local fast (light CPU)</option>
               <option value="local_llm">Local slow – LLM (heavy CPU)</option>
@@ -387,7 +388,7 @@
       <section class="card" id="claudeBox">
         <div class="card-head"><h2>Claude</h2></div>
         <div class="form-grid">
-          <label>API key
+          <label id="claudeKeyLabel">API key
             <input type="password" name="claude_api_key" autocomplete="off" placeholder="sk-ant-…">
             <span class="hint" id="apiKeyHint"></span>
           </label>
@@ -405,9 +406,28 @@
             </select>
           </label>
         </div>
-        <div class="test-row">
+        <div class="test-row" id="claudeTestRow">
           <button type="button" class="secondary" id="testClaude">Test Claude</button>
           <div class="result" id="claudeResult"></div>
+        </div>
+      </section>
+
+      <section class="card" id="claudeCodeBox">
+        <div class="card-head"><h2>Claude Code bridge</h2></div>
+        <div class="form-grid">
+          <label>Bridge URL
+            <input type="text" name="claude_code_url" autocomplete="off" placeholder="http://1016f397-claudecode:8800">
+            <span class="hint">An HTTP bridge with a <code>/v1/complete</code> endpoint that runs <code>claude -p</code> with your own Claude Code login.</span>
+          </label>
+          <label>Bridge token
+            <input type="password" name="claude_code_token" autocomplete="off">
+            <span class="hint" id="claudeCodeTokenHint"></span>
+          </label>
+        </div>
+        <p class="hint">Model and effort are set in the Claude card above. If the bridge does not answer, that run uses the local fast engine and you get an error notification.</p>
+        <div class="test-row">
+          <button type="button" class="secondary" id="testClaudeCode">Test bridge</button>
+          <div class="result" id="claudeCodeResult"></div>
         </div>
       </section>
 

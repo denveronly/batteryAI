@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.78
+
+- New prediction engine **Claude via Claude Code (subscription)**: the same data, instructions
+  and plan format as the Claude API engine, sent to a Claude Code bridge (`POST /v1/complete`)
+  that runs `claude -p` with your own Claude Code login – no API key, no per-token bill. Set the
+  bridge URL and token in Settings → Claude Code bridge (*Test bridge* checks both without
+  running Claude); model and effort come from the Claude card. Also in the header dropdown.
+- If the bridge does not answer (e.g. its add-on is restarting), that run falls back to the
+  local fast engine and sends an error notification, so the battery is still planned.
+
 ## 0.4.77
 
 - **Quiet hours for critical alerts** (Settings → Phone notifications, 22:00–09:00 by

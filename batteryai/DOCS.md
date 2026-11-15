@@ -84,11 +84,19 @@ All settings are stored in `/data/settings.json` and apply immediately when save
 
 - **Home Assistant connection** – test shows the version and time zone, or why the
   add-on cannot read data.
-- **Prediction engine** – *Claude* (cloud), *ChatGPT* (OpenAI cloud), *Local fast*
+- **Prediction engine** – *Claude* (cloud), *Claude via Claude Code* (your Claude
+  subscription through a bridge), *ChatGPT* (OpenAI cloud), *Local fast*
   (statistics + rules, light CPU) or *Local slow* (Qwen2.5 3B LLM on the CPU). Also switchable from the header
   dropdown. See *Prediction engines* below.
 - **Claude** – API key (never sent back to the browser), model (dropdown with the models
   your key can use; also in the header), effort, language.
+- **Claude Code bridge** – URL and token of an HTTP bridge that runs `claude -p` with your
+  own Claude Code login (for example a small script inside the Claude Code add-on). It must
+  accept `POST /v1/complete` with `Authorization: Bearer <token>` and
+  `{"system", "prompt", "model", "effort", "json_schema", "timeout"}`, and answer
+  `{"structured_output", "text", "model", "input_tokens", "output_tokens"}`. Model and effort
+  come from the Claude card. If the bridge fails, that run uses *Local fast* and notifies you.
+  Use only your own bridge and login – a Claude subscription is personal.
 - **ChatGPT (OpenAI)** – OpenAI API key (from platform.openai.com; never sent back to the
   browser), model (dropdown with the chat models your key can use; also in the header)
   and reasoning effort for reasoning models (GPT-5, o-series). ChatGPT gets exactly the
@@ -156,6 +164,7 @@ Every entity has a **Test** button showing its current value or why it fails.
 | Engine | Runs | Speed / load | Quality |
 | --- | --- | --- | --- |
 | Claude | Anthropic cloud, API key | ~1 min, nothing local | Best: reads all history, weather, outages, tariffs |
+| Claude via Claude Code | your Claude subscription through a bridge | 1–3 min, nothing local | Same as Claude |
 | ChatGPT | OpenAI cloud, API key | ~1 min, nothing local | Same data and instructions as Claude |
 | Local fast | inside the add-on | instant, negligible CPU | Solid baseline: similar-day forecast + fixed rules |
 | Local slow | inside the add-on (llama.cpp) | minutes, ~3 GB RAM, all cores | Plans and explains like an AI, from the local fast forecast |
