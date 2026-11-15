@@ -2167,9 +2167,12 @@ function fillEngineSelect(data) {
   const local = el("optgroup", { label: "Local (inside the add-on)" },
     el("option", { value: "local_fast" }, "Local fast (light CPU)"),
     el("option", { value: "local_llm" }, "Local LLM (heavy CPU)"));
+  const claudeCode = el("optgroup", { label: "Claude via Claude Code (subscription)" }, ...data.models.map((m) => el("option", { value: `claude_code:${m.id}`, title: m.id }, m.display_name || m.id)));
   const openai = el("optgroup", { label: "ChatGPT (OpenAI cloud)" }, ...(data.openai_models || []).map((m) => el("option", { value: `openai:${m.id}`, title: m.id }, m.id)));
-  select.replaceChildren(claude, openai, local);
-  select.value = data.engine === "claude" ? `claude:${data.current}` : data.engine === "openai" ? `openai:${data.openai_current}` : data.engine;
+  select.replaceChildren(claude, claudeCode, openai, local);
+  select.value = data.engine === "claude" ? `claude:${data.current}`
+    : data.engine === "claude_code" ? `claude_code:${data.current}`
+      : data.engine === "openai" ? `openai:${data.openai_current}` : data.engine;
 }
 
 async function initModelSelect(force = false) {
@@ -2184,6 +2187,8 @@ $("modelSelect").addEventListener("change", async (e) => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(select.value.startsWith("claude:")
       ? { prediction_engine: "claude", claude_model: select.value.slice(7) }
+      : select.value.startsWith("claude_code:")
+        ? { prediction_engine: "claude_code", claude_model: select.value.slice(12) }
       : select.value.startsWith("openai:")
         ? { prediction_engine: "openai", openai_model: select.value.slice(7) }
         : { prediction_engine: select.value }),

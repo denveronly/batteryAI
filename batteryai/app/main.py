@@ -35,6 +35,7 @@ import notify
 import grid
 import outage_plan
 import planning
+import claude_code_engine
 import openai_engine
 import backup
 from bill import BillRecorder, bill_report, reprice_month
@@ -626,12 +627,15 @@ class BatteryAI:
             return self._client is not None
         if engine == "openai":
             return bool(self.opts.openai_api_key)
+        if engine == "claude_code":
+            return bool(self.opts.claude_code_url and self.opts.claude_code_token)
         return True
 
     @property
     def engine_label(self) -> str:
         return {
             "claude": self.opts.claude_model,
+            "claude_code": f"{self.opts.claude_model} (Claude Code)",
             "openai": self.opts.openai_model,
             "local_fast": "local-fast (statistics + rules)",
             "local_llm": f"local {local_llm.MODEL_NAME}",
@@ -720,6 +724,20 @@ class BatteryAI:
                 raise AnalysisError("Set the OpenAI API key in the Settings tab.")
             data = build_input(self.db, self.opts, snapshot, self.tz, trigger)
             return await openai_engine.analyze(self.opts, data), data
+        if engine == "claude_code":
+            data = build_input(self.db, self.opts, snapshot, self.tz, trigger)
+            try:
+                return await claude_code_engine.analyze(self.opts, data), data
+            except AnalysisError as err:
+                # The bridge lives in another add-on that may be restarting: keep the battery
+                # planned with the local fast engine instead of skipping this run.
+                _LOGGER.warning("Claude Code failed (%s); using the local fast engine for this run", err)
+                await self.notify("⚠️ BatteryAI: Claude Code unavailable",
+                                  f"{err} This run used the local fast engine.", self.opts.notify_errors, "error")
+                baseline = await asyncio.to_thread(local_fast.analyze, self.db, self.opts, snapshot, self.tz)
+                return {"result": baseline, "model": "local-fast (Claude Code unavailable)",
+                        "input_tokens": None, "output_tokens": None}, {"engine": "local_fast", "snapshot": snapshot,
+                                                                      "fallback_from": "claude_code", "error": str(err)}
 
         baseline = await asyncio.to_thread(local_fast.analyze, self.db, self.opts, snapshot, self.tz)
         if engine == "local_fast":
@@ -893,6 +911,8 @@ async def status(request: web.Request) -> web.Response:
         warnings.append("Claude API key is not set.")
     if opts.prediction_engine == "openai" and not opts.openai_api_key:
         warnings.append("OpenAI API key is not set.")
+    if opts.prediction_engine == "claude_code" and not (opts.claude_code_url and opts.claude_code_token):
+        warnings.append("Claude Code bridge URL or token is not set.")
     if opts.prediction_engine == "local_llm":
         llm = local_llm.available()
         if not llm["runtime"]:
@@ -1915,6 +1935,7 @@ async def models(request: web.Request) -> web.Response:
         "engine": app.opts.prediction_engine,
         "engines": [
             {"id": "claude", "name": "Claude (cloud)"},
+            {"id": "claude_code", "name": "Claude via Claude Code (subscription)"},
             {"id": "openai", "name": "ChatGPT (OpenAI cloud)"},
             {"id": "local_fast", "name": "Local fast – statistics + rules (light CPU)"},
             {"id": "local_llm", "name": f"Local slow – {local_llm.MODEL_NAME} LLM (heavy CPU)"},
@@ -2001,6 +2022,16 @@ async def test_claude(request: web.Request) -> web.Response:
     finally:
         await client.close()
     return web.json_response({"ok": True, "model": info.id, "display_name": info.display_name})
+
+
+@routes.post("/api/test/claude_code")
+async def test_claude_code(request: web.Request) -> web.Response:
+    """Checks that the Claude Code bridge answers and accepts the token (Claude is not run)."""
+    app = _app(request)
+    body = await request.json() if request.can_read_body else {}
+    url = (body.get("url") or "").strip().rstrip("/") or app.opts.claude_code_url
+    token = (body.get("token") or "").strip() or app.opts.claude_code_token
+    return web.json_response(await claude_code_engine.test(url, token))
 
 
 @routes.post("/api/test/openai")

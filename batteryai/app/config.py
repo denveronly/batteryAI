@@ -14,7 +14,7 @@ DATA_DIR = os.environ.get("BATTERYAI_DATA", "/data")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 
 WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-ENGINES = ("claude", "openai", "local_fast", "local_llm")
+ENGINES = ("claude", "claude_code", "openai", "local_fast", "local_llm")
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 OPENAI_EFFORTS = ["low", "medium", "high"]
 DEYE_PROGRAM_COUNT = 6
@@ -134,6 +134,10 @@ class Options:
     claude_api_key: str = ""
     claude_model: str = "claude-opus-5-5"
     claude_effort: str = "high"
+    # Claude through a Claude Code bridge (owner's Claude Code login instead of an API key);
+    # uses claude_model and claude_effort above.
+    claude_code_url: str = ""
+    claude_code_token: str = ""
     openai_api_key: str = ""
     openai_model: str = "gpt-5"
     openai_effort: str = "medium"  # reasoning_effort for reasoning models (o-series, GPT-5)
@@ -376,6 +380,7 @@ class Options:
         data = self.to_dict()
         data["claude_api_key_set"] = bool(data.pop("claude_api_key"))
         data["openai_api_key_set"] = bool(data.pop("openai_api_key"))
+        data["claude_code_token_set"] = bool(data.pop("claude_code_token"))
         return data
 
 
@@ -427,10 +432,13 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
 
     api_key = text("claude_api_key") if raw.get("claude_api_key") else base.claude_api_key
     openai_key = text("openai_api_key") if raw.get("openai_api_key") else base.openai_api_key
+    bridge_token = text("claude_code_token") if raw.get("claude_code_token") else base.claude_code_token
     opts = Options(
         claude_api_key=api_key,
         claude_model=text("claude_model") or "claude-opus-5-5",
         claude_effort=text("claude_effort"),
+        claude_code_url=text("claude_code_url").rstrip("/"),
+        claude_code_token=bridge_token,
         openai_api_key=openai_key,
         openai_model=text("openai_model") or "gpt-5",
         openai_effort=text("openai_effort"),
@@ -506,6 +514,8 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         errors["notify_quiet_to"] = "set both times, or leave both empty to turn quiet hours off"
     if opts.claude_effort not in EFFORTS:
         errors["claude_effort"] = "must be one of " + ", ".join(EFFORTS)
+    if opts.claude_code_url and not re.match(r"^https?://[^\s/]+", opts.claude_code_url):
+        errors["claude_code_url"] = "must start with http:// or https://, e.g. http://1016f397-claudecode:8800"
     if opts.openai_effort not in OPENAI_EFFORTS:
         errors["openai_effort"] = "must be one of " + ", ".join(OPENAI_EFFORTS)
     times = raw.get("analysis_times_list", base.analysis_times_list)

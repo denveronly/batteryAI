@@ -41,11 +41,12 @@ const NUMBER_FIELDS = ["record_interval_minutes", "history_days", "detail_days",
   "outage_precharge_minutes", "outage_precharge_soc_percent", "solar_forecast_percent", "night_reserve_soc_percent",
   "outage_shift_hours", "strict_outage_hours", "strict_min_soc_percent", "balance_soc_above", "pv_room_percent", "prediction_strictness",
   "deye_hv_interval_seconds", "ext_charger_start_below", "ext_charger_stop_at"];
-const TEXT_FIELDS = ["battery_name", "notify_prefix", "claude_effort", "response_language", "extra_instructions", "tariff_currency", "program_time_marks", "prediction_engine", "openai_effort", "balance_time", "notify_quiet_from", "notify_quiet_to", "ext_charger_switch", "ext_charger_power_sensor", "ext_charger_grid_sensor", "ext_charger_soc_sensor", "ext_charger_battery_power_sensor", "ext_charger_charge_negative"];
+const TEXT_FIELDS = ["battery_name", "notify_prefix", "claude_effort", "response_language", "extra_instructions", "tariff_currency", "program_time_marks", "prediction_engine", "claude_code_url", "openai_effort", "balance_time", "notify_quiet_from", "notify_quiet_to", "ext_charger_switch", "ext_charger_power_sensor", "ext_charger_grid_sensor", "ext_charger_soc_sensor", "ext_charger_battery_power_sensor", "ext_charger_charge_negative"];
 const PRICE_FIELDS = ["battery_capacity_kwh", "ext_charger_grid_limit_kw", "ext_charger_grid_resume_kw", "ext_charger_grid_low_kw"];
 
 const ENGINE_HELP = {
   claude: "Claude reads all recorded history, weather, tariffs and outages and writes the plan. Needs internet and an API key; each prediction costs API tokens.",
+  claude_code: "Claude gets the same data and instructions as with an API key, but runs through a Claude Code bridge on your own Claude subscription – no API key and no per-token bill. Takes a minute or two; if the bridge is down, that run falls back to the local fast engine.",
   openai: "ChatGPT gets the same data and instructions as Claude (history, weather, tariffs, outages) and writes the plan. Needs internet and an OpenAI API key; each prediction costs API tokens.",
   local_fast: "Runs inside the add-on with no internet and no AI: averages your most similar past days (weekday/weekend, temperature) and plans each program with fixed rules. Instant and light on the CPU.",
   local_llm: "Runs Qwen2.5 3B inside the add-on (no internet after the one-time model download): the local fast forecast is its input and the LLM writes the plan. Needs ~3 GB RAM and takes minutes per prediction on a small CPU.",
@@ -55,7 +56,10 @@ function updateEngineView() {
   const engine = field("prediction_engine").value;
   $("engineHelp").textContent = ENGINE_HELP[engine] || "";
   $("localLlmBox").hidden = engine !== "local_llm";
-  $("claudeBox").hidden = engine !== "claude";
+  $("claudeBox").hidden = engine !== "claude" && engine !== "claude_code";
+  $("claudeKeyLabel").hidden = engine === "claude_code";
+  $("claudeTestRow").hidden = engine === "claude_code";
+  $("claudeCodeBox").hidden = engine !== "claude_code";
   $("openaiBox").hidden = engine !== "openai";
   if (engine === "local_llm") refreshLlmStatus();
 }
@@ -534,6 +538,8 @@ function fillForm(s) {
     fillModelSelect(field("openai_model"), data.openai_models || [], s.openai_model);
     $("openaiModelHint").textContent = data.openai_live ? "Models available to your API key." : data.openai_error ? `Could not list models: ${data.openai_error}` : "Save an API key to list the models it can use.";
   });
+  field("claude_code_token").value = "";
+  $("claudeCodeTokenHint").textContent = s.claude_code_token_set ? "A token is saved. Leave empty to keep it." : "No token saved yet.";
   field("openai_api_key").value = "";
   $("openaiKeyHint").textContent = s.openai_api_key_set ? "A key is saved. Leave empty to keep it." : "No key saved yet.";
   $("apiKeyHint").textContent = s.claude_api_key_set ? "A key is saved. Leave empty to keep it." : "No key saved yet.";
@@ -567,6 +573,7 @@ function readForm() {
   for (const key of CHECKBOXES) data[key] = field(key).checked;
   if (value("claude_api_key")) data.claude_api_key = value("claude_api_key");
   if (value("openai_api_key")) data.openai_api_key = value("openai_api_key");
+  if (value("claude_code_token")) data.claude_code_token = value("claude_code_token");
   for (const s of SENSORS) data[s.key] = value(s.key);
   for (let slot = 1; slot <= PROGRAMS; slot++) {
     data.deye_programs.push({
@@ -664,6 +671,18 @@ async function testClaude() {
   try {
     const r = await postJson("api/test/claude", { api_key: field("claude_api_key").value.trim(), model: field("claude_model").value.trim() });
     if (r.ok) showResult(result, "ok", "✓ API key works · ", el("span", { class: "value" }, r.display_name || r.model), ` (${r.model})`);
+    else showResult(result, "error", `✕ ${r.error}`);
+  } catch (err) {
+    showResult(result, "error", `✕ Could not run the test: ${err.message}`);
+  }
+}
+
+async function testClaudeCode() {
+  const result = $("claudeCodeResult");
+  showResult(result, "", "Testing…");
+  try {
+    const r = await postJson("api/test/claude_code", { url: field("claude_code_url").value.trim(), token: field("claude_code_token").value.trim() });
+    if (r.ok) showResult(result, "ok", "✓ Bridge answers and accepts the token");
     else showResult(result, "error", `✕ ${r.error}`);
   } catch (err) {
     showResult(result, "error", `✕ Could not run the test: ${err.message}`);
@@ -804,6 +823,7 @@ $("llmDelete").addEventListener("click", async () => {
 $("testHa").addEventListener("click", testHa);
 $("testClaude").addEventListener("click", testClaude);
 $("testOpenai").addEventListener("click", testOpenai);
+$("testClaudeCode").addEventListener("click", testClaudeCode);
 $("testAll").addEventListener("click", testAllEntities);
 $("testNotify").addEventListener("click", () => testNotify(false));
 $("testCritical").addEventListener("click", () => testNotify(true));
