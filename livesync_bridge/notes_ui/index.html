@@ -474,6 +474,8 @@ $("lockForm").onsubmit = async (e) => {
     token = b.token; try { sessionStorage.setItem("unlock", token); } catch {}
     $("lock").hidden = true; $("pass").value = "";
     await loadList(); route();
+  } catch (err) {
+    $("passErr").textContent = "Нет связи с аддоном (" + (err.message || err) + "). Обнови страницу и попробуй ещё раз.";
   } finally { $("unlockBtn").disabled = false; }
 };
 $("lockBtn").onclick = async () => {

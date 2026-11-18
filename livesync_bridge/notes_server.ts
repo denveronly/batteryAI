@@ -144,10 +144,12 @@ async function unlock(pass: string): Promise<{ token?: string; error?: string; s
   });
   unlocking = job.catch(() => {});
   if (!await job) {
+    console.log(`Panel unlock: wrong passphrase${lastError ? " (" + lastError + ")" : ""}`);
     failures.push(Date.now());
     await new Promise((r) => setTimeout(r, 1500));
     return { status: 403, error: "Неверная passphrase" };
   }
+  console.log("Panel unlocked");
   const token = crypto.randomUUID() + crypto.randomUUID();
   sessions.set(token, Date.now());
   return { status: 200, token };

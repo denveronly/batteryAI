@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- The lock screen shows an error instead of hanging on «Проверяю…» when the add-on cannot be reached; unlock attempts are logged (without the passphrase).
+
 ## 0.3.0
 
 - The panel asks for the vault passphrase on every visit; access expires after `ui_lock_minutes` without use, 🔒 locks at once.
