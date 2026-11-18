@@ -1,5 +1,5 @@
 name: Obsidian LiveSync Bridge
-version: "0.1.0"
+version: "0.1.1"
 slug: livesync_bridge
 description: Keeps an Obsidian Self-hosted LiveSync vault (CouchDB) in sync with a plain Markdown folder in /share
 url: https://github.com/denveronly/batteryai/tree/main/livesync_bridge
