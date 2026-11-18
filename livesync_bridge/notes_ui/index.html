@@ -21,6 +21,7 @@
   --accent: #a58bff; --accent-soft: #2a2442; --code: #262626; --danger: #ef5350;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; }
 body { background: var(--bg); color: var(--text); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 button, input, textarea { font: inherit; color: inherit; }
@@ -472,7 +473,7 @@ $("lockForm").onsubmit = async (e) => {
     const b = await r.json().catch(() => ({}));
     if (!r.ok) { $("passErr").textContent = b.error || `Ошибка ${r.status}`; return; }
     token = b.token; try { sessionStorage.setItem("unlock", token); } catch {}
-    $("lock").hidden = true; $("pass").value = "";
+    $("lock").hidden = true; $("pass").value = ""; $("passErr").textContent = "";
     await loadList(); route();
   } catch (err) {
     $("passErr").textContent = "Нет связи с аддоном (" + (err.message || err) + "). Обнови страницу и попробуй ещё раз.";

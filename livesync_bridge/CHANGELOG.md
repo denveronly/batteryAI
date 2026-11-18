@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.2
+
+- Fix: the lock screen stayed on top after a correct passphrase.
+
 ## 0.3.1
 
 - The lock screen shows an error instead of hanging on «Проверяю…» when the add-on cannot be reached; unlock attempts are logged (without the passphrase).

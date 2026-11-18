@@ -1,5 +1,5 @@
 name: Obsidian LiveSync Bridge
-version: "0.3.1"
+version: "0.3.2"
 slug: livesync_bridge
 description: Obsidian notes from a Self-hosted LiveSync vault (CouchDB) in the Home Assistant sidebar, read and written straight in the database
 url: https://github.com/denveronly/batteryai/tree/main/livesync_bridge
