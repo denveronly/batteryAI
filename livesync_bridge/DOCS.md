@@ -16,7 +16,8 @@ Built on [livesync-bridge](https://github.com/vrtmrz/livesync-bridge) and its li
 | `couchdb_url` | CouchDB address, the same one the LiveSync plugin uses, e.g. `http://192.168.1.2:5984` |
 | `database` | Database name from the plugin settings |
 | `username`, `password` | CouchDB user from the plugin settings |
-| `passphrase` | End-to-end encryption passphrase, if *End-to-End Encryption* is on in the plugin |
+| `passphrase` | End-to-end encryption passphrase, if *End-to-End Encryption* is on in the plugin. Optional — see *Lock* below |
+| `ui_lock_minutes` | The panel locks again after this many minutes without use (default 15) |
 | `path_obfuscation` | Turn on if *Path Obfuscation* is on in the plugin (needs the passphrase) |
 | `voice_note_folder` | Vault folder for daily voice notes, default `Claude Note` |
 | `timezone` | Time zone for the voice-note dates and times |
@@ -33,10 +34,21 @@ sync once if the log says the database version is not compatible.
 ## Panel
 
 - Folder tree and search by name on the left; notes are shown rendered, with `[[wikilinks]]`
-  and embedded images.
+  and embedded images. Canvas files are shown as a board you can drag and zoom (Ctrl + wheel or pinch).
 - **Править** edits the Markdown, **Сохранить** (or Ctrl+S) writes it to the vault. If the note
   was changed on another device in the meantime, saving is refused instead of overwriting it.
 - **Новая** creates a note, 🗑 deletes it from the vault (on every device).
+
+## Lock
+
+The panel always asks for the vault passphrase first. Each browser tab gets its own unlock, which ends
+after `ui_lock_minutes` without use, on 🔒, or when the add-on restarts. Five wrong passphrases within
+10 minutes pause further attempts.
+
+- **Passphrase in the options:** the panel checks what you type against it; voice notes always work.
+- **Passphrase left empty:** it is not stored anywhere. The vault stays closed after every add-on start
+  until someone enters the passphrase in the panel; it is then kept in memory only. Until then voice
+  notes are refused (HTTP 423).
 
 ## Voice notes API
 

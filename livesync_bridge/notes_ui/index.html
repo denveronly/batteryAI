@@ -65,6 +65,28 @@ textarea.editor { width: 100%; max-width: 860px; display: block; margin: 0 auto;
   border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
   font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; resize: vertical; }
 .empty { color: var(--muted); text-align: center; margin-top: 18vh; }
+.content.board { padding: 0; overflow: hidden; position: relative; }
+.cv { position: absolute; inset: 0; overflow: hidden; touch-action: none; cursor: grab; background:
+  radial-gradient(circle, var(--line) 1px, transparent 1px) 0 0 / 22px 22px; }
+.cv.drag { cursor: grabbing; }
+.cv-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.cv-node { position: absolute; border: 2px solid var(--c, var(--line)); border-radius: 10px; background: var(--panel);
+  overflow: auto; padding: 10px 14px; font-size: 14px; }
+.cv-node .note { max-width: none; }
+.cv-node .note > :first-child { margin-top: 0; }
+.cv-group { position: absolute; border: 2px dashed var(--c, var(--muted)); border-radius: 14px;
+  background: color-mix(in srgb, var(--c, var(--muted)) 7%, transparent); }
+.cv-group span { position: absolute; top: -26px; left: 4px; font-weight: 600; color: var(--c, var(--muted)); white-space: nowrap; }
+.cv-file { display: flex; flex-direction: column; gap: 6px; }
+.cv-file img { width: 100%; height: 100%; object-fit: contain; }
+.cv svg { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.cv-tools { position: absolute; right: 12px; bottom: 12px; display: flex; gap: 6px; z-index: 2; }
+.lock { position: fixed; inset: 0; z-index: 10; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.lock form { width: 100%; max-width: 340px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 24px; display: grid; gap: 12px; }
+.lock h2 { margin: 0; font-size: 18px; }
+.lock p { margin: 0; color: var(--muted); font-size: 13px; }
+.lock input { padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.lock .err { color: var(--danger); min-height: 1.2em; font-size: 13px; }
 .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg);
   padding: 8px 14px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; }
 .toast.show { opacity: .92; }
@@ -95,11 +117,21 @@ textarea.editor { width: 100%; max-width: 860px; display: block; margin: 0 auto;
       <button class="btn primary" id="save" hidden>Сохранить</button>
       <button class="btn" id="cancel" hidden>Отмена</button>
       <button class="btn danger" id="del" hidden title="Удалить заметку">🗑</button>
+      <button class="btn" id="lockBtn" title="Заблокировать">🔒</button>
     </div>
     <div class="content" id="content"><div class="empty">Загружаю список заметок…</div></div>
   </main>
 </div>
 <div class="toast" id="toast"></div>
+<div class="lock" id="lock" hidden>
+  <form id="lockForm" autocomplete="off">
+    <h2>🔒 Obsidian</h2>
+    <p>Введи passphrase хранилища (End-to-End Encryption из LiveSync).</p>
+    <input id="pass" type="password" placeholder="Passphrase" autocomplete="current-password" required>
+    <div class="err" id="passErr"></div>
+    <button class="btn primary" type="submit" id="unlockBtn">Открыть</button>
+  </form>
+</div>
 <script>
 const $ = (id) => document.getElementById(id);
 let files = [];            // [{path, mtime, size}]
@@ -110,15 +142,23 @@ function toast(msg) {
   const t = $("toast"); t.textContent = msg; t.classList.add("show");
   clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 2600);
 }
-async function api(path, opts) {
+// unlock token lives only in this tab (sessionStorage) and expires on the server after inactivity
+let token = null;
+try { token = sessionStorage.getItem("unlock"); } catch {}
+function showLock(msg) {
+  $("lock").hidden = false; $("passErr").textContent = msg || ""; $("pass").value = ""; $("pass").focus();
+}
+async function api(path, opts = {}) {
+  opts.headers = { ...(opts.headers || {}), "x-unlock": token || "" };
   const r = await fetch(path, opts);
+  if (r.status === 401) { showLock("Сессия истекла, введи passphrase ещё раз"); throw new Error("Заблокировано"); }
   const ct = r.headers.get("content-type") || "";
   const body = ct.includes("json") ? await r.json() : await r.text();
   if (!r.ok) throw new Error(body && body.error ? body.error : `HTTP ${r.status}`);
   return body;
 }
 const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const fileUrl = (p) => "api/file?path=" + encodeURIComponent(p);
+const fileUrl = (p) => "api/file?path=" + encodeURIComponent(p) + "&t=" + encodeURIComponent(token || "");
 const isText = (p) => /\.(md|txt|canvas|base|json|css|js|csv)$/i.test(p);
 
 // ---- list / tree ----
@@ -128,6 +168,7 @@ async function loadList(refresh) {
     renderTree();
     if (!current && !location.hash) $("content").innerHTML = `<div class="empty">${files.length} заметок и файлов. Выбери слева.</div>`;
   } catch (e) {
+    if (!$("lock").hidden) return;
     $("content").innerHTML = `<div class="empty">${esc(e.message)}</div>`;
     setTimeout(() => loadList(), 5000);
   }
@@ -212,6 +253,7 @@ async function open(path) {
   $("app").classList.remove("nav");
   $("path").textContent = path;
   const c = $("content");
+  c.classList.remove("board");
   if (!isText(path)) {
     current = { path };
     setButtons();
@@ -227,11 +269,131 @@ async function open(path) {
     current = { path, text: f.text, mtime: f.mtime };
     renderTree(); setButtons();
     c.innerHTML = "";
+    c.classList.remove("board");
+    if (/\.canvas$/i.test(path)) { try { return renderCanvas(JSON.parse(f.text || "{}")); } catch { /* not JSON: show as text */ } }
     if (/\.md$/i.test(path)) c.append(render(f.text));
     else { const pre = document.createElement("pre"); pre.className = "note"; pre.textContent = f.text; c.append(pre); }
     c.scrollTop = 0;
   } catch (e) { current = null; setButtons(); c.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
+// ---- canvas (.canvas = JSON Canvas: nodes text/file/link/group + edges) ----
+const CV_COLORS = { 1: "#e93147", 2: "#ec7500", 3: "#e0ac00", 4: "#08b94e", 5: "#00bfbc", 6: "#a882ff" };
+function renderCanvas(data) {
+  const c = $("content");
+  c.classList.add("board");
+  const nodes = Array.isArray(data.nodes) ? data.nodes : [];
+  const edges = Array.isArray(data.edges) ? data.edges : [];
+  if (!nodes.length) { c.classList.remove("board"); c.innerHTML = `<div class="empty">Пустой canvas</div>`; return; }
+  const view = document.createElement("div"); view.className = "cv";
+  const world = document.createElement("div"); world.className = "cv-world";
+  view.append(world);
+  const color = (n) => n.color ? (CV_COLORS[n.color] || n.color) : "";
+  const byId = {};
+  // groups under everything else
+  for (const n of [...nodes].sort((a, b) => (a.type === "group" ? 0 : 1) - (b.type === "group" ? 0 : 1))) {
+    byId[n.id] = n;
+    const el = document.createElement(n.type === "group" ? "div" : "div");
+    el.className = n.type === "group" ? "cv-group" : "cv-node";
+    Object.assign(el.style, { left: n.x + "px", top: n.y + "px", width: n.width + "px", height: n.height + "px" });
+    if (color(n)) el.style.setProperty("--c", color(n));
+    if (n.type === "group") {
+      if (n.label) { const s = document.createElement("span"); s.textContent = n.label; el.append(s); }
+    } else if (n.type === "text") {
+      el.append(render(n.text || ""));
+    } else if (n.type === "file") {
+      const p = resolve(n.file || "") || n.file;
+      el.classList.add("cv-file");
+      if (/\.(png|jpe?g|gif|webp|svg)$/i.test(p || "")) el.innerHTML = `<img src="${fileUrl(p)}" alt="">`;
+      else el.innerHTML = `<a href="#/${encodeURIComponent(p || "")}">📄 ${esc((n.file || "").split("/").pop())}</a>`;
+    } else if (n.type === "link") {
+      el.innerHTML = `<a href="${esc(n.url || "")}" target="_blank" rel="noopener">🔗 ${esc(n.url || "")}</a>`;
+    }
+    world.append(el);
+  }
+  // edges
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.innerHTML = `<defs><marker id="cv-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>`;
+  svg.style.color = "var(--muted)";
+  const side = (n, s) => {
+    const cx = n.x + n.width / 2, cy = n.y + n.height / 2;
+    return { top: [cx, n.y], bottom: [cx, n.y + n.height], left: [n.x, cy], right: [n.x + n.width, cy] }[s] || [cx, cy];
+  };
+  const pull = { top: [0, -1], bottom: [0, 1], left: [-1, 0], right: [1, 0] };
+  for (const e of edges) {
+    const a = byId[e.fromNode], b = byId[e.toNode];
+    if (!a || !b) continue;
+    const [x1, y1] = side(a, e.fromSide), [x2, y2] = side(b, e.toSide);
+    const d = Math.max(40, Math.hypot(x2 - x1, y2 - y1) / 3);
+    const [p1x, p1y] = pull[e.fromSide] || [0, 0], [p2x, p2y] = pull[e.toSide] || [0, 0];
+    const path = document.createElementNS(NS, "path");
+    path.setAttribute("d", `M${x1},${y1} C${x1 + p1x * d},${y1 + p1y * d} ${x2 + p2x * d},${y2 + p2y * d} ${x2},${y2}`);
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", (e.color && (CV_COLORS[e.color] || e.color)) || "currentColor");
+    path.setAttribute("stroke-width", "2");
+    if (e.toEnd !== "none") path.setAttribute("marker-end", "url(#cv-arrow)");
+    if (e.fromEnd === "arrow") path.setAttribute("marker-start", "url(#cv-arrow)");
+    svg.append(path);
+    if (e.label) {
+      const t = document.createElementNS(NS, "text");
+      t.setAttribute("x", (x1 + x2) / 2); t.setAttribute("y", (y1 + y2) / 2 - 6);
+      t.setAttribute("text-anchor", "middle"); t.setAttribute("fill", "var(--text)"); t.setAttribute("font-size", "13");
+      t.textContent = e.label; svg.append(t);
+    }
+  }
+  world.prepend(svg);
+
+  // pan / zoom
+  const minX = Math.min(...nodes.map((n) => n.x)), minY = Math.min(...nodes.map((n) => n.y) ) - 30;
+  const maxX = Math.max(...nodes.map((n) => n.x + n.width)), maxY = Math.max(...nodes.map((n) => n.y + n.height));
+  let s = 1, tx = 0, ty = 0;
+  const apply = () => { world.style.transform = `translate(${tx}px,${ty}px) scale(${s})`; };
+  const fit = () => {
+    const w = view.clientWidth || 800, h = view.clientHeight || 600, pad = 40;
+    s = Math.min(1.5, Math.max(0.05, Math.min((w - pad * 2) / (maxX - minX), (h - pad * 2) / (maxY - minY))));
+    tx = (w - (maxX - minX) * s) / 2 - minX * s; ty = (h - (maxY - minY) * s) / 2 - minY * s; apply();
+  };
+  const zoomAt = (f, cx, cy) => {
+    const ns = Math.min(4, Math.max(0.05, s * f));
+    tx = cx - (cx - tx) * (ns / s); ty = cy - (cy - ty) * (ns / s); s = ns; apply();
+  };
+  view.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const r = view.getBoundingClientRect();
+    if (e.ctrlKey || e.metaKey) zoomAt(Math.exp(-e.deltaY * 0.01), e.clientX - r.left, e.clientY - r.top);
+    else { tx -= e.deltaX; ty -= e.deltaY; apply(); }
+  }, { passive: false });
+  const pts = new Map(); let last = null;
+  view.addEventListener("pointerdown", (e) => {
+    if (e.target.closest("a")) return;
+    view.setPointerCapture(e.pointerId); pts.set(e.pointerId, [e.clientX, e.clientY]); view.classList.add("drag");
+  });
+  view.addEventListener("pointermove", (e) => {
+    if (!pts.has(e.pointerId)) return;
+    const prev = pts.get(e.pointerId); pts.set(e.pointerId, [e.clientX, e.clientY]);
+    if (pts.size === 1) { tx += e.clientX - prev[0]; ty += e.clientY - prev[1]; apply(); }
+    else if (pts.size === 2) {
+      const [a, b] = [...pts.values()];
+      const dist = Math.hypot(a[0] - b[0], a[1] - b[1]);
+      const r = view.getBoundingClientRect();
+      if (last) zoomAt(dist / last, (a[0] + b[0]) / 2 - r.left, (a[1] + b[1]) / 2 - r.top);
+      last = dist;
+    }
+  });
+  const up = (e) => { pts.delete(e.pointerId); last = null; if (!pts.size) view.classList.remove("drag"); };
+  view.addEventListener("pointerup", up); view.addEventListener("pointercancel", up);
+
+  const tools = document.createElement("div"); tools.className = "cv-tools";
+  tools.innerHTML = `<button class="btn" data-z="out">−</button><button class="btn" data-z="fit">⤢</button><button class="btn" data-z="in">+</button>`;
+  tools.onclick = (e) => {
+    const z = e.target.dataset.z; if (!z) return;
+    if (z === "fit") return fit();
+    zoomAt(z === "in" ? 1.25 : 0.8, view.clientWidth / 2, view.clientHeight / 2);
+  };
+  c.append(view, tools);
+  requestAnimationFrame(fit);
+}
+
 function setButtons() {
   const text = current && current.text !== undefined;
   $("edit").hidden = !text || editing;
@@ -243,6 +405,7 @@ function startEdit() {
   editing = true; setButtons();
   const ta = document.createElement("textarea");
   ta.className = "editor"; ta.id = "editor"; ta.value = current.text; ta.spellcheck = true;
+  $("content").classList.remove("board");
   $("content").innerHTML = ""; $("content").append(ta); ta.focus();
 }
 async function save() {
@@ -300,7 +463,30 @@ addEventListener("keydown", (e) => {
   if (e.key === "Escape" && editing) $("cancel").click();
 });
 addEventListener("beforeunload", (e) => { if (editing) e.preventDefault(); });
-loadList().then(route);
+$("lockForm").onsubmit = async (e) => {
+  e.preventDefault();
+  $("unlockBtn").disabled = true; $("passErr").textContent = "Проверяю…";
+  try {
+    const r = await fetch("api/unlock", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ passphrase: $("pass").value }) });
+    const b = await r.json().catch(() => ({}));
+    if (!r.ok) { $("passErr").textContent = b.error || `Ошибка ${r.status}`; return; }
+    token = b.token; try { sessionStorage.setItem("unlock", token); } catch {}
+    $("lock").hidden = true; $("pass").value = "";
+    await loadList(); route();
+  } finally { $("unlockBtn").disabled = false; }
+};
+$("lockBtn").onclick = async () => {
+  if (editing && !confirm("Есть несохранённые правки. Заблокировать без сохранения?")) return;
+  editing = false;
+  await fetch("api/lock", { method: "POST", headers: { "x-unlock": token || "" } }).catch(() => {});
+  token = null; try { sessionStorage.removeItem("unlock"); } catch {}
+  current = null; files = []; $("tree").innerHTML = ""; $("path").textContent = "Obsidian";
+  $("content").classList.remove("board");
+  $("content").innerHTML = `<div class="empty">Заблокировано</div>`; setButtons();
+  showLock();
+};
+if (token) loadList().then(route); else showLock();
 </script>
 </body>
 </html>

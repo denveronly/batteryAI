@@ -3,6 +3,11 @@
 //
 // Ingress (Home Assistant sidebar) talks to it from 172.30.32.2; Home Assistant Core may call
 // POST /api/append (voice notes) from 172.30.32.1. Everything else is refused.
+//
+// The panel is locked: every browser session must enter the vault passphrase first (checked here,
+// then a random in-memory unlock token, which expires after ui_lock_minutes without use).
+// If the passphrase is not in the add-on options, the vault stays closed until the first correct
+// passphrase is typed in the panel; it is then kept in memory only, until the add-on restarts.
 import { DirectFileManipulator } from "@vrtmrz/livesync-commonlib";
 import { DEVICE_ID_PREFERRED, MILESTONE_DOCID } from "@vrtmrz/livesync-commonlib/compat/common/types";
 import { decodeBinary } from "@vrtmrz/livesync-commonlib/compat/string_and_binary/convert";
@@ -27,8 +32,8 @@ const conf: Record<string, any> = {
   database: o.database,
   username: o.username,
   password: o.password,
-  passphrase: o.passphrase || "",
-  obfuscatePassphrase: o.path_obfuscation ? o.passphrase : "",
+  passphrase: "",
+  obfuscatePassphrase: "",
   pathNormalizationVersion: o.unicode_nfc_paths ? 1 : 0,
   handleFilenameCaseSensitive: !!o.filename_case_sensitive,
 };
@@ -57,16 +62,39 @@ async function applyRemoteTweaks() {
 
 let man: DirectFileManipulator | undefined;
 let lastError = "";
-async function connect() {
-  for (let attempt = 1; ; attempt++) {
+let passphrase: string | undefined = o.passphrase || undefined;
+
+async function openVault(pass: string): Promise<DirectFileManipulator> {
+  conf.passphrase = pass;
+  conf.obfuscatePassphrase = o.path_obfuscation ? pass : "";
+  await applyRemoteTweaks();
+  const m = new DirectFileManipulator(conf as never, { fetch: (r, i) => globalThis.fetch(r, i) });
+  await m.ready.promise;
+  return m;
+}
+
+// Proves the passphrase by decrypting one real note (opening the database alone does not).
+async function canDecrypt(m: DirectFileManipulator): Promise<boolean> {
+  // deno-lint-ignore no-explicit-any
+  for await (const d of m.enumerateAllNormalDocs({ metaOnly: true }) as AsyncGenerator<any>) {
+    if (d.deleted || d._deleted || !d.path || String(d.path).startsWith("i:")) continue;
     try {
-      await applyRemoteTweaks();
-      const m = new DirectFileManipulator(conf as never, { fetch: (r, i) => globalThis.fetch(r, i) });
-      await m.ready.promise;
-      man = m;
+      // deno-lint-ignore no-explicit-any
+      const full = await m.get(d.path) as any;
+      return !!full && Array.isArray(full.data);
+    } catch {
+      return false;
+    }
+  }
+  return true; // empty vault: nothing to prove against
+}
+
+async function connectWithConfiguredPassphrase() {
+  for (let attempt = 1; passphrase && !man; attempt++) {
+    try {
+      man = await openVault(passphrase);
       lastError = "";
-      console.log(`Connected to ${conf.url}/${conf.database}${conf.passphrase ? " (end-to-end encrypted)" : ""}`);
-      return;
+      console.log(`Connected to ${conf.url}/${conf.database} (passphrase from the add-on options)`);
     } catch (e) {
       lastError = e instanceof Error ? e.message : String(e);
       const delay = Math.min(60, 2 ** Math.min(attempt, 6));
@@ -75,7 +103,55 @@ async function connect() {
     }
   }
 }
-connect();
+if (passphrase) connectWithConfiguredPassphrase();
+else console.log("No passphrase in the options: the vault opens when it is entered in the panel");
+
+// ---- panel lock ----------------------------------------------------------------------------------
+const LOCK_MS = Math.max(1, Number(o.ui_lock_minutes) || 15) * 60_000;
+const sessions = new Map<string, number>(); // token -> last use
+const failures: number[] = [];               // times of wrong passphrases (brute-force brake)
+
+function sameText(a: string, b: string) {
+  const x = new TextEncoder().encode(a), y = new TextEncoder().encode(b);
+  let diff = x.length ^ y.length;
+  for (let i = 0; i < Math.max(x.length, y.length); i++) diff |= (x[i] ?? 0) ^ (y[i] ?? 0);
+  return diff === 0;
+}
+function sessionOk(token: string | null) {
+  if (!token) return false;
+  const seen = sessions.get(token);
+  if (!seen || Date.now() - seen > LOCK_MS) { if (token) sessions.delete(token); return false; }
+  sessions.set(token, Date.now());
+  return true;
+}
+let unlocking: Promise<unknown> = Promise.resolve();
+async function unlock(pass: string): Promise<{ token?: string; error?: string; status: number }> {
+  const now = Date.now();
+  while (failures.length && now - failures[0] > 10 * 60_000) failures.shift();
+  if (failures.length >= 5) return { status: 429, error: "Слишком много неверных попыток. Подожди 10 минут." };
+  const job = unlocking.then(async () => {
+    if (passphrase) return sameText(pass, passphrase);
+    try {
+      const m = await openVault(pass);
+      if (!await canDecrypt(m)) { await m.close().catch(() => {}); return false; }
+      man = m; passphrase = pass; lastError = "";
+      console.log(`Vault opened from the panel: ${conf.url}/${conf.database}`);
+      return true;
+    } catch (e) {
+      lastError = e instanceof Error ? e.message : String(e);
+      return false;
+    }
+  });
+  unlocking = job.catch(() => {});
+  if (!await job) {
+    failures.push(Date.now());
+    await new Promise((r) => setTimeout(r, 1500));
+    return { status: 403, error: "Неверная passphrase" };
+  }
+  const token = crypto.randomUUID() + crypto.randomUUID();
+  sessions.set(token, Date.now());
+  return { status: 200, token };
+}
 
 // ---- vault access ----------------------------------------------------------------------------
 type Item = { path: string; mtime: number; size: number };
@@ -151,18 +227,30 @@ Deno.serve({ port: PORT, hostname: "0.0.0.0" }, async (req, info) => {
   const fromCore = ip === CORE_IP && route === "/api/append" && req.method === "POST";
   if (!fromIngress && !fromCore) return new Response("Forbidden", { status: 403 });
 
-  if (route === "/") return new Response(UI, { headers: { "content-type": "text/html; charset=utf-8" } });
-  if (!man) return json({ error: lastError ? `Нет доступа к базе: ${lastError}` : "Подключаюсь к базе…" }, 503);
+  if (route === "/") {
+    return new Response(UI, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+  }
 
   try {
-    if (route === "/api/list") return json(await list(url.searchParams.has("refresh")));
-
     if (route === "/api/append" && req.method === "POST") {
+      if (!man) return json({ error: passphrase ? "vault is not connected yet" : "vault is locked: enter the passphrase in the panel" }, 423);
       const b = await req.json().catch(() => ({}));
       const text = String(b.text ?? "").replace(/\s+/g, " ").trim().slice(0, 2000);
       if (!text) return json({ error: "empty text" }, 400);
       return json({ path: await appendNote(text) });
     }
+
+    if (route === "/api/unlock" && req.method === "POST") {
+      const b = await req.json().catch(() => ({}));
+      const r = await unlock(String(b.passphrase ?? ""));
+      return json(r.token ? { token: r.token, minutes: LOCK_MS / 60_000 } : { error: r.error }, r.status);
+    }
+    const token = req.headers.get("x-unlock") ?? url.searchParams.get("t");
+    if (route === "/api/lock" && req.method === "POST") { if (token) sessions.delete(token); return json({ ok: true }); }
+    if (!sessionOk(token)) return json({ locked: true, error: "Введи passphrase" }, 401);
+    if (!man) return json({ error: lastError ? `Нет доступа к базе: ${lastError}` : "Подключаюсь к базе…" }, 503);
+
+    if (route === "/api/list") return json(await list(url.searchParams.has("refresh")));
 
     if (route === "/api/file") {
       const path = url.searchParams.get("path");

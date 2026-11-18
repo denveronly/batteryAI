@@ -1,5 +1,5 @@
 name: Obsidian LiveSync Bridge
-version: "0.2.0"
+version: "0.3.0"
 slug: livesync_bridge
 description: Obsidian notes from a Self-hosted LiveSync vault (CouchDB) in the Home Assistant sidebar, read and written straight in the database
 url: https://github.com/denveronly/batteryai/tree/main/livesync_bridge
@@ -23,6 +23,7 @@ options:
   password: ""
   passphrase: ""
   path_obfuscation: false
+  ui_lock_minutes: 15
   voice_note_folder: Claude Note
   timezone: Europe/Kyiv
   mirror_to_share: false
@@ -38,6 +39,7 @@ schema:
   password: password
   passphrase: password?
   path_obfuscation: bool
+  ui_lock_minutes: int(1,1440)
   voice_note_folder: str
   timezone: str
   mirror_to_share: bool
