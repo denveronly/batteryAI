@@ -1,13 +1,13 @@
 # Obsidian LiveSync Bridge
 
-Runs [livesync-bridge](https://github.com/vrtmrz/livesync-bridge) by vrtmrz next to Home Assistant.
-It keeps the CouchDB database of the Obsidian **Self-hosted LiveSync** plugin in two-way sync with
-an ordinary folder of Markdown files in `/share`, for example `/share/obsidian`.
+Opens the notes of an Obsidian **Self-hosted LiveSync** vault in the Home Assistant sidebar
+(**Obsidian** panel, administrators only). Notes are read, decrypted and saved straight in the
+CouchDB database on every request. **Nothing is copied to disk**, so the vault does not end up in
+`/share`, in other add-ons or in Home Assistant backups.
 
-Once the folder is there, Home Assistant (a `shell_command`, a script, a voice assistant) can read
-notes and add new ones simply by writing `.md` files, and they show up in Obsidian on every device.
-Writing straight into CouchDB is not a good idea: LiveSync splits every note into chunks and may
-encrypt them, which this bridge handles for you.
+Home Assistant can also add lines to a daily note (voice notes) through a small internal API.
+
+Built on [livesync-bridge](https://github.com/vrtmrz/livesync-bridge) and its library by vrtmrz.
 
 ## Configuration
 
@@ -16,19 +16,45 @@ encrypt them, which this bridge handles for you.
 | `couchdb_url` | CouchDB address, the same one the LiveSync plugin uses, e.g. `http://192.168.1.2:5984` |
 | `database` | Database name from the plugin settings |
 | `username`, `password` | CouchDB user from the plugin settings |
-| `passphrase` | End-to-end encryption passphrase, if *End-to-End Encryption* is on in the plugin. Leave empty otherwise |
+| `passphrase` | End-to-end encryption passphrase, if *End-to-End Encryption* is on in the plugin |
 | `path_obfuscation` | Turn on if *Path Obfuscation* is on in the plugin (needs the passphrase) |
-| `share_folder` | Folder inside `/share` for the files, default `obsidian` → `/share/obsidian` |
-| `vault_subfolder` | Sync only this folder of the vault (e.g. `Inbox`). Empty = the whole vault |
-| `unicode_nfc_paths` | Must match the vault's path normalisation. Leave off for an existing vault unless you know it uses NFC |
+| `voice_note_folder` | Vault folder for daily voice notes, default `Claude Note` |
+| `timezone` | Time zone for the voice-note dates and times |
+| `unicode_nfc_paths` | Must match the vault's path normalisation. Leave off unless you know the vault uses NFC |
 | `filename_case_sensitive` | Must match *Handle files as Case-Sensitive* in the plugin |
-| `reset_on_start` | Re-read the database and the folder from the beginning on the next start. Turn it off again afterwards |
+| `mirror_to_share` | Off by default. On: also keep a full two-way **plain-text copy** of the vault in `/share/<share_folder>` (the original livesync-bridge) |
+| `share_folder`, `vault_subfolder`, `reset_on_start` | Only for the mirror |
 
-Chunk size and other remote settings are taken from the database automatically.
+Chunk size, encryption and other settings are taken from the vault itself.
 
-## Notes
+The vault must be on database format 12 or newer: update the LiveSync plugin on your devices and
+sync once if the log says the database version is not compatible.
 
-- The first start downloads the whole vault (or the chosen subfolder) into the folder.
-- Files are synced both ways; deleting a file in the folder deletes the note in the vault.
-- Sync state is kept in the add-on's `/data`, so restarts continue where they stopped.
-- Back up the vault before the first start, as with any new sync client.
+## Panel
+
+- Folder tree and search by name on the left; notes are shown rendered, with `[[wikilinks]]`
+  and embedded images.
+- **Править** edits the Markdown, **Сохранить** (or Ctrl+S) writes it to the vault. If the note
+  was changed on another device in the meantime, saving is refused instead of overwriting it.
+- **Новая** creates a note, 🗑 deletes it from the vault (on every device).
+
+## Voice notes API
+
+Home Assistant Core (only) may call:
+
+```yaml
+rest_command:
+  obsidian_note:
+    url: http://4034a19f-livesync-bridge:8099/api/append
+    method: POST
+    content_type: application/json
+    payload: '{{ {"text": text} | to_json }}'
+```
+
+Each call adds `- HH:MM text` to `<voice_note_folder>/YYYY-MM-DD.md`.
+The hostname is shown on the add-on's Info page; it starts with your repository's ID.
+
+## Access
+
+The panel answers only through Home Assistant ingress, and the API only to Home Assistant Core.
+Requests from anything else on the network are refused.

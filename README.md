@@ -128,9 +128,9 @@ The zip includes your API keys, so keep it private.
 
 ## Other add-ons in this repository
 
-- **[Obsidian LiveSync Bridge](livesync_bridge/DOCS.md)** – keeps an Obsidian Self-hosted
-  LiveSync vault (CouchDB) in two-way sync with a Markdown folder in `/share`, so Home
-  Assistant can read and write notes as plain files.
+- **[Obsidian LiveSync Bridge](livesync_bridge/DOCS.md)** – an Obsidian panel in the Home Assistant
+  sidebar that reads and edits a Self-hosted LiveSync vault straight in CouchDB, plus voice notes
+  from Home Assistant. Nothing is copied to disk.
 
 ## Documentation
 

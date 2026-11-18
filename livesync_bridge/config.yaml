@@ -1,7 +1,7 @@
 name: Obsidian LiveSync Bridge
-version: "0.1.1"
+version: "0.2.0"
 slug: livesync_bridge
-description: Keeps an Obsidian Self-hosted LiveSync vault (CouchDB) in sync with a plain Markdown folder in /share
+description: Obsidian notes from a Self-hosted LiveSync vault (CouchDB) in the Home Assistant sidebar, read and written straight in the database
 url: https://github.com/denveronly/batteryai/tree/main/livesync_bridge
 arch:
   - aarch64
@@ -9,6 +9,11 @@ arch:
 init: false
 startup: application
 boot: auto
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:notebook-outline
+panel_title: Obsidian
+panel_admin: true
 map:
   - share:rw
 options:
@@ -18,6 +23,9 @@ options:
   password: ""
   passphrase: ""
   path_obfuscation: false
+  voice_note_folder: Claude Note
+  timezone: Europe/Kyiv
+  mirror_to_share: false
   share_folder: obsidian
   vault_subfolder: ""
   unicode_nfc_paths: false
@@ -30,6 +38,9 @@ schema:
   password: password
   passphrase: password?
   path_obfuscation: bool
+  voice_note_folder: str
+  timezone: str
+  mirror_to_share: bool
   share_folder: match(^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$)
   vault_subfolder: str?
   unicode_nfc_paths: bool

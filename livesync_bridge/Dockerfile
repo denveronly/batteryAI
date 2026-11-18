@@ -11,6 +11,8 @@ RUN tar -xzf /tmp/bridge.tar.gz --strip-components=1 -C /app \
     && deno install --frozen
 
 COPY gen_config.ts /gen_config.ts
+COPY notes_server.ts /app/notes_server.ts
+COPY notes_ui /app/notes_ui
 COPY run.sh /run.sh
 RUN chmod +x /run.sh
 

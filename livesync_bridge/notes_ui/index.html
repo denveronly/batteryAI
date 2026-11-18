@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Obsidian Notes</title>
+<script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/lib/marked.umd.js"></script>
+<style>
+:root {
+  --bg: #fafafa; --panel: #ffffff; --text: #212121; --muted: #6b6b6b; --line: #e3e3e3;
+  --accent: #7c5cff; --accent-soft: #efeaff; --code: #f3f3f5; --danger: #c62828;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111111; --panel: #1c1c1c; --text: #e6e6e6; --muted: #9a9a9a; --line: #2e2e2e;
+    --accent: #a58bff; --accent-soft: #2a2442; --code: #262626; --danger: #ef5350;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111111; --panel: #1c1c1c; --text: #e6e6e6; --muted: #9a9a9a; --line: #2e2e2e;
+  --accent: #a58bff; --accent-soft: #2a2442; --code: #262626; --danger: #ef5350;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+button, input, textarea { font: inherit; color: inherit; }
+.app { display: grid; grid-template-columns: 300px 1fr; height: 100vh; }
+aside { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+.side-top { padding: 12px; display: flex; gap: 8px; border-bottom: 1px solid var(--line); }
+.side-top input { flex: 1; min-width: 0; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.btn { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 6px 10px; cursor: pointer; white-space: nowrap; }
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.danger { color: var(--danger); }
+.tree { overflow: auto; padding: 6px 0 24px; flex: 1; }
+.tree details > summary { list-style: none; cursor: pointer; padding: 3px 12px; color: var(--muted); user-select: none; }
+.tree details > summary::before { content: "▸ "; }
+.tree details[open] > summary::before { content: "▾ "; }
+.tree details details { margin-left: 12px; }
+.tree a { display: block; padding: 3px 12px 3px 26px; color: var(--text); text-decoration: none; border-radius: 6px; margin: 0 6px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree a:hover { background: var(--accent-soft); }
+.tree a.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.tree .flat a { padding-left: 12px; }
+main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.bar { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.bar .path { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu { display: none; }
+.content { flex: 1; overflow: auto; padding: 24px 32px 64px; }
+.note { max-width: 860px; margin: 0 auto; }
+.note h1, .note h2, .note h3 { line-height: 1.25; margin: 1.2em 0 .5em; }
+.note h1:first-child { margin-top: 0; }
+.note a { color: var(--accent); }
+.note a.missing { color: var(--muted); text-decoration: line-through dotted; }
+.note pre, .note code { background: var(--code); border-radius: 6px; }
+.note code { padding: 1px 5px; font-size: .92em; }
+.note pre { padding: 12px; overflow: auto; }
+.note pre code { padding: 0; }
+.note img { max-width: 100%; border-radius: 6px; }
+.note blockquote { margin: 0; padding: 4px 14px; border-left: 3px solid var(--accent); color: var(--muted); }
+.note table { border-collapse: collapse; display: block; overflow: auto; }
+.note th, .note td { border: 1px solid var(--line); padding: 5px 9px; }
+.note li input[type=checkbox] { margin-right: 6px; }
+textarea.editor { width: 100%; max-width: 860px; display: block; margin: 0 auto; min-height: 70vh; padding: 14px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+  font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; resize: vertical; }
+.empty { color: var(--muted); text-align: center; margin-top: 18vh; }
+.toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg);
+  padding: 8px 14px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; }
+.toast.show { opacity: .92; }
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; }
+  aside { position: fixed; inset: 0 20% 0 0; z-index: 5; transform: translateX(-105%); transition: transform .2s; box-shadow: 0 0 24px #0005; }
+  .app.nav aside { transform: none; }
+  .menu { display: inline-block; }
+  .content { padding: 16px 16px 48px; }
+}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <aside>
+    <div class="side-top">
+      <input id="search" type="search" placeholder="Поиск по названию…" autocomplete="off">
+      <button class="btn" id="refresh" title="Обновить список">⟳</button>
+    </div>
+    <div class="tree" id="tree"></div>
+  </aside>
+  <main>
+    <div class="bar">
+      <button class="btn menu" id="menu">☰</button>
+      <span class="path" id="path">Obsidian</span>
+      <button class="btn" id="new">Новая</button>
+      <button class="btn" id="edit" hidden>Править</button>
+      <button class="btn primary" id="save" hidden>Сохранить</button>
+      <button class="btn" id="cancel" hidden>Отмена</button>
+      <button class="btn danger" id="del" hidden title="Удалить заметку">🗑</button>
+    </div>
+    <div class="content" id="content"><div class="empty">Загружаю список заметок…</div></div>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const $ = (id) => document.getElementById(id);
+let files = [];            // [{path, mtime, size}]
+let current = null;        // {path, text, mtime}
+let editing = false;
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 2600);
+}
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const ct = r.headers.get("content-type") || "";
+  const body = ct.includes("json") ? await r.json() : await r.text();
+  if (!r.ok) throw new Error(body && body.error ? body.error : `HTTP ${r.status}`);
+  return body;
+}
+const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fileUrl = (p) => "api/file?path=" + encodeURIComponent(p);
+const isText = (p) => /\.(md|txt|canvas|base|json|css|js|csv)$/i.test(p);
+
+// ---- list / tree ----
+async function loadList(refresh) {
+  try {
+    files = await api("api/list" + (refresh ? "?refresh=1" : ""));
+    renderTree();
+    if (!current && !location.hash) $("content").innerHTML = `<div class="empty">${files.length} заметок и файлов. Выбери слева.</div>`;
+  } catch (e) {
+    $("content").innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    setTimeout(() => loadList(), 5000);
+  }
+}
+function renderTree() {
+  const q = $("search").value.trim().toLowerCase();
+  const tree = $("tree");
+  if (q) {
+    const hits = files.filter((f) => f.path.toLowerCase().includes(q)).slice(0, 300);
+    tree.innerHTML = `<div class="flat">${hits.map(link).join("") || '<div class="empty">Ничего</div>'}</div>`;
+    return;
+  }
+  const root = { dirs: {}, files: [] };
+  for (const f of files) {
+    const parts = f.path.split("/"); let node = root;
+    for (const d of parts.slice(0, -1)) node = node.dirs[d] ??= { dirs: {}, files: [] };
+    node.files.push(f);
+  }
+  const openDirs = new Set(current ? current.path.split("/").slice(0, -1).map((_, i, a) => a.slice(0, i + 1).join("/")) : []);
+  const html = (node, prefix) =>
+    Object.keys(node.dirs).sort((a, b) => a.localeCompare(b)).map((d) => {
+      const full = prefix ? prefix + "/" + d : d;
+      return `<details ${openDirs.has(full) ? "open" : ""}><summary>${esc(d)}</summary>${html(node.dirs[d], full)}</details>`;
+    }).join("") + node.files.map(link).join("");
+  tree.innerHTML = html(root, "");
+}
+function link(f) {
+  const name = f.path.split("/").pop().replace(/\.md$/i, "");
+  const active = current && current.path === f.path ? " active" : "";
+  return `<a class="${active}" href="#/${encodeURIComponent(f.path)}" title="${esc(f.path)}">${esc(name)}</a>`;
+}
+
+// ---- wikilinks ----
+function resolve(target) {
+  target = target.split("#")[0].split("^")[0].trim();
+  if (!target) return null;
+  const lc = target.toLowerCase();
+  const exact = files.find((f) => f.path.toLowerCase() === lc || f.path.toLowerCase() === lc + ".md");
+  if (exact) return exact.path;
+  const base = lc.split("/").pop();
+  const byName = files.find((f) => { const n = f.path.toLowerCase().split("/").pop(); return n === base || n === base + ".md"; });
+  return byName ? byName.path : null;
+}
+function preprocess(md) {
+  // embeds: ![[image.png]] / ![[Note]]
+  md = md.replace(/!\[\[([^\]|]+)(?:\|([^\]]*))?\]\]/g, (_, t, alt) => {
+    const p = resolve(t);
+    if (!p) return `*(нет файла: ${t})*`;
+    if (/\.(png|jpe?g|gif|webp|svg)$/i.test(p)) return `<img src="${fileUrl(p)}" alt="${esc(alt || t)}">`;
+    return `<a href="#/${encodeURIComponent(p)}">${esc(alt || t)}</a>`;
+  });
+  // links: [[Note]] / [[Note|alias]]
+  return md.replace(/\[\[([^\]|]+)(?:\|([^\]]*))?\]\]/g, (_, t, alias) => {
+    const p = resolve(t);
+    const label = esc(alias || t.split("/").pop());
+    return p ? `<a href="#/${encodeURIComponent(p)}">${label}</a>` : `<a class="missing">${label}</a>`;
+  });
+}
+function render(md) {
+  const html = marked.parse(preprocess(md.replace(/^---\n[\s\S]*?\n---\n/, "")), { gfm: true, breaks: true });
+  const div = document.createElement("div"); div.className = "note"; div.innerHTML = html;
+  // relative markdown links and images to vault files
+  for (const a of div.querySelectorAll("a[href]")) {
+    const h = a.getAttribute("href");
+    if (/^[a-z]+:|^#/i.test(h)) { if (/^https?:/i.test(h)) a.target = "_blank"; continue; }
+    const p = resolve(decodeURIComponent(h));
+    if (p) a.setAttribute("href", "#/" + encodeURIComponent(p));
+  }
+  for (const img of div.querySelectorAll("img[src]")) {
+    const s = img.getAttribute("src");
+    if (/^(https?:|data:|api\/)/i.test(s)) continue;
+    const p = resolve(decodeURIComponent(s));
+    if (p) img.src = fileUrl(p);
+  }
+  return div;
+}
+
+// ---- open / edit ----
+async function open(path) {
+  if (editing && !confirm("Есть несохранённые правки. Уйти без сохранения?")) return false;
+  editing = false;
+  $("app").classList.remove("nav");
+  $("path").textContent = path;
+  const c = $("content");
+  if (!isText(path)) {
+    current = { path };
+    setButtons();
+    renderTree();
+    c.innerHTML = /\.(png|jpe?g|gif|webp|svg)$/i.test(path)
+      ? `<div class="note"><img src="${fileUrl(path)}"></div>`
+      : `<div class="empty"><a class="btn" href="${fileUrl(path)}" target="_blank">Открыть файл</a></div>`;
+    return;
+  }
+  c.innerHTML = `<div class="empty">Открываю…</div>`;
+  try {
+    const f = await api(fileUrl(path));
+    current = { path, text: f.text, mtime: f.mtime };
+    renderTree(); setButtons();
+    c.innerHTML = "";
+    if (/\.md$/i.test(path)) c.append(render(f.text));
+    else { const pre = document.createElement("pre"); pre.className = "note"; pre.textContent = f.text; c.append(pre); }
+    c.scrollTop = 0;
+  } catch (e) { current = null; setButtons(); c.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+function setButtons() {
+  const text = current && current.text !== undefined;
+  $("edit").hidden = !text || editing;
+  $("del").hidden = !current || editing;
+  $("save").hidden = $("cancel").hidden = !editing;
+  $("new").hidden = editing;
+}
+function startEdit() {
+  editing = true; setButtons();
+  const ta = document.createElement("textarea");
+  ta.className = "editor"; ta.id = "editor"; ta.value = current.text; ta.spellcheck = true;
+  $("content").innerHTML = ""; $("content").append(ta); ta.focus();
+}
+async function save() {
+  const text = $("editor").value;
+  $("save").disabled = true;
+  try {
+    const r = await api(fileUrl(current.path), {
+      method: "PUT", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text, baseMtime: current.mtime }),
+    });
+    editing = false; toast("Сохранено");
+    if (!files.some((f) => f.path === current.path)) await loadList(true);
+    await open(current.path);
+  } catch (e) { toast(e.message); }
+  finally { $("save").disabled = false; }
+}
+async function createNote() {
+  const name = prompt("Название заметки (можно с папкой, например «Claude Note/Идеи»):");
+  if (!name) return;
+  let path = name.trim().replace(/^\/+/, "");
+  if (!/\.[a-z0-9]+$/i.test(path)) path += ".md";
+  if (files.some((f) => f.path.toLowerCase() === path.toLowerCase())) return (location.hash = "#/" + encodeURIComponent(path));
+  try {
+    await api(fileUrl(path), { method: "PUT", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: `# ${path.split("/").pop().replace(/\.md$/i, "")}\n\n` }) });
+    await loadList(true);
+    location.hash = "#/" + encodeURIComponent(path);
+    setTimeout(startEdit, 400);
+  } catch (e) { toast(e.message); }
+}
+async function remove() {
+  if (!confirm(`Удалить «${current.path}» из хранилища? Она пропадёт на всех устройствах.`)) return;
+  try {
+    await api(fileUrl(current.path), { method: "DELETE" });
+    toast("Удалено"); current = null; location.hash = ""; setButtons(); await loadList(true);
+    $("content").innerHTML = `<div class="empty">Заметка удалена.</div>`; $("path").textContent = "Obsidian";
+  } catch (e) { toast(e.message); }
+}
+
+function route() {
+  const p = decodeURIComponent(location.hash.replace(/^#\/?/, ""));
+  if (p) open(p);
+}
+$("search").addEventListener("input", renderTree);
+$("refresh").onclick = () => loadList(true).then(() => toast("Список обновлён"));
+$("menu").onclick = () => $("app").classList.toggle("nav");
+$("edit").onclick = startEdit;
+$("save").onclick = save;
+$("cancel").onclick = () => { editing = false; open(current.path); };
+$("new").onclick = createNote;
+$("del").onclick = remove;
+addEventListener("hashchange", route);
+addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s" && editing) { e.preventDefault(); save(); }
+  if (e.key === "Escape" && editing) $("cancel").click();
+});
+addEventListener("beforeunload", (e) => { if (editing) e.preventDefault(); });
+loadList().then(route);
+</script>
+</body>
+</html>
