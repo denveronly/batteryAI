@@ -126,6 +126,12 @@ are compressed to hourly values, so a year of data takes only a few MB. **Logs â
 downloads a zip with the database and settings, and can restore it into a new installation.
 The zip includes your API keys, so keep it private.
 
+## Other add-ons in this repository
+
+- **[Obsidian LiveSync Bridge](livesync_bridge/DOCS.md)** â€“ keeps an Obsidian Self-hosted
+  LiveSync vault (CouchDB) in two-way sync with a Markdown folder in `/share`, so Home
+  Assistant can read and write notes as plain files.
+
 ## Documentation
 
 - [batteryai/DOCS.md](batteryai/DOCS.md) describes every option and rule. It is also shown

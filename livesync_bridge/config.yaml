@@ -1,0 +1,37 @@
+name: Obsidian LiveSync Bridge
+version: "0.1.0"
+slug: livesync_bridge
+description: Keeps an Obsidian Self-hosted LiveSync vault (CouchDB) in sync with a plain Markdown folder in /share
+url: https://github.com/denveronly/batteryai/tree/main/livesync_bridge
+arch:
+  - aarch64
+  - amd64
+init: false
+startup: application
+boot: auto
+map:
+  - share:rw
+options:
+  couchdb_url: "http://192.168.1.2:5984"
+  database: obsidian
+  username: obsidian_user
+  password: ""
+  passphrase: ""
+  path_obfuscation: false
+  share_folder: obsidian
+  vault_subfolder: ""
+  unicode_nfc_paths: false
+  filename_case_sensitive: false
+  reset_on_start: false
+schema:
+  couchdb_url: url
+  database: str
+  username: str
+  password: password
+  passphrase: password?
+  path_obfuscation: bool
+  share_folder: match(^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$)
+  vault_subfolder: str?
+  unicode_nfc_paths: bool
+  filename_case_sensitive: bool
+  reset_on_start: bool
