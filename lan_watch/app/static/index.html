@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LAN Watch</title>
+<style>
+:root{--bg:#0e1116;--panel:#151a21;--row:#1a2029;--row2:#1e252f;--line:#252d38;--txt:#e6e9ee;--mut:#8a94a3;--dim:#5d6775;
+--on:#3ecf6e;--off:#e5534b;--new:#f0b429;--acc:#4aa3ff;
+--c-network:#4aa3ff;--c-server:#a371f7;--c-camera:#ff7b72;--c-iot:#3ecf6e;--c-media:#f778ba;--c-computer:#79c0ff;
+--c-mobile:#d2a8ff;--c-energy:#f0b429;--c-appliance:#56d4dd;--c-unknown:#6e7681}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:13px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.wrap{display:grid;grid-template-columns:300px 1fr;gap:14px;padding:14px;max-width:1500px;margin:0 auto}
+@media(max-width:860px){.wrap{grid-template-columns:1fr;padding:10px}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+.side{display:flex;flex-direction:column;gap:12px}
+.hdr{display:flex;align-items:center;gap:8px}
+.hdr h1{font-size:17px;margin:0;font-weight:650}
+.ver{font-size:10px;color:var(--acc);background:#4aa3ff22;border-radius:6px;padding:1px 5px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--on);margin-left:auto;box-shadow:0 0 6px var(--on)}
+.dot.busy{background:var(--new);box-shadow:0 0 6px var(--new)}
+.ib{background:none;border:0;color:var(--mut);cursor:pointer;font-size:15px;padding:2px 4px;border-radius:6px}
+.ib:hover{color:var(--txt);background:var(--row2)}
+.search{width:100%;margin-top:10px;background:var(--bg);border:1px solid var(--line);border-radius:18px;padding:8px 12px;color:var(--txt);outline:none}
+.search:focus{border-color:var(--acc)}
+.donutbox{display:flex;align-items:center;gap:14px;margin-top:14px}
+.donut{position:relative;width:110px;height:110px;flex:none}
+.donut .c{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.donut .c b{font-size:26px;font-weight:700}
+.donut .c span{font-size:10px;color:var(--mut)}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:6px;flex:1}
+.kpi{background:var(--row);border-radius:8px;padding:6px 8px}
+.kpi b{display:block;font-size:16px}
+.kpi span{font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.chip{border:1px solid var(--line);background:var(--row);color:var(--mut);border-radius:14px;padding:4px 10px;cursor:pointer;font-size:12px}
+.chip.on{background:#4aa3ff26;border-color:var(--acc);color:var(--txt)}
+.chip i{font-style:normal;color:var(--dim);margin-left:3px}
+.bar{display:flex;height:6px;border-radius:3px;overflow:hidden;margin:8px 0 6px}
+.legend{display:grid;grid-template-columns:1fr 1fr;gap:3px 10px;font-size:11px;color:var(--mut)}
+.legend div{display:flex;align-items:center;gap:6px;cursor:pointer}
+.legend div:hover{color:var(--txt)}
+.sw{width:8px;height:8px;border-radius:2px;flex:none}
+.sec-t{font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:0 0 8px;font-weight:600}
+.ev{display:flex;gap:8px;padding:5px 0;border-top:1px solid var(--line);font-size:12px}
+.ev:first-of-type{border-top:0}
+.ev .t{color:var(--dim);flex:none;width:44px}
+.ev .k{flex:none}
+.ev .l{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btns{display:flex;flex-wrap:wrap;gap:6px}
+.btn{background:var(--row2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:6px 10px;cursor:pointer;font-size:12px}
+.btn:hover{border-color:var(--acc)}
+.btn.danger{color:var(--off)}
+.btn.pri{background:var(--acc);border-color:var(--acc);color:#fff}
+.main{display:flex;flex-direction:column;gap:12px;min-width:0}
+.group{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.gh{display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer;user-select:none}
+.gh .ico{font-size:14px}
+.gh b{font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+.gh .cnt{font-size:10px;background:var(--row2);color:var(--mut);border-radius:8px;padding:1px 6px}
+.gh .sum{margin-left:auto;font-size:11px;color:var(--mut)}
+.gh .car{color:var(--dim);transition:transform .15s}
+.group.closed .car{transform:rotate(-90deg)}
+.group.closed .rows{display:none}
+.r{display:grid;grid-template-columns:28px minmax(150px,2fr) 100px 125px 118px minmax(80px,1fr) 100px 20px;
+align-items:center;gap:10px;padding:7px 14px;border-top:1px solid var(--line);cursor:pointer}
+.r:hover{background:var(--row)}
+.r .av{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px}
+.r .nm{min-width:0}
+.r .nm b{display:block;font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.r .nm small{display:block;color:var(--dim);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:var(--mut)}
+.st{font-size:11.5px}
+.st.on{color:var(--on)}.st.off{color:var(--dim)}
+.vd{color:var(--mut);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tag{font-size:9.5px;border-radius:5px;padding:0 4px;margin-left:5px;vertical-align:1px;font-weight:600}
+.tag.new{background:#f0b42933;color:var(--new)}
+.tag.rnd{background:#6e768133;color:var(--mut)}
+.tag.w{background:#4aa3ff26;color:var(--acc)}
+svg.sp{width:100px;height:18px;display:block}
+.open{color:var(--dim);text-decoration:none;font-size:14px;text-align:center}
+.open:hover{color:var(--acc)}
+@media(max-width:860px){.r{grid-template-columns:28px 1fr 96px;}.r .vd,.r svg.sp,.r .open,.r .mac{display:none}
+.r .ipst{display:flex;flex-direction:column;align-items:flex-end}}
+.ipst{display:contents}
+.empty{padding:30px;text-align:center;color:var(--dim)}
+dialog{background:var(--panel);color:var(--txt);border:1px solid var(--line);border-radius:14px;padding:18px;width:min(460px,94vw)}
+dialog::backdrop{background:#000a}
+dialog h3{margin:0 0 4px}
+dialog .meta{color:var(--mut);font-size:11.5px;margin-bottom:12px;line-height:1.6}
+dialog label{display:block;font-size:11px;color:var(--mut);margin:10px 0 4px}
+dialog input,dialog select,dialog textarea{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:8px;color:var(--txt);padding:7px 9px;font:inherit}
+.tg{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12.5px}
+.tg input{width:auto}
+.dlgb{display:flex;gap:8px;margin-top:16px}
+.dlgb .sp{flex:1}
+.toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--row2);border:1px solid var(--line);padding:8px 14px;border-radius:10px;opacity:0;transition:.2s;pointer-events:none}
+.toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <aside class="side">
+    <div class="card">
+      <div class="hdr"><span>📡</span><h1>LAN Watch</h1><span class="ver">v1.0</span>
+        <span class="dot" id="dot" title=""></span>
+        <button class="ib" id="rescan" title="Сканировать сейчас">⟳</button></div>
+      <input class="search" id="q" placeholder="🔍  Поиск: имя, IP, MAC, производитель">
+      <div class="donutbox">
+        <div class="donut"><svg viewBox="0 0 42 42" id="donut"></svg>
+          <div class="c"><b id="total">–</b><span>устройств</span></div></div>
+        <div class="kpis">
+          <div class="kpi"><b id="k-on" style="color:var(--on)">–</b><span>онлайн</span></div>
+          <div class="kpi"><b id="k-off">–</b><span>офлайн</span></div>
+          <div class="kpi"><b id="k-new" style="color:var(--new)">–</b><span>новые</span></div>
+          <div class="kpi"><b id="k-w" style="color:var(--acc)">–</b><span>слежу</span></div>
+        </div>
+      </div>
+      <div class="chips" id="chips"></div>
+      <div class="bar" id="bar"></div>
+      <div class="legend" id="legend"></div>
+    </div>
+    <div class="card"><p class="sec-t">Последние события</p><div id="events"></div></div>
+    <div class="card"><p class="sec-t">Действия</p>
+      <div class="btns">
+        <button class="btn" data-act="ha-sync">⇅ Синхр. с HA</button>
+        <button class="btn" data-act="wyl-import">⇩ Импорт WatchYourLAN</button>
+        <button class="btn" data-act="test-telegram">✈ Тест Telegram</button>
+        <button class="btn" data-act="known-all">✓ Все известные</button>
+      </div>
+      <p class="mono" id="meta" style="margin:10px 0 0"></p>
+    </div>
+  </aside>
+  <main class="main" id="groups"></main>
+</div>
+
+<dialog id="dlg"><form method="dialog" id="frm">
+  <h3 id="d-title"></h3><div class="meta" id="d-meta"></div>
+  <label>Имя</label><input id="d-name" autocomplete="off">
+  <label>Группа</label><select id="d-cat"></select>
+  <label>Заметка</label><textarea id="d-note" rows="2"></textarea>
+  <div class="tg"><input type="checkbox" id="d-watch"><span>Уведомлять в Telegram, когда пропадает / появляется</span></div>
+  <div class="tg"><input type="checkbox" id="d-known"><span>Известное устройство</span></div>
+  <div class="dlgb"><button class="btn danger" value="del" id="d-del">Удалить</button><span class="sp"></span>
+    <button class="btn" value="cancel">Отмена</button><button class="btn pri" value="save">Сохранить</button></div>
+</form></dialog>
+<div class="toast" id="toast"></div>
+
+<script>
+const CAT={network:['Сеть','🛜'],server:['Серверы и VM','🗄️'],camera:['Камеры и NVR','📹'],iot:['Умный дом','💡'],
+media:['Медиа и ТВ','📺'],computer:['Компьютеры','💻'],mobile:['Телефоны и планшеты','📱'],energy:['Энергия','⚡'],
+appliance:['Климат и техника','🌡️'],unknown:['Неизвестные','❔']};
+const ORDER=Object.keys(CAT);
+const $=s=>document.querySelector(s);
+let D={hosts:[]},filter='all',catFilter=null,closed=new Set(JSON.parse(safeGet('lw_closed')||'[]')),cur=null;
+function safeGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
+function safeSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const ipn=ip=>(ip||'').split('.').reduce((a,b)=>a*256+(+b||0),0);
+function ago(ts){if(!ts)return'никогда';const s=D.now-ts;if(s<90)return'только что';if(s<3600)return Math.round(s/60)+' мин';
+ if(s<86400)return Math.round(s/3600)+' ч';return Math.round(s/86400)+' д'}
+function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2500)}
+async function api(p,o){const r=await fetch('api/'+p,o);if(!r.ok)throw new Error(await r.text());return r.json()}
+
+function spark(h){const s=new Set(h.spark);let d='';for(let i=0;i<96;i++){if(s.has(i))d+=`M${i*100/96} 4V14`}
+ const c=h.online?'var(--on)':'var(--dim)';
+ return `<svg class="sp" viewBox="0 0 100 18" preserveAspectRatio="none"><path d="M0 9H100" stroke="var(--line)" stroke-width="1"/>
+ <path d="${d}" stroke="${c}" stroke-width="1.1" opacity=".9"/></svg>`}
+
+function match(h){
+ if(filter==='on'&&!h.online)return false;if(filter==='off'&&h.online)return false;
+ if(filter==='new'&&h.known)return false;if(filter==='watch'&&!h.watch)return false;
+ if(catFilter&&h.category!==catFilter)return false;
+ const q=$('#q').value.trim().toLowerCase();if(!q)return true;
+ return [h.label,h.name,h.ha_name,h.hostname,h.ip,h.mac,h.vendor,h.ha_model,h.note,h.ha_area].some(x=>(x||'').toLowerCase().includes(q))}
+
+function render(){
+ const H=D.hosts,on=H.filter(h=>h.online).length;
+ $('#total').textContent=H.length;$('#k-on').textContent=on;$('#k-off').textContent=H.length-on;
+ $('#k-new').textContent=H.filter(h=>!h.known).length;$('#k-w').textContent=H.filter(h=>h.watch).length;
+ const st=D.state||{};$('#dot').className='dot'+(st.scanning?' busy':'');
+ $('#dot').title='Последний скан: '+(st.last_scan?new Date(st.last_scan*1000).toLocaleTimeString():'—');
+ $('#meta').textContent=`iface ${st.iface||'?'} · скан ${st.scan_ms||0} мс · ${st.last_scan?new Date(st.last_scan*1000).toLocaleTimeString():'—'}`+
+  (D.telegram?' · Telegram ✓':' · Telegram не настроен');
+ // donut: online per category
+ const cnt={},onc={};ORDER.forEach(c=>{cnt[c]=0;onc[c]=0});H.forEach(h=>{cnt[h.category]++;if(h.online)onc[h.category]++});
+ let off=25,svg='<circle cx="21" cy="21" r="15.9" fill="none" stroke="var(--row2)" stroke-width="4"/>';
+ ORDER.forEach(c=>{const p=H.length?onc[c]/H.length*100:0;if(p>0){svg+=`<circle cx="21" cy="21" r="15.9" fill="none" stroke="var(--c-${c})" stroke-width="4" stroke-dasharray="${Math.max(p-.6,.1)} ${100-p+.6}" stroke-dashoffset="${off}"/>`;off-=p}});
+ $('#donut').innerHTML=svg;
+ $('#bar').innerHTML=ORDER.filter(c=>cnt[c]).map(c=>`<span style="flex:${cnt[c]};background:var(--c-${c})"></span>`).join('');
+ $('#legend').innerHTML=ORDER.filter(c=>cnt[c]).map(c=>`<div data-c="${c}" style="${catFilter===c?'color:var(--txt)':''}"><span class="sw" style="background:var(--c-${c})"></span>${CAT[c][0]} <span style="margin-left:auto">${onc[c]}/${cnt[c]}</span></div>`).join('');
+ const F=[['all','Все',H.length],['on','Онлайн',on],['off','Офлайн',H.length-on],['new','Новые',H.filter(h=>!h.known).length],['watch','Слежу',H.filter(h=>h.watch).length]];
+ $('#chips').innerHTML=F.map(([k,t,n])=>`<span class="chip${filter===k?' on':''}" data-f="${k}">${t}<i>${n}</i></span>`).join('')+
+  (catFilter?`<span class="chip on" data-cf="x">${CAT[catFilter][0]} ✕</span>`:'');
+ // groups
+ const V=H.filter(match);let html='';
+ ORDER.forEach(c=>{const g=V.filter(h=>h.category===c).sort((a,b)=>(b.online-a.online)||ipn(a.ip)-ipn(b.ip));if(!g.length)return;
+  const go=g.filter(h=>h.online).length;
+  html+=`<section class="group${closed.has(c)?' closed':''}"><div class="gh" data-g="${c}"><span class="car">▾</span><span class="ico">${CAT[c][1]}</span><b>${CAT[c][0]}</b><span class="cnt">${g.length}</span><span class="sum">${go} онлайн</span></div><div class="rows">`+
+  g.map(h=>{const sub=[h.name&&h.ha_name&&h.ha_name!==h.name?'HA: '+h.ha_name:'',h.ha_area,h.hostname&&h.hostname!==h.label?h.hostname:'',h.note].filter(Boolean).join(' · ');
+   const stat=h.online?`<span class="st on">Онлайн${h.rtt!=null?' · '+Math.round(h.rtt)+' мс':''}</span>`:`<span class="st off">Офлайн · ${ago(h.last_seen)}</span>`;
+   const tags=(h.known?'':'<span class="tag new">NEW</span>')+(h.watch?'<span class="tag w">🔔</span>':'')+(h.random_mac?'<span class="tag rnd">rnd</span>':'');
+   return `<div class="r" data-m="${h.mac}"><div class="av" style="background:color-mix(in srgb,var(--c-${c}) 18%,transparent)">${CAT[c][1]}</div>
+   <div class="nm"><b>${esc(h.label)}${tags}</b><small>${esc(sub)}</small></div>
+   <div class="ipst"><span class="mono">${esc(h.ip)}</span>${stat}</div>
+   <span class="mono mac">${esc(h.mac)}</span><span class="vd">${esc(h.ha_model||h.vendor||'')}</span>${spark(h)}
+   <a class="open" href="http://${esc(h.ip)}" target="_blank" rel="noopener" title="Открыть http://${esc(h.ip)}" onclick="event.stopPropagation()">↗</a></div>`}).join('')+`</div></section>`});
+ $('#groups').innerHTML=html||'<div class="card empty">Ничего не найдено</div>';
+}
+async function load(){try{D=await api('hosts');render()}catch(e){console.error(e)}}
+async function loadEvents(){try{const E=await api('events?limit=12');const K={new:'🆕',online:'🟢',offline:'🔴',ip:'🔁'};
+ $('#events').innerHTML=E.length?E.map(e=>`<div class="ev"><span class="t">${new Date(e.ts*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span><span class="k">${K[e.kind]||'•'}</span><span class="l">${esc(e.label)}${e.kind==='ip'?' · '+esc(e.detail):''}</span></div>`).join(''):'<div class="ev"><span class="l" style="color:var(--dim)">Пока пусто</span></div>'}catch(e){}}
+
+document.addEventListener('click',async e=>{
+ const f=e.target.closest('[data-f]');if(f){filter=f.dataset.f;render();return}
+ if(e.target.closest('[data-cf]')){catFilter=null;render();return}
+ const lg=e.target.closest('.legend [data-c]');if(lg){catFilter=catFilter===lg.dataset.c?null:lg.dataset.c;render();return}
+ const g=e.target.closest('[data-g]');if(g){const c=g.dataset.g;closed.has(c)?closed.delete(c):closed.add(c);safeSet('lw_closed',JSON.stringify([...closed]));render();return}
+ const r=e.target.closest('.r');if(r){openDlg(r.dataset.m);return}
+ const a=e.target.closest('[data-act]');if(a){const act=a.dataset.act;
+  if(act==='known-all'&&!confirm('Отметить все устройства как известные?'))return;
+  a.disabled=true;try{const res=await api(act,{method:'POST'});
+   toast(act==='test-telegram'?(res.ok?'Отправлено в Telegram':'Ошибка: '+(res.error||'').slice(0,120)):act==='wyl-import'?(res.ok?'Импортировано: '+res.imported:'Ошибка: '+res.error):'Готово')}
+  catch(err){toast('Ошибка: '+err.message.slice(0,120))}a.disabled=false;load();loadEvents()}
+});
+$('#rescan').onclick=async()=>{$('#dot').className='dot busy';try{await api('scan',{method:'POST'})}catch(e){}load();loadEvents()};
+$('#q').oninput=render;
+$('#d-cat').innerHTML=ORDER.map(c=>`<option value="${c}">${CAT[c][1]} ${CAT[c][0]}</option>`).join('');
+function openDlg(mac){const h=D.hosts.find(x=>x.mac===mac);if(!h)return;cur=h;
+ $('#d-title').textContent=h.label;
+ $('#d-meta').innerHTML=`<span class="mono">${esc(h.ip)} · ${esc(h.mac)}${h.random_mac?' (случайный MAC)':''}</span><br>`+
+  [h.vendor&&'Производитель: '+esc(h.vendor),h.ha_name&&'HA: '+esc(h.ha_name)+(h.ha_model?' ('+esc(h.ha_model)+')':''),h.ha_area&&'Зона: '+esc(h.ha_area),h.hostname&&'Hostname: '+esc(h.hostname),
+   'Впервые: '+new Date(h.first_seen*1000).toLocaleString(),'Последний раз: '+(h.online?'сейчас':ago(h.last_seen)+' назад')].filter(Boolean).join('<br>');
+ $('#d-name').value=h.name||'';$('#d-name').placeholder=h.ha_name||h.hostname||'';$('#d-cat').value=h.category;$('#d-note').value=h.note||'';
+ $('#d-watch').checked=!!h.watch;$('#d-known').checked=!!h.known;$('#dlg').showModal()}
+$('#dlg').addEventListener('close',async()=>{const v=$('#dlg').returnValue;if(!cur)return;const mac=cur.mac;cur=null;
+ try{if(v==='save'){await api('hosts/'+mac,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('#d-name').value.trim(),category:$('#d-cat').value,note:$('#d-note').value.trim(),watch:$('#d-watch').checked?1:0,known:$('#d-known').checked?1:0})});toast('Сохранено')}
+  else if(v==='del'){if(confirm('Удалить устройство из списка? Появится снова как новое, если будет в сети.')){await api('hosts/'+mac,{method:'DELETE'});toast('Удалено')}}}
+ catch(e){toast('Ошибка: '+e.message.slice(0,120))}load()});
+load();loadEvents();setInterval(()=>{load();loadEvents()},15000);
+</script>
+</body>
+</html>

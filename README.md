@@ -131,6 +131,9 @@ The zip includes your API keys, so keep it private.
 - **[Obsidian LiveSync Bridge](livesync_bridge/DOCS.md)** – an Obsidian panel in the Home Assistant
   sidebar that reads and edits a Self-hosted LiveSync vault straight in CouchDB, plus voice notes
   from Home Assistant. Nothing is copied to disk.
+- **[LAN Watch](lan_watch/DOCS.md)** – ARP scanner of the local network (like WatchYourLAN): devices grouped
+  by type, names from the Home Assistant device registry, online/offline history and Telegram alerts
+  for new devices and watched devices going offline.
 
 ## Documentation
 

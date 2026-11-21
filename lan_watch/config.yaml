@@ -1,0 +1,39 @@
+name: LAN Watch
+version: "1.0.0"
+slug: lan_watch
+description: ARP-сканер сети с инвентарём устройств, именами из Home Assistant и уведомлениями в Telegram
+url: https://github.com/denveronly/batteryai/tree/main/lan_watch
+arch:
+  - amd64
+  - aarch64
+init: false
+startup: services
+boot: auto
+host_network: true
+privileged:
+  - NET_ADMIN
+  - NET_RAW
+homeassistant_api: true
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:lan
+panel_title: LAN
+panel_admin: true
+options:
+  interface: ""
+  scan_interval: 60
+  offline_after: 300
+  telegram_token: ""
+  telegram_chat_id: ""
+  notify_new: true
+  notify_watched: true
+  wyl_url: ""
+schema:
+  interface: str?
+  scan_interval: int(15,3600)
+  offline_after: int(60,86400)
+  telegram_token: password?
+  telegram_chat_id: str?
+  notify_new: bool
+  notify_watched: bool
+  wyl_url: str?
