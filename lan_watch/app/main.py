@@ -263,7 +263,7 @@ async def scan_loop():
 
 
 # ---------------------------------------------------------------- Home Assistant enrichment
-GENERIC = re.compile(r"^([0-9a-f]{2}[:_-]?){6}$|^(wlan0|eth0|espressif|eero|iphone|ipad|mac|samsung|reolink|mxchip|"
+GENERIC = re.compile(r"([0-9a-f]{2}[:_-]){5}[0-9a-f]{2}|^([0-9a-f]{12})$|^\d+\.\d+\.\d+\.\d+$|^(wlan0|eth0|espressif|eero|iphone|ipad|mac|samsung|reolink|mxchip|"
                      r"esp_[0-9a-f]{6}|nvr|google-home-mini|nest-audio|android-.*|localhost)$", re.I)
 
 
@@ -283,19 +283,23 @@ async def ha_ws(commands):
                 while True:
                     m = await ws.receive_json()
                     if m.get("id") == i and m.get("type") == "result":
+                        if not m.get("success"):
+                            log.warning("HA %s: %s", c["type"], m.get("error"))
                         res.append(m.get("result"))
                         break
     return res
 
 
 async def ha_sync():
+    log.info("HA sync: start")
     try:
-        r = await ha_ws([{"type": "config/device_registry/list"}, {"type": "config/area_registry/list"},
-                         {"type": "get_states"}])
+        r = await asyncio.wait_for(ha_ws([{"type": "config/device_registry/list"}, {"type": "config/area_registry/list"},
+                         {"type": "get_states"}]), 120)
     except Exception as e:  # noqa: BLE001
-        log.warning("HA sync failed: %s", e)
+        log.warning("HA sync failed: %r", e)
         return
     if not r:
+        log.warning("HA sync: no data (auth failed or no SUPERVISOR_TOKEN)")
         return
     devs, areas, states = r
     areas = {a["area_id"]: a["name"] for a in areas or []}
@@ -306,7 +310,7 @@ async def ha_sync():
 
     for d in devs or []:
         name = d.get("name_by_user") or d.get("name") or ""
-        if GENERIC.match(name or "x"):
+        if GENERIC.search(name or "x"):
             name = ""
         model = " ".join(x for x in (d.get("manufacturer"), d.get("model")) if x)
         for c in d.get("connections", []):
@@ -325,10 +329,10 @@ async def ha_sync():
             continue
         r = rec(m)
         fn = a.get("friendly_name") or ""
-        if fn and not GENERIC.match(fn) and not r["name"]:
+        if fn and not GENERIC.search(fn) and not r["name"]:
             r["name"] = fn
         hn = a.get("host_name") or a.get("hostname") or ""
-        if hn and not GENERIC.match(hn):
+        if hn and not GENERIC.search(hn):
             r["host"] = r["host"] or hn
     con = db()
     for m, r in info.items():
@@ -352,7 +356,10 @@ async def ha_sync():
 async def ha_loop():
     await asyncio.sleep(5)
     while True:
-        await ha_sync()
+        try:
+            await ha_sync()
+        except Exception:  # noqa: BLE001
+            log.exception("HA sync crashed")
         await asyncio.sleep(600)
 
 
