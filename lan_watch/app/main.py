@@ -268,15 +268,23 @@ GENERIC = re.compile(r"([0-9a-f]{2}[:_-]){5}[0-9a-f]{2}|^([0-9a-f]{12})$|^\d+\.\
 
 
 async def ha_ws(commands):
-    token = os.environ.get("SUPERVISOR_TOKEN")
+    token = os.environ.get("SUPERVISOR_TOKEN") or os.environ.get("HASSIO_TOKEN")
     if not token:
+        try:  # s6-overlay keeps the container env here when the process env was cleared
+            token = Path("/run/s6/container_environment/SUPERVISOR_TOKEN").read_text().strip()
+        except OSError:
+            token = ""
+    if not token:
+        log.warning("HA sync: SUPERVISOR_TOKEN not available")
         return None
     res = []
     async with aiohttp.ClientSession() as s:
         async with s.ws_connect("http://supervisor/core/websocket", max_msg_size=0, timeout=30) as ws:
             await ws.receive_json()
             await ws.send_json({"type": "auth", "access_token": token})
-            if (await ws.receive_json()).get("type") != "auth_ok":
+            auth = await ws.receive_json()
+            if auth.get("type") != "auth_ok":
+                log.warning("HA sync: websocket auth: %s", auth)
                 return None
             for i, c in enumerate(commands, 1):
                 await ws.send_json({"id": i, **c})

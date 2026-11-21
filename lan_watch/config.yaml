@@ -1,5 +1,5 @@
 name: LAN Watch
-version: "1.0.1"
+version: "1.0.2"
 slug: lan_watch
 description: ARP-сканер сети с инвентарём устройств, именами из Home Assistant и уведомлениями в Telegram
 url: https://github.com/denveronly/batteryai/tree/main/lan_watch
