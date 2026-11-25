@@ -1,0 +1,22 @@
+# BatteryAI as a standalone container (Docker, Umbrel, …) – outside the Home Assistant
+# add-on store. It reaches Home Assistant over its URL with a long-lived access token
+# (HA_URL / HA_TOKEN, or Settings → Home Assistant connection). Data lives in /data.
+# The local LLM engine ("Local slow") is not included; the other engines work.
+FROM python:3.12-slim
+
+ARG BUILD_VERSION=dev
+ENV BATTERYAI_VERSION=${BUILD_VERSION} \
+    BATTERYAI_DATA=/data \
+    BATTERYAI_OPTIONS=/data/options.json \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+COPY app/ /app/
+COPY config.yaml /app/addon_config.yaml
+
+VOLUME /data
+EXPOSE 8099
+CMD ["python3", "-u", "/app/main.py"]

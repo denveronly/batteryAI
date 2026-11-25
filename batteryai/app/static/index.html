@@ -291,6 +291,16 @@
   <main id="view-settings" hidden>
     <section class="card">
       <div class="card-head"><h2>Home Assistant connection</h2></div>
+      <div class="form-grid" id="haStandalone">
+        <label>Home Assistant URL
+          <input type="text" name="ha_url" form="settingsForm" placeholder="http://homeassistant.local:8123" autocomplete="off" spellcheck="false">
+          <span class="hint">Only for the standalone container (Docker, Umbrel). The add-on connects by itself.</span>
+        </label>
+        <label>Long-lived access token
+          <input type="password" name="ha_token" form="settingsForm" autocomplete="off">
+          <span class="hint" id="haTokenHint">Home Assistant → your profile → Security → Long-lived access tokens.</span>
+        </label>
+      </div>
       <div class="test-row">
         <button type="button" class="secondary" id="testHa">Test connection</button>
         <div class="result" id="haResult"></div>

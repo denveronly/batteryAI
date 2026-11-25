@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.30
+
+- **Standalone container** for Docker / Umbrel / Portainer: `ghcr.io/denveronly/batteryai`
+  (amd64, arm64), built by GitHub Actions on every push to `main`; example
+  `deploy/docker-compose.yml`. It connects to Home Assistant by URL and long-lived token –
+  `HA_URL` / `HA_TOKEN` or the new fields in Settings → Home Assistant connection (shown
+  only outside the add-on). Data stays in `/data`; backups move between both versions.
+
 ## 0.4.29
 
 - Expected outages **may shift**: each window from yesterday is expected today and

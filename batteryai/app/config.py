@@ -109,6 +109,9 @@ class Options:
     claude_model: str = "claude-opus-5-5"
     claude_effort: str = "high"
     openai_api_key: str = ""
+    # Standalone container only (Docker, Umbrel): how to reach Home Assistant.
+    ha_url: str = ""
+    ha_token: str = ""
     openai_model: str = "gpt-5"
     openai_effort: str = "medium"  # reasoning_effort for reasoning models (o-series, GPT-5)
     response_language: str = "English"
@@ -273,6 +276,7 @@ class Options:
         data = self.to_dict()
         data["claude_api_key_set"] = bool(data.pop("claude_api_key"))
         data["openai_api_key_set"] = bool(data.pop("openai_api_key"))
+        data["ha_token_set"] = bool(data.pop("ha_token"))
         return data
 
 
@@ -313,11 +317,14 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
 
     api_key = text("claude_api_key") if raw.get("claude_api_key") else base.claude_api_key
     openai_key = text("openai_api_key") if raw.get("openai_api_key") else base.openai_api_key
+    ha_token = text("ha_token") if raw.get("ha_token") else base.ha_token
     opts = Options(
         claude_api_key=api_key,
         claude_model=text("claude_model") or "claude-opus-5-5",
         claude_effort=text("claude_effort"),
         openai_api_key=openai_key,
+        ha_token=ha_token,
+        ha_url=text("ha_url").rstrip("/"),
         openai_model=text("openai_model") or "gpt-5",
         openai_effort=text("openai_effort"),
         response_language=text("response_language") or "English",
@@ -340,6 +347,8 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         outage_precharge_minutes=integer("outage_precharge_minutes", 5, 720),
         outage_precharge_soc_percent=integer("outage_precharge_soc_percent", 10, 100),
     )
+    if opts.ha_url and not re.match(r"^https?://[^\s/]+(:\d+)?(/.*)?$", opts.ha_url):
+        errors["ha_url"] = "must look like http://homeassistant.local:8123"
     if opts.min_soc_percent > opts.max_soc_percent:
         errors["min_soc_percent"] = "must not be higher than the maximum SOC"
     for key in SENSOR_KEYS:
