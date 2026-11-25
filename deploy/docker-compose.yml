@@ -1,0 +1,18 @@
+# BatteryAI as a standalone container (Docker, Portainer, Umbrel, …).
+# Open http://<this host>:8099 afterwards. Settings are kept in ./batteryai-data.
+services:
+  batteryai:
+    image: ghcr.io/denveronly/batteryai:latest
+    container_name: batteryai
+    restart: unless-stopped
+    ports:
+      - "8099:8099"
+    environment:
+      # Where Home Assistant is (on Umbrel: http://umbrel.local:8123) and a long-lived
+      # access token (Home Assistant → profile → Security). Both can also be entered in
+      # BatteryAI → Settings → Home Assistant connection instead.
+      # HA_URL: "http://homeassistant.local:8123"
+      # HA_TOKEN: "your-long-lived-token"
+      TZ: "Europe/Kyiv"
+    volumes:
+      - ./batteryai-data:/data

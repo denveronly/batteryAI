@@ -177,3 +177,24 @@ mkdir -p dev-data && export BATTERYAI_DATA=$PWD/dev-data
 export HA_URL=http://homeassistant.local:8123 HA_TOKEN=<довгостроковий токен доступу>
 python main.py   # інтерфейс на http://localhost:8099
 ```
+
+
+## Окремий контейнер (Docker, Umbrel, Portainer)
+
+Без магазину доповнень Home Assistant (наприклад, Home Assistant як застосунок на Umbrel)
+BatteryAI запускається як контейнер. GitHub збирає образ при кожному push у `main`:
+
+`ghcr.io/denveronly/batteryai:latest` (amd64 і arm64; також з тегом версії)
+
+1. Візьміть [`deploy/docker-compose.yml`](deploy/docker-compose.yml) – у Portainer
+   (*Stacks → Add stack*) або через SSH: `docker compose up -d`.
+2. Відкрийте `http://<хост>:8099`.
+3. Settings → **Home Assistant connection**: адреса Home Assistant (на Umbrel – IP-адреса
+   Umbrel, напр. `http://192.168.1.50:8123`; `umbrel.local` у контейнерах часто не
+   розпізнається) і **довгостроковий токен доступу** (Home Assistant → профіль → Безпека).
+   Або `HA_URL` / `HA_TOKEN` у compose-файлі.
+4. Решта налаштувань – у панелі, як у доповненні. Дані – у томі `/data`; резервні копії з
+   вкладки Logs переносяться між обома варіантами.
+
+Відмінності від доповнення: немає панелі в бічному меню Home Assistant (відкривайте порт
+напряму), у сповіщеннях немає посилання «Open BatteryAI», рушія «Local slow» в образі немає.

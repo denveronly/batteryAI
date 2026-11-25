@@ -139,6 +139,9 @@ class Options:
     claude_code_url: str = ""
     claude_code_token: str = ""
     openai_api_key: str = ""
+    # Standalone container only (Docker, Umbrel): how to reach Home Assistant.
+    ha_url: str = ""
+    ha_token: str = ""
     openai_model: str = "gpt-5"
     openai_effort: str = "medium"  # reasoning_effort for reasoning models (o-series, GPT-5)
     response_language: str = "English"
@@ -381,6 +384,7 @@ class Options:
         data["claude_api_key_set"] = bool(data.pop("claude_api_key"))
         data["openai_api_key_set"] = bool(data.pop("openai_api_key"))
         data["claude_code_token_set"] = bool(data.pop("claude_code_token"))
+        data["ha_token_set"] = bool(data.pop("ha_token"))
         return data
 
 
@@ -433,6 +437,7 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
     api_key = text("claude_api_key") if raw.get("claude_api_key") else base.claude_api_key
     openai_key = text("openai_api_key") if raw.get("openai_api_key") else base.openai_api_key
     bridge_token = text("claude_code_token") if raw.get("claude_code_token") else base.claude_code_token
+    ha_token = text("ha_token") if raw.get("ha_token") else base.ha_token
     opts = Options(
         claude_api_key=api_key,
         claude_model=text("claude_model") or "claude-opus-5-5",
@@ -440,6 +445,8 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
         claude_code_url=text("claude_code_url").rstrip("/"),
         claude_code_token=bridge_token,
         openai_api_key=openai_key,
+        ha_token=ha_token,
+        ha_url=text("ha_url").rstrip("/"),
         openai_model=text("openai_model") or "gpt-5",
         openai_effort=text("openai_effort"),
         response_language=text("response_language") or "English",
@@ -497,6 +504,8 @@ def parse_settings(raw: dict[str, Any], current: Options | None = None) -> Optio
                         ("bms_volt_drift_warn", "bms_volt_drift_alarm")):
         if getattr(opts, alarm) <= getattr(opts, warn):
             errors[alarm] = "red must be above yellow"
+    if opts.ha_url and not re.match(r"^https?://[^\s/]+(:\d+)?(/.*)?$", opts.ha_url):
+        errors["ha_url"] = "must look like http://homeassistant.local:8123"
     if opts.min_soc_percent > opts.max_soc_percent:
         errors["min_soc_percent"] = "must not be higher than the maximum SOC"
     for key in SENSOR_KEYS:

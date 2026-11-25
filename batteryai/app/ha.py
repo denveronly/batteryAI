@@ -71,13 +71,34 @@ class HomeAssistant:
         self.last_error: str | None = None
         self._missing_logged: set[str] = set()
         self._logged_error: str | None = None
+        # Inside Home Assistant (add-on) the Supervisor token is used; a standalone container
+        # (Docker, Umbrel) uses HA_URL / HA_TOKEN or the URL and token from Settings.
+        self.supervisor = self.token_source.startswith(("environment variable SUPERVISOR", "environment variable HASSIO")) or (
+            "container_environment" in self.token_source
+        )
         if self.token:
             _LOGGER.info("Home Assistant API %s, token from %s", self._api, self.token_source)
         else:
-            _LOGGER.error(
-                "No Supervisor token found. Check that the add-on has homeassistant_api: true "
-                "and restart it."
+            _LOGGER.warning(
+                "No Home Assistant token yet. As an add-on: check homeassistant_api: true and restart. "
+                "As a standalone container: set HA_URL and HA_TOKEN, or the URL and token in Settings."
             )
+
+    @property
+    def standalone(self) -> bool:
+        return not self.supervisor
+
+    def use_settings(self, url: str, token: str) -> None:
+        """Standalone container: the Home Assistant URL / long-lived token from Settings
+        (environment variables HA_URL / HA_TOKEN win; the add-on ignores both)."""
+        if self.supervisor:
+            return
+        if url and not os.environ.get("HA_URL"):
+            self.base_url = url.rstrip("/")
+            self._api = f"{self.base_url}/api"
+        if token and not os.environ.get("HA_TOKEN"):
+            self.token, self.token_source = token, "Settings"
+            self._headers = {"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"}
 
     async def request(
         self,

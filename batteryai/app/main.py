@@ -528,6 +528,7 @@ class BatteryAI:
         weekend_changed = opts.weekend_days != self.opts.weekend_days
         self.opts = opts
         bms.configure(opts)
+        self.ha.use_settings(opts.ha_url, opts.ha_token)
         if weekend_changed:
             self.relocalize()
         elif marks_changed:
@@ -1746,7 +1747,7 @@ async def put_settings(request: web.Request) -> web.Response:
 @routes.get("/api/test/ha")
 async def test_ha(request: web.Request) -> web.Response:
     ha = _app(request).ha
-    info: dict[str, Any] = {"url": ha.base_url, "token_source": ha.token_source}
+    info: dict[str, Any] = {"url": ha.base_url, "token_source": ha.token_source, "standalone": ha.standalone}
     try:
         await ha.request("/")
         config = await ha.config()
@@ -2089,6 +2090,7 @@ async def main() -> None:
 
     async with aiohttp.ClientSession() as session:
         ha = HomeAssistant(session)
+        ha.use_settings(opts.ha_url, opts.ha_token)
         tz, tz_source = await resolve_time_zone(ha)
         batteryai = BatteryAI(opts, db, ha, tz)
         batteryai.tz_source = tz_source

@@ -532,6 +532,9 @@ function fillForm(s) {
   for (const key of CHECKBOXES) field(key).checked = !!s[key];
   updateEngineView();
   field("claude_api_key").value = "";
+  field("ha_token").value = "";
+  field("ha_url").value = s.ha_url || "";
+  $("haTokenHint").textContent = s.ha_token_set ? "A token is saved. Leave empty to keep it." : "Home Assistant → your profile → Security → Long-lived access tokens.";
   loadModels().then((data) => {
     fillModelSelect(field("claude_model"), data.models, s.claude_model);
     $("modelHint").textContent = data.live ? "Models available to your API key." : data.error ? `Could not list models: ${data.error}` : "Save an API key to list the models it can use.";
@@ -572,6 +575,8 @@ function readForm() {
   for (const key of PRICE_FIELDS) data[key] = value(key);
   for (const key of CHECKBOXES) data[key] = field(key).checked;
   if (value("claude_api_key")) data.claude_api_key = value("claude_api_key");
+  if (value("ha_token")) data.ha_token = value("ha_token");
+  data.ha_url = value("ha_url");
   if (value("openai_api_key")) data.openai_api_key = value("openai_api_key");
   if (value("claude_code_token")) data.claude_code_token = value("claude_code_token");
   for (const s of SENSORS) data[s.key] = value(s.key);
@@ -649,6 +654,7 @@ async function testHa() {
   showResult(result, "", "Testing…");
   try {
     const r = await api("api/test/ha");
+    $("haStandalone").hidden = r.standalone === false;  // the add-on needs no URL or token
     if (r.ok) {
       showResult(result, "ok", `✓ Connected to Home Assistant ${r.version || ""}`.trim(),
         r.location_name ? ` (${r.location_name})` : "", r.time_zone ? ` · time zone ${r.time_zone}` : "",
